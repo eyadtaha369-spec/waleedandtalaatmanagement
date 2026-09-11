@@ -154,10 +154,24 @@ function LedgerPage() {
             <DialogTitle className="text-primary">تسجيل حركة يومية</DialogTitle>
             <DialogDescription className="text-muted-foreground">قيمة اشتراك/رحلة (مدين) أو تحصيل/دفعة (دائن)</DialogDescription>
           </DialogHeader>
+          {rows.length === 0 && (
+            <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              لا يوجد عملاء/طلاب مسجلون بعد — أضف طالبًا أولًا من صفحة "الخطوط والاشتراكات" قبل تسجيل أي حركة هنا.
+            </p>
+          )}
           <div className="grid gap-3">
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">اسم العميل/الطالب</Label>
-              <Input value={form.studentName} onChange={(e) => setForm({ ...form, studentName: e.target.value })} className="border-border bg-input/60" />
+              <Select value={form.studentName} onValueChange={(v) => setForm({ ...form, studentName: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue placeholder="اختر العميل" />
+                </SelectTrigger>
+                <SelectContent>
+                  {rows.map((r) => (
+                    <SelectItem key={r.id} value={r.name}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">نوع الحركة</Label>

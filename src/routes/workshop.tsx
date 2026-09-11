@@ -1,0 +1,228 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { AlertTriangle, Plus } from "lucide-react";
+import { AppShell } from "@/components/app-shell";
+import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  currency,
+  fuelLogs,
+  inventory,
+  maintenanceOrders as orderSeed,
+  type MaintenanceOrder,
+} from "@/lib/fleet-data";
+
+export const Route = createFileRoute("/workshop")({
+  head: () => ({
+    meta: [
+      { title: "الورشة والمخزون والسولار | وليد وطلعت" },
+      { name: "description", content: "أوامر الصيانة ومخزون قطع الغيار وسجل استهلاك السولار للأسطول." },
+      { property: "og:title", content: "الورشة والمخزون والسولار | وليد وطلعت" },
+      { property: "og:description", content: "متابعة أوامر الإصلاح، الحد الأدنى للمخزون، وتكلفة الوقود." },
+    ],
+  }),
+  component: WorkshopPage,
+});
+
+const columns: MaintenanceOrder["status"][] = ["بانتظار القطع", "قيد التنفيذ", "مكتمل"];
+
+function WorkshopPage() {
+  const [orders, setOrders] = useState(orderSeed);
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ bus: "", issue: "", parts: "", cost: "" });
+
+  const addOrder = () => {
+    if (!form.bus.trim()) return;
+    setOrders((prev) => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        code: `MO-${1046 + prev.length}`,
+        bus: form.bus,
+        issue: form.issue || "—",
+        parts: form.parts || "—",
+        cost: Number(form.cost) || 0,
+        status: "بانتظار القطع",
+      },
+    ]);
+    setForm({ bus: "", issue: "", parts: "", cost: "" });
+    setAdding(false);
+  };
+
+  const move = (id: string) =>
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === id
+          ? { ...o, status: columns[Math.min(columns.indexOf(o.status) + 1, columns.length - 1)] }
+          : o,
+      ),
+    );
+
+  return (
+    <AppShell>
+      <PageHeader title="الورشة والمخزون والسولار" subtitle="أوامر الصيانة، قطع الغيار، وسجل التزود بالوقود" />
+
+      <Tabs defaultValue="orders">
+        <TabsList className="no-print mb-4 border border-border bg-secondary/50">
+          <TabsTrigger value="orders">أوامر الصيانة</TabsTrigger>
+          <TabsTrigger value="inventory">المخزن</TabsTrigger>
+          <TabsTrigger value="fuel">سجل السولار</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="orders">
+          <Panel title="لوحة أوامر الصيانة">
+            <Toolbar
+              query={query}
+              onQuery={setQuery}
+              placeholder="ابحث برقم الأمر أو كود الأتوبيس..."
+              onExport={() => exportToExcel("أوامر الصيانة", orders as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAdding(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> أمر صيانة جديد
+                </Button>
+              }
+            />
+            <div className="grid gap-4 lg:grid-cols-3">
+              {columns.map((col) => (
+                <div key={col} className="rounded-xl border border-border bg-secondary/20 p-3">
+                  <h3 className="mb-3 flex items-center justify-between text-sm font-bold">
+                    <span>{col}</span>
+                    <StatusPill
+                      label={String(orders.filter((o) => o.status === col).length)}
+                      tone={col === "مكتمل" ? "good" : col === "قيد التنفيذ" ? "warn" : "muted"}
+                    />
+                  </h3>
+                  <div className="space-y-3">
+                    {orders
+                      .filter((o) => o.status === col && (o.code + o.bus + o.issue).includes(query))
+                      .map((o) => (
+                        <div key={o.id} className="rounded-lg border border-border bg-card p-3">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-primary">{o.code}</span>
+                            <span>{o.bus}</span>
+                          </div>
+                          <p className="mt-2 text-sm font-semibold">{o.issue}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">قطع الغيار: {o.parts}</p>
+                          <div className="mt-3 flex items-center justify-between">
+                            <span className="text-sm font-bold text-warning">{currency(o.cost)}</span>
+                            {o.status !== "مكتمل" && (
+                              <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => move(o.id)}>
+                                نقل للمرحلة التالية
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="inventory">
+          <Panel title="مخزن قطع الغيار">
+            <Toolbar
+              query={query}
+              onQuery={setQuery}
+              placeholder="ابحث باسم الصنف..."
+              onExport={() => exportToExcel("المخزن", inventory as unknown as Record<string, string | number>[])}
+            />
+            <DataTable head={["الصنف", "الكود", "الرصيد الحالي", "الحد الأدنى", "سعر الوحدة", "الحالة"]}>
+              {inventory
+                .filter((i) => i.name.includes(query) || query === "")
+                .map((i) => (
+                  <tr key={i.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3 font-bold">{i.name}</td>
+                    <td className="px-4 py-3">{i.code}</td>
+                    <td className="px-4 py-3">{i.stock}</td>
+                    <td className="px-4 py-3">{i.minStock}</td>
+                    <td className="px-4 py-3">{currency(i.unitPrice)}</td>
+                    <td className="px-4 py-3">
+                      {i.stock < i.minStock ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/15 px-3 py-1 text-xs font-bold text-destructive">
+                          <AlertTriangle className="h-3.5 w-3.5" /> تنبيه الحد الأدنى
+                        </span>
+                      ) : (
+                        <StatusPill label="رصيد كافٍ" tone="good" />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+            </DataTable>
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="fuel">
+          <Panel title="سجل التزود بالسولار">
+            <Toolbar
+              query={query}
+              onQuery={setQuery}
+              placeholder="ابحث بكود الأتوبيس أو المحطة..."
+              onExport={() => exportToExcel("سجل السولار", fuelLogs as unknown as Record<string, string | number>[])}
+            />
+            <DataTable head={["التاريخ", "الأتوبيس", "عداد البداية", "عداد النهاية", "المسافة", "الكمية (لتر)", "التكلفة", "المحطة"]}>
+              {fuelLogs
+                .filter((f) => (f.bus + f.station).includes(query) || query === "")
+                .map((f) => (
+                  <tr key={f.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3">{f.date}</td>
+                    <td className="px-4 py-3 font-bold text-primary">{f.bus}</td>
+                    <td className="px-4 py-3">{f.odoStart.toLocaleString("ar-EG")}</td>
+                    <td className="px-4 py-3">{f.odoEnd.toLocaleString("ar-EG")}</td>
+                    <td className="px-4 py-3">{(f.odoEnd - f.odoStart).toLocaleString("ar-EG")} كم</td>
+                    <td className="px-4 py-3">{f.liters}</td>
+                    <td className="px-4 py-3 text-warning">{currency(f.cost)}</td>
+                    <td className="px-4 py-3">{f.station}</td>
+                  </tr>
+                ))}
+            </DataTable>
+          </Panel>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={adding} onOpenChange={setAdding}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">أمر صيانة جديد</DialogTitle>
+            <DialogDescription className="text-muted-foreground">سجل العطل وقطع الغيار المطلوبة</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["bus", "كود الأتوبيس"],
+              ["issue", "وصف العطل"],
+              ["parts", "قطع الغيار"],
+              ["cost", "التكلفة الإجمالية"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={form[key as keyof typeof form]}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={addOrder}>
+              حفظ الأمر
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </AppShell>
+  );
+}

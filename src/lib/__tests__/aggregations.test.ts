@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -57,5 +57,60 @@ describe("computeMonthlyFinance", () => {
   it("handles a month with expenses but no revenue", () => {
     const result = computeMonthlyFinance([], [{ date: "2026-03-01", amount: 250 }]);
     expect(result).toEqual([{ month: expect.any(String), الإيرادات: 0, المصروفات: 250 }]);
+  });
+});
+
+describe("computeDriverPayroll", () => {
+  it("computes net salary as base + overtime - (advances + penalties)", () => {
+    const result = computeDriverPayroll(
+      [{ name: "أحمد", base_salary: 3000 }],
+      [
+        { driver: "أحمد", overtimeAllowance: 200, dailyAdvance: 100, penalty: 50 },
+        { driver: "أحمد", overtimeAllowance: 100, dailyAdvance: 0, penalty: 0 },
+      ],
+    );
+    expect(result).toEqual([
+      { driver: "أحمد", baseSalary: 3000, totalOvertime: 300, totalAdvances: 100, totalPenalties: 50, netSalary: 3150 },
+    ]);
+  });
+
+  it("gives a driver with no shifts this month just their base salary", () => {
+    const result = computeDriverPayroll([{ name: "سارة", base_salary: 2500 }], []);
+    expect(result).toEqual([
+      { driver: "سارة", baseSalary: 2500, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, netSalary: 2500 },
+    ]);
+  });
+
+  it("keeps each driver's totals independent", () => {
+    const result = computeDriverPayroll(
+      [{ name: "أحمد", base_salary: 3000 }, { name: "محمد", base_salary: 2800 }],
+      [{ driver: "أحمد", overtimeAllowance: 500, dailyAdvance: 0, penalty: 0 }],
+    );
+    expect(result.find((r) => r.driver === "محمد")).toEqual({
+      driver: "محمد", baseSalary: 2800, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, netSalary: 2800,
+    });
+  });
+});
+
+describe("computeRunningBalance", () => {
+  it("adds debits and subtracts credits in chronological order", () => {
+    const result = computeRunningBalance([
+      { id: "1", date: "2026-01-01", type: "مدين", amount: 500, method: "—", notes: "" },
+      { id: "2", date: "2026-01-05", type: "دائن", amount: 300, method: "نقدي", notes: "" },
+    ]);
+    expect(result[0]!.runningBalance).toBe(500);
+    expect(result[1]!.runningBalance).toBe(200);
+  });
+
+  it("can go negative when payments exceed charges (client overpaid)", () => {
+    const result = computeRunningBalance([
+      { id: "1", date: "2026-01-01", type: "مدين", amount: 100, method: "—", notes: "" },
+      { id: "2", date: "2026-01-02", type: "دائن", amount: 150, method: "نقدي", notes: "" },
+    ]);
+    expect(result[1]!.runningBalance).toBe(-50);
+  });
+
+  it("returns an empty array for a client with no transactions", () => {
+    expect(computeRunningBalance([])).toEqual([]);
   });
 });

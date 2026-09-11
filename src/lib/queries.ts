@@ -723,3 +723,199 @@ export async function bulkInsertInventory(rows: Record<string, string>[]) {
   if (error) throw error;
   return payload.length;
 }
+
+// ---- Daily shift & payroll (Module 1) ----
+
+export interface DailyShift {
+  id: string;
+  driverId: string;
+  driver: string;
+  date: string;
+  status: string;
+  overtimeAllowance: number;
+  dailyAdvance: number;
+  penalty: number;
+  notes: string;
+}
+
+export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[]> {
+  const { data, error } = await supabase
+    .from("attendance")
+    .select("*, drivers(name)")
+    .gte("date", `${monthPrefix}-01`)
+    .lt("date", `${monthPrefix}-32`)
+    .order("date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((a: any) => ({
+    id: a.id,
+    driverId: a.driver_id,
+    driver: a.drivers?.name ?? "—",
+    date: a.date,
+    status: a.status ?? "حاضر",
+    overtimeAllowance: Number(a.overtime_allowance ?? 0),
+    dailyAdvance: Number(a.daily_advance ?? 0),
+    penalty: Number(a.penalty ?? 0),
+    notes: a.notes ?? "",
+  }));
+}
+
+export async function upsertDailyShift(input: {
+  driverName: string;
+  date: string;
+  status: string;
+  overtimeAllowance: number;
+  dailyAdvance: number;
+  penalty: number;
+  notes: string;
+}) {
+  const { data: driver } = await supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle();
+  if (!driver) throw new Error("لم يتم العثور على سائق بهذا الاسم");
+  const { data: existing } = await supabase
+    .from("attendance")
+    .select("id")
+    .eq("driver_id", driver.id)
+    .eq("date", input.date)
+    .maybeSingle();
+  const payload = {
+    driver_id: driver.id,
+    date: input.date,
+    status: input.status,
+    overtime_allowance: input.overtimeAllowance,
+    daily_advance: input.dailyAdvance,
+    penalty: input.penalty,
+    notes: input.notes,
+  };
+  if (existing) {
+    const { error } = await supabase.from("attendance").update(payload).eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("attendance").insert(payload);
+    if (error) throw error;
+  }
+}
+
+export interface DriverPayrollRow {
+  driver: string;
+  baseSalary: number;
+  totalOvertime: number;
+  totalAdvances: number;
+  totalPenalties: number;
+  netSalary: number;
+}
+
+export function computeDriverPayroll(
+  drivers: { name: string; base_salary: number }[],
+  shifts: { driver: string; overtimeAllowance: number; dailyAdvance: number; penalty: number }[],
+): DriverPayrollRow[] {
+  return drivers.map((d) => {
+    const rows = shifts.filter((s) => s.driver === d.name);
+    const totalOvertime = rows.reduce((sum, r) => sum + r.overtimeAllowance, 0);
+    const totalAdvances = rows.reduce((sum, r) => sum + r.dailyAdvance, 0);
+    const totalPenalties = rows.reduce((sum, r) => sum + r.penalty, 0);
+    const baseSalary = Number(d.base_salary ?? 0);
+    return {
+      driver: d.name,
+      baseSalary,
+      totalOvertime,
+      totalAdvances,
+      totalPenalties,
+      netSalary: baseSalary + totalOvertime - (totalAdvances + totalPenalties),
+    };
+  });
+}
+
+export async function fetchDriverPayroll(monthPrefix: string): Promise<DriverPayrollRow[]> {
+  const [{ data: drivers, error: dErr }, shifts] = await Promise.all([
+    supabase.from("drivers").select("name, base_salary"),
+    fetchDailyShifts(monthPrefix),
+  ]);
+  if (dErr) throw dErr;
+  return computeDriverPayroll(
+    (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) })),
+    shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty })),
+  );
+}
+
+// ---- Client ledger & statement (Module 2) ----
+
+export interface LedgerEntry {
+  id: string;
+  date: string;
+  type: "مدين" | "دائن";
+  amount: number;
+  method: string;
+  notes: string;
+}
+
+export interface ClientLedgerRow {
+  id: string;
+  name: string;
+  phone: string;
+  totalDebit: number;
+  totalCredit: number;
+  balance: number;
+  status: "خالص" | "عليه مديونية";
+}
+
+export async function fetchClientLedger(): Promise<ClientLedgerRow[]> {
+  const { data, error } = await supabase.from("students").select("id, name, parent_phone, total_amount, paid_amount").order("name");
+  if (error) throw error;
+  return (data ?? []).map((s: any) => {
+    const totalDebit = Number(s.total_amount ?? 0);
+    const totalCredit = Number(s.paid_amount ?? 0);
+    const balance = totalDebit - totalCredit;
+    return {
+      id: s.id,
+      name: s.name,
+      phone: s.parent_phone ?? "—",
+      totalDebit,
+      totalCredit,
+      balance,
+      status: balance <= 0 ? "خالص" : "عليه مديونية",
+    };
+  });
+}
+
+export async function fetchClientStatement(studentId: string): Promise<LedgerEntry[]> {
+  const { data, error } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("student_id", studentId)
+    .order("date", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((p: any) => ({
+    id: p.id,
+    date: p.date,
+    type: (p.type ?? "دائن") as "مدين" | "دائن",
+    amount: Number(p.amount ?? 0),
+    method: p.method ?? "—",
+    notes: p.notes ?? "",
+  }));
+}
+
+export function computeRunningBalance(entries: LedgerEntry[]): (LedgerEntry & { runningBalance: number })[] {
+  let balance = 0;
+  return entries.map((e) => {
+    balance += e.type === "مدين" ? e.amount : -e.amount;
+    return { ...e, runningBalance: balance };
+  });
+}
+
+export async function addLedgerTransaction(input: {
+  studentName: string;
+  type: "مدين" | "دائن";
+  amount: number;
+  method: string;
+  notes: string;
+}) {
+  const { data: student } = await supabase.from("students").select("id").eq("name", input.studentName).maybeSingle();
+  if (!student) throw new Error("لم يتم العثور على عميل بهذا الاسم");
+  const { error } = await supabase.from("payments").insert({
+    student_id: student.id,
+    type: input.type,
+    amount: input.amount,
+    method: input.method,
+    notes: input.notes,
+  });
+  if (error) throw error;
+}

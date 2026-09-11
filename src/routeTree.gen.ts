@@ -14,8 +14,10 @@ import { Route as AuditRouteImport } from './routes/audit'
 import { Route as BackupRouteImport } from './routes/backup'
 import { Route as FinanceRouteImport } from './routes/finance'
 import { Route as FleetRouteImport } from './routes/fleet'
+import { Route as LedgerRouteImport } from './routes/ledger'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
+import { Route as PayrollRouteImport } from './routes/payroll'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as WorkshopRouteImport } from './routes/workshop'
@@ -45,6 +47,11 @@ const FleetRoute = FleetRouteImport.update({
   path: '/fleet',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LedgerRoute = LedgerRouteImport.update({
+  id: '/ledger',
+  path: '/ledger',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -53,6 +60,11 @@ const LoginRoute = LoginRouteImport.update({
 const OperationsRoute = OperationsRouteImport.update({
   id: '/operations',
   path: '/operations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PayrollRoute = PayrollRouteImport.update({
+  id: '/payroll',
+  path: '/payroll',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -77,8 +89,10 @@ export interface FileRoutesByFullPath {
   '/backup': typeof BackupRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/ledger': typeof LedgerRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/payroll': typeof PayrollRoute
   '/reset-password': typeof ResetPasswordRoute
   '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
@@ -89,8 +103,10 @@ export interface FileRoutesByTo {
   '/backup': typeof BackupRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/ledger': typeof LedgerRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/payroll': typeof PayrollRoute
   '/reset-password': typeof ResetPasswordRoute
   '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
@@ -102,8 +118,10 @@ export interface FileRoutesById {
   '/backup': typeof BackupRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/ledger': typeof LedgerRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/payroll': typeof PayrollRoute
   '/reset-password': typeof ResetPasswordRoute
   '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
@@ -116,8 +134,10 @@ export interface FileRouteTypes {
     | '/backup'
     | '/finance'
     | '/fleet'
+    | '/ledger'
     | '/login'
     | '/operations'
+    | '/payroll'
     | '/reset-password'
     | '/team'
     | '/workshop'
@@ -128,8 +148,10 @@ export interface FileRouteTypes {
     | '/backup'
     | '/finance'
     | '/fleet'
+    | '/ledger'
     | '/login'
     | '/operations'
+    | '/payroll'
     | '/reset-password'
     | '/team'
     | '/workshop'
@@ -140,8 +162,10 @@ export interface FileRouteTypes {
     | '/backup'
     | '/finance'
     | '/fleet'
+    | '/ledger'
     | '/login'
     | '/operations'
+    | '/payroll'
     | '/reset-password'
     | '/team'
     | '/workshop'
@@ -153,8 +177,10 @@ export interface RootRouteChildren {
   BackupRoute: typeof BackupRoute
   FinanceRoute: typeof FinanceRoute
   FleetRoute: typeof FleetRoute
+  LedgerRoute: typeof LedgerRoute
   LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
+  PayrollRoute: typeof PayrollRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TeamRoute: typeof TeamRoute
   WorkshopRoute: typeof WorkshopRoute
@@ -197,6 +223,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FleetRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ledger': {
+      id: '/ledger'
+      path: '/ledger'
+      fullPath: '/ledger'
+      preLoaderRoute: typeof LedgerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -209,6 +242,13 @@ declare module '@tanstack/react-router' {
       path: '/operations'
       fullPath: '/operations'
       preLoaderRoute: typeof OperationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/payroll': {
+      id: '/payroll'
+      path: '/payroll'
+      fullPath: '/payroll'
+      preLoaderRoute: typeof PayrollRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -241,8 +281,10 @@ const rootRouteChildren: RootRouteChildren = {
   BackupRoute: BackupRoute,
   FinanceRoute: FinanceRoute,
   FleetRoute: FleetRoute,
+  LedgerRoute: LedgerRoute,
   LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
+  PayrollRoute: PayrollRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TeamRoute: TeamRoute,
   WorkshopRoute: WorkshopRoute,

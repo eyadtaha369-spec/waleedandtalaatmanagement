@@ -26,7 +26,9 @@ import {
   addExpense,
   addLoan,
   addPayslip,
+  fetchAttendanceSummary,
 } from "@/lib/queries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/finance")({
   head: () => ({
@@ -58,6 +60,8 @@ function FinancePage() {
   const [loanForm, setLoanForm] = useState({ lender: "", total: "", paid: "", installment: "", nextDue: "" });
   const [addingPayslip, setAddingPayslip] = useState(false);
   const [payslipForm, setPayslipForm] = useState({ employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+  const [payslipMonth, setPayslipMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [attendanceSummary, setAttendanceSummary] = useState<{ present: number; late: number; absent: number } | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
@@ -140,6 +144,15 @@ function FinancePage() {
     }
   };
 
+  const loadAttendanceSummary = async () => {
+    if (!payslipForm.employeeName.trim()) return;
+    try {
+      setAttendanceSummary(await fetchAttendanceSummary(payslipForm.employeeName, payslipMonth));
+    } catch {
+      setAttendanceSummary(null);
+    }
+  };
+
   const submitPayslip = async () => {
     if (!payslipForm.employeeName.trim()) return;
     setSaving(true);
@@ -154,6 +167,7 @@ function FinancePage() {
       });
       await loadAll();
       setPayslipForm({ employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+      setAttendanceSummary(null);
       setAddingPayslip(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر إضافة كشف المرتب");
@@ -332,7 +346,7 @@ function FinancePage() {
           <div className="grid gap-3">
             {[
               ["account", "اسم الحساب"],
-              ["opening", "رصيد أول المدة"],
+              ["opening", "رصيد أول المدة (للحساب الجديد فقط — يُحسب تلقائيًا بعد أول سجل)"],
               ["deposits", "إيداعات"],
               ["withdrawals", "مسحوبات"],
             ].map(([key, label]) => (
@@ -361,8 +375,21 @@ function FinancePage() {
             <DialogDescription className="text-muted-foreground">أدخل بيانات المصروف والمورد</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">البند</Label>
+              <Select value={expenseForm.category} onValueChange={(v) => setExpenseForm({ ...expenseForm, category: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue placeholder="اختر البند" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="زيوت ومحروقات">زيوت ومحروقات</SelectItem>
+                  <SelectItem value="قطع غيار">قطع غيار</SelectItem>
+                  <SelectItem value="إداريات">إداريات</SelectItem>
+                  <SelectItem value="مرتبات">مرتبات</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             {[
-              ["category", "البند (مثال: قطع غيار)"],
               ["supplier", "المورد"],
               ["amount", "المبلغ"],
               ["supplierBalance", "رصيد المورد بعد الدفع"],
@@ -427,6 +454,33 @@ function FinancePage() {
             {[
               ["employeeName", "اسم الموظف"],
               ["role", "الوظيفة"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={payslipForm[key as keyof typeof payslipForm]}
+                  onChange={(e) => setPayslipForm({ ...payslipForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+            <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">شهر الحضور (YYYY-MM)</Label>
+                <Input value={payslipMonth} onChange={(e) => setPayslipMonth(e.target.value)} className="border-border bg-input/60" />
+              </div>
+              <Button type="button" variant="outline" className="border-border" onClick={loadAttendanceSummary}>
+                عرض الحضور
+              </Button>
+            </div>
+            {attendanceSummary && (
+              <p className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
+                حاضر: <b className="text-success">{attendanceSummary.present}</b> يوم • متأخر:{" "}
+                <b className="text-warning">{attendanceSummary.late}</b> يوم • غائب:{" "}
+                <b className="text-destructive">{attendanceSummary.absent}</b> يوم — استخدم هذه البيانات لتحديد الجزاءات
+              </p>
+            )}
+            {[
               ["baseSalary", "الأساسي"],
               ["overtime", "الإضافي"],
               ["advances", "السُلف"],

@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
 import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi, checkInDriver, checkOutDriver, upsertAttendanceRecord } from "@/lib/queries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/fleet")({
   head: () => ({
@@ -43,7 +44,7 @@ function FleetPage() {
   const [adding, setAdding] = useState(false);
   const [addingDriver, setAddingDriver] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "" });
+  const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
   const [driverForm, setDriverForm] = useState({ name: "", phone: "", license: "", licenseExpiry: "" });
   const [attendanceBusy, setAttendanceBusy] = useState<string | null>(null);
   const [addingAttendance, setAddingAttendance] = useState(false);
@@ -94,9 +95,10 @@ function FleetPage() {
         model: form.model,
         capacity: Number(form.capacity) || 0,
         odometer: Number(form.odometer) || 0,
+        status: form.status,
       });
       await loadAll();
-      setForm({ code: "", plate: "", model: "", capacity: "", odometer: "" });
+      setForm({ code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
       setAdding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر إضافة الأتوبيس");
@@ -406,6 +408,19 @@ function FleetPage() {
                 />
               </div>
             ))}
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الحالة</Label>
+              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="تعمل">تعمل</SelectItem>
+                  <SelectItem value="بالورشة">بالورشة</SelectItem>
+                  <SelectItem value="متوقفة">متوقفة</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={addBus} disabled={saving}>
@@ -486,12 +501,17 @@ function FleetPage() {
               </div>
             </div>
             <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">الحالة (حاضر / متأخر / غائب)</Label>
-              <Input
-                value={attendanceForm.status}
-                onChange={(e) => setAttendanceForm({ ...attendanceForm, status: e.target.value })}
-                className="border-border bg-input/60"
-              />
+              <Label className="text-xs text-muted-foreground">الحالة</Label>
+              <Select value={attendanceForm.status} onValueChange={(v) => setAttendanceForm({ ...attendanceForm, status: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="حاضر">حاضر</SelectItem>
+                  <SelectItem value="متأخر">متأخر</SelectItem>
+                  <SelectItem value="غائب">غائب</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

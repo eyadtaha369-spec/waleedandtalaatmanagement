@@ -1,12 +1,14 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Bus,
+  ClipboardList,
   Coins,
   LayoutDashboard,
   LogOut,
   Menu,
   Route as RouteIcon,
   Search,
+  Users,
   Wrench,
   Bell,
 } from "lucide-react";
@@ -14,27 +16,46 @@ import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
+import { fetchMyProfile, fetchAlerts, type Profile } from "@/lib/queries";
 import brandLogo from "@/assets/brand-logo.jpeg.asset.json";
 
 const nav = [
-  { to: "/", label: "لوحة التحكّم", icon: LayoutDashboard },
-  { to: "/fleet", label: "الأسطول والسائقون", icon: Bus },
-  { to: "/operations", label: "الخطوط والاشتراكات", icon: RouteIcon },
-  { to: "/workshop", label: "الورشة والمخزون والسولار", icon: Wrench },
-  { to: "/finance", label: "المالية والخزينة", icon: Coins },
+  { to: "/", label: "لوحة التحكّم", icon: LayoutDashboard, roles: null },
+  { to: "/fleet", label: "الأسطول والسائقون", icon: Bus, roles: null },
+  { to: "/operations", label: "الخطوط والاشتراكات", icon: RouteIcon, roles: null },
+  { to: "/workshop", label: "الورشة والمخزون والسولار", icon: Wrench, roles: null },
+  { to: "/finance", label: "المالية والخزينة", icon: Coins, roles: ["admin", "accountant"] },
+  { to: "/audit", label: "سجل التعديلات", icon: ClipboardList, roles: ["admin"] },
+  { to: "/team", label: "الفريق والصلاحيات", icon: Users, roles: ["admin"] },
 ] as const;
+
+const roleLabels: Record<string, string> = {
+  admin: "مدير",
+  accountant: "محاسب",
+  dispatcher: "منسق تشغيل",
+  staff: "موظف",
+};
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(true);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { session, loading, signOut } = useAuth();
   const navigate = useNavigate();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [alertCount, setAlertCount] = useState(0);
 
   useEffect(() => {
     if (!loading && !session) {
       navigate({ to: "/login" });
     }
   }, [loading, session, navigate]);
+
+  useEffect(() => {
+    if (session) {
+      fetchMyProfile().then(setProfile).catch(() => setProfile(null));
+      fetchAlerts().then((a) => setAlertCount(a.length)).catch(() => setAlertCount(0));
+    }
+  }, [session]);
 
   if (loading || !session) {
     return (
@@ -43,6 +64,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
     );
   }
+
+  const visibleNav = nav.filter((item) => !item.roles || (profile && (item.roles as readonly string[]).includes(profile.role)));
 
   return (
     <div className="flex min-h-screen w-full" dir="rtl">
@@ -63,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 space-y-1 p-3">
-          {nav.map((item) => {
+          {visibleNav.map((item) => {
             const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
             return (
               <Link
@@ -109,13 +132,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mr-auto flex items-center gap-3">
             <span className="relative rounded-lg border border-border p-2">
               <Bell className="h-5 w-5 text-primary" />
-              <span className="absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
-                3
-              </span>
+              {alertCount > 0 && (
+                <span className="absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                  {alertCount}
+                </span>
+              )}
             </span>
             <div className="hidden text-left sm:block">
-              <p className="text-sm font-bold">م. وليد طلعت</p>
-              <p className="text-[11px] text-muted-foreground">مدير التشغيل</p>
+              <p className="text-sm font-bold">{session.user.email}</p>
+              <p className="text-[11px] text-muted-foreground">{profile ? roleLabels[profile.role] : "—"}</p>
             </div>
             <button
               onClick={() => signOut()}

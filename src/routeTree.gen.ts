@@ -10,15 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuditRouteImport } from './routes/audit'
 import { Route as FinanceRouteImport } from './routes/finance'
 import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
+import { Route as TeamRouteImport } from './routes/team'
 import { Route as WorkshopRouteImport } from './routes/workshop'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FinanceRoute = FinanceRouteImport.update({
@@ -41,6 +48,11 @@ const OperationsRoute = OperationsRouteImport.update({
   path: '/operations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TeamRoute = TeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkshopRoute = WorkshopRouteImport.update({
   id: '/workshop',
   path: '/workshop',
@@ -49,51 +61,76 @@ const WorkshopRoute = WorkshopRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/audit': typeof AuditRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/audit': typeof AuditRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/audit': typeof AuditRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/finance' | '/fleet' | '/login' | '/operations' | '/workshop'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/finance' | '/fleet' | '/login' | '/operations' | '/workshop'
-  id:
-    | '__root__'
     | '/'
+    | '/audit'
     | '/finance'
     | '/fleet'
     | '/login'
     | '/operations'
+    | '/team'
+    | '/workshop'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/'
+    | '/audit'
+    | '/finance'
+    | '/fleet'
+    | '/login'
+    | '/operations'
+    | '/team'
+    | '/workshop'
+  id:
+    | '__root__'
+    | '/'
+    | '/audit'
+    | '/finance'
+    | '/fleet'
+    | '/login'
+    | '/operations'
+    | '/team'
     | '/workshop'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuditRoute: typeof AuditRoute
   FinanceRoute: typeof FinanceRoute
   FleetRoute: typeof FleetRoute
   LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
+  TeamRoute: typeof TeamRoute
   WorkshopRoute: typeof WorkshopRoute
 }
 
@@ -104,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/finance': {
@@ -134,6 +178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OperationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/team': {
+      id: '/team'
+      path: '/team'
+      fullPath: '/team'
+      preLoaderRoute: typeof TeamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/workshop': {
       id: '/workshop'
       path: '/workshop'
@@ -146,10 +197,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuditRoute: AuditRoute,
   FinanceRoute: FinanceRoute,
   FleetRoute: FleetRoute,
   LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
+  TeamRoute: TeamRoute,
   WorkshopRoute: WorkshopRoute,
 }
 export const routeTree = rootRouteImport

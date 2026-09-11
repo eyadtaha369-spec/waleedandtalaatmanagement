@@ -37,13 +37,14 @@ export async function fetchBuses(): Promise<Bus[]> {
   }));
 }
 
-export async function addBus(input: { code: string; plate: string; model: string; capacity: number; odometer: number }) {
+export async function addBus(input: { code: string; plate: string; model: string; capacity: number; odometer: number; status?: string }) {
   const { error } = await supabase.from("buses").insert({
     bus_code: input.code,
     plate_number: input.plate,
     model: input.model,
     capacity: input.capacity,
     odometer: input.odometer,
+    status: input.status ?? "تعمل",
   });
   if (error) throw error;
 }
@@ -188,7 +189,10 @@ export async function addRoute(input: {
     seats: input.seats,
     booked: 0,
   });
-  if (error) throw error;
+  if (error) {
+    if (error.code === "23505") throw new Error(`الأتوبيس ${input.busCode} مخصص بالفعل لخط آخر`);
+    throw error;
+  }
 }
 
 export async function fetchStudents(): Promise<Student[]> {
@@ -500,3 +504,76 @@ export async function fetchPayroll(): Promise<Payslip[]> {
     penalties: Number(p.penalties ?? 0),
   }));
 }
+
+export async function fetchAttendanceSummary(driverName: string, monthPrefix: string) {
+  const { data, error } = await supabase
+    .from("attendance")
+    .select("status, drivers(name)")
+    .gte("date", `${monthPrefix}-01`)
+    .lt("date", `${monthPrefix}-32`);
+  if (error) throw error;
+  const rows = (data ?? []).filter((r: any) => r.drivers?.name === driverName);
+  return {
+    present: rows.filter((r: any) => r.status === "حاضر").length,
+    late: rows.filter((r: any) => r.status === "متأخر").length,
+    absent: rows.filter((r: any) => r.status === "غائب").length,
+  };
+}
+
+// ---- Roles & team ----
+
+export interface Profile {
+  id: string;
+  email: string;
+  role: "admin" | "accountant" | "dispatcher" | "staff";
+}
+
+export async function fetchMyProfile(): Promise<Profile | null> {
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return null;
+  const { data, error } = await supabase.from("profiles").select("*").eq("id", auth.user.id).maybeSingle();
+  if (error) throw error;
+  return data as Profile | null;
+}
+
+export async function fetchTeam(): Promise<Profile[]> {
+  const { data, error } = await supabase.from("profiles").select("*").order("email");
+  if (error) throw error;
+  return (data ?? []) as Profile[];
+}
+
+export async function updateProfileRole(id: string, role: Profile["role"]) {
+  const { error } = await supabase.from("profiles").update({ role }).eq("id", id);
+  if (error) throw error;
+}
+
+// ---- Audit log ----
+
+export interface AuditEntry {
+  id: string;
+  tableName: string;
+  action: string;
+  changedByEmail: string | null;
+  changedAt: string;
+  oldData: any;
+  newData: any;
+}
+
+export async function fetchAuditLog(limit = 100): Promise<AuditEntry[]> {
+  const { data, error } = await supabase
+    .from("audit_log")
+    .select("*")
+    .order("changed_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((a: any) => ({
+    id: a.id,
+    tableName: a.table_name,
+    action: a.action,
+    changedByEmail: a.changed_by_email,
+    changedAt: a.changed_at,
+    oldData: a.old_data,
+    newData: a.new_data,
+  }));
+}
+

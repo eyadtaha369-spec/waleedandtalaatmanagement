@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { fetchTeam, updateProfileRole, fetchMyProfile, type Profile } from "@/lib/queries";
+import { fetchTeam, updateProfileRole, updateProfileName, fetchMyProfile, type Profile } from "@/lib/queries";
 import { supabase } from "@/lib/supabase";
 import { createStaffAccount } from "@/lib/team-actions";
 
@@ -42,7 +42,8 @@ function TeamPage() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [newAccount, setNewAccount] = useState<{ email: string; password: string; role: Profile["role"] }>({
+  const [newAccount, setNewAccount] = useState<{ fullName: string; email: string; password: string; role: Profile["role"] }>({
+    fullName: "",
     email: "",
     password: "",
     role: "staff",
@@ -84,10 +85,10 @@ function TeamPage() {
       const accessToken = session.session?.access_token;
       if (!accessToken) throw new Error("جلسة غير صالحة");
       await createStaffAccount({
-        data: { accessToken, email: newAccount.email, password: newAccount.password, role: newAccount.role as any },
+        data: { accessToken, email: newAccount.email, password: newAccount.password, role: newAccount.role as any, fullName: newAccount.fullName },
       });
       await load();
-      setNewAccount({ email: "", password: "", role: "staff" });
+      setNewAccount({ fullName: "", email: "", password: "", role: "staff" });
       setAdding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر إنشاء الحساب");
@@ -122,14 +123,30 @@ function TeamPage() {
             </Button>
           </div>
         )}
-        <DataTable head={["البريد الإلكتروني", "الصلاحية"]}>
+        <DataTable head={["الاسم", "البريد الإلكتروني", "الصلاحية"]}>
           {loading ? (
             <tr>
-              <td colSpan={2} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+              <td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
             </tr>
           ) : (
             team.map((p) => (
               <tr key={p.id} className={cn("transition-colors hover:bg-secondary/30", p.role === "pending" && "bg-destructive/5")}>
+                <td className="px-4 py-3">
+                  {isAdmin ? (
+                    <Input
+                      defaultValue={p.fullName ?? ""}
+                      placeholder="—"
+                      className="h-8 w-40 border-border bg-input/60 text-sm"
+                      onBlur={(e) => {
+                        if (e.target.value !== (p.fullName ?? "")) {
+                          updateProfileName(p.id, e.target.value).then(load);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span className="font-bold">{p.fullName || "—"}</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 font-bold">{p.email}</td>
                 <td className="px-4 py-3">
                   {isAdmin ? (
@@ -164,6 +181,14 @@ function TeamPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الاسم الكامل</Label>
+              <Input
+                value={newAccount.fullName}
+                onChange={(e) => setNewAccount({ ...newAccount, fullName: e.target.value })}
+                className="border-border bg-input/60"
+              />
+            </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">البريد الإلكتروني</Label>
               <Input

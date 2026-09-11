@@ -24,7 +24,10 @@ import {
   addPayment,
   addRoute as addRouteApi,
   addStudent as addStudentApi,
+  bulkInsertRoutes,
+  bulkInsertStudents,
 } from "@/lib/queries";
+import { CsvImportDialog } from "@/components/csv-import-dialog";
 
 export const Route = createFileRoute("/operations")({
   head: () => ({
@@ -53,6 +56,8 @@ function OperationsPage() {
   const [routeForm, setRouteForm] = useState({ name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
   const [addingStudent, setAddingStudent] = useState(false);
   const [studentForm, setStudentForm] = useState({ name: "", guardianPhone: "", routeName: "", monthly: "" });
+  const [importingRoutes, setImportingRoutes] = useState(false);
+  const [importingStudents, setImportingStudents] = useState(false);
 
   const loadAll = async () => {
     setLoading(true);
@@ -154,9 +159,14 @@ function OperationsPage() {
               placeholder="ابحث باسم الخط..."
               onExport={() => exportToExcel("الخطوط", routes as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingRoute(true)}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة خط
-                </Button>
+                <>
+                  <Button variant="outline" className="border-border" onClick={() => setImportingRoutes(true)}>
+                    استيراد CSV
+                  </Button>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingRoute(true)}>
+                    <Plus className="ml-2 h-4 w-4" /> إضافة خط
+                  </Button>
+                </>
               }
             />
             {loading ? (
@@ -203,9 +213,14 @@ function OperationsPage() {
               placeholder="ابحث باسم الطالب أو الخط..."
               onExport={() => exportToExcel("الاشتراكات", filteredStudents as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingStudent(true)}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة طالب
-                </Button>
+                <>
+                  <Button variant="outline" className="border-border" onClick={() => setImportingStudents(true)}>
+                    استيراد CSV
+                  </Button>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingStudent(true)}>
+                    <Plus className="ml-2 h-4 w-4" /> إضافة طالب
+                  </Button>
+                </>
               }
             />
             <DataTable head={["الطالب", "الخط", "هاتف ولي الأمر", "الاشتراك الشهري", "المسدد", "المتبقي", "الحالة", "السجل"]}>
@@ -344,6 +359,35 @@ function OperationsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <CsvImportDialog
+        open={importingRoutes}
+        onOpenChange={setImportingRoutes}
+        title="استيراد الخطوط من CSV"
+        columns={[
+          { key: "route_name", label: "اسم الخط" },
+          { key: "pickup_points", label: "نقاط التجمع" },
+          { key: "departure_time", label: "موعد التحرك" },
+          { key: "return_time", label: "موعد الوصول" },
+          { key: "bus_code", label: "كود الأتوبيس" },
+          { key: "seats", label: "عدد المقاعد" },
+        ]}
+        onImport={bulkInsertRoutes}
+        onDone={loadAll}
+      />
+      <CsvImportDialog
+        open={importingStudents}
+        onOpenChange={setImportingStudents}
+        title="استيراد الطلاب من CSV"
+        columns={[
+          { key: "name", label: "الاسم" },
+          { key: "parent_phone", label: "هاتف ولي الأمر" },
+          { key: "route_name", label: "اسم الخط" },
+          { key: "total_amount", label: "الاشتراك الشهري" },
+          { key: "paid_amount", label: "المسدد" },
+        ]}
+        onImport={bulkInsertStudents}
+        onDone={loadAll}
+      />
     </AppShell>
   );
 }

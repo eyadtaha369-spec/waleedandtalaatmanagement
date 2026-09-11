@@ -3,6 +3,7 @@ import {
   Bus,
   ClipboardList,
   Coins,
+  Database,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -35,6 +36,7 @@ const nav = [
   { to: "/finance", label: "المالية والخزينة", icon: Coins, roles: ["admin", "accountant"] },
   { to: "/audit", label: "سجل التعديلات", icon: ClipboardList, roles: ["admin"] },
   { to: "/team", label: "الفريق والصلاحيات", icon: Users, roles: ["admin"] },
+  { to: "/backup", label: "النسخ الاحتياطي", icon: Database, roles: ["admin"] },
 ] as const;
 
 const roleLabels: Record<string, string> = {
@@ -233,7 +235,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="hidden text-left sm:block">
-              <p className="text-sm font-bold">{session.user.email}</p>
+              <p className="text-sm font-bold">{profile?.fullName || session.user.email}</p>
               <p className="text-[11px] text-muted-foreground">{profile ? roleLabels[profile.role] : "—"}</p>
             </div>
             <button

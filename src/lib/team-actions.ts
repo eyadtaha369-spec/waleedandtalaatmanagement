@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase-admin.server";
 
 export const createStaffAccount = createServerFn({ method: "POST" })
-  .validator((d: { accessToken: string; email: string; password: string; role: "admin" | "accountant" | "dispatcher" | "staff" }) => d)
+  .validator((d: { accessToken: string; email: string; password: string; role: "admin" | "accountant" | "dispatcher" | "staff"; fullName: string }) => d)
   .handler(async ({ data }) => {
     const url = process.env['VITE_SUPABASE_URL'];
     const anonKey = process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];
@@ -39,7 +39,7 @@ export const createStaffAccount = createServerFn({ method: "POST" })
 
     // The handle_new_user trigger already inserted a profile row (role defaults
     // to 'pending' since this isn't the first user) — set it to the chosen role.
-    const { error: roleErr } = await admin.from("profiles").update({ role: data.role }).eq("id", created.user.id);
+    const { error: roleErr } = await admin.from("profiles").update({ role: data.role, full_name: data.fullName }).eq("id", created.user.id);
     if (roleErr) throw new Error(roleErr.message);
 
     return { id: created.user.id, email: created.user.email };

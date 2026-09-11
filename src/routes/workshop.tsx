@@ -24,7 +24,9 @@ import {
   updateMaintenanceStatus,
   addInventoryItem,
   addFuelLog,
+  bulkInsertInventory,
 } from "@/lib/queries";
+import { CsvImportDialog } from "@/components/csv-import-dialog";
 
 export const Route = createFileRoute("/workshop")({
   head: () => ({
@@ -51,6 +53,7 @@ function WorkshopPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ bus: "", issue: "", parts: "", cost: "" });
   const [addingItem, setAddingItem] = useState(false);
+  const [importingInventory, setImportingInventory] = useState(false);
   const [itemForm, setItemForm] = useState({ name: "", code: "", stock: "", minStock: "", unitPrice: "" });
   const [addingFuel, setAddingFuel] = useState(false);
   const [fuelForm, setFuelForm] = useState({ busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
@@ -229,9 +232,14 @@ function WorkshopPage() {
               placeholder="ابحث باسم الصنف..."
               onExport={() => exportToExcel("المخزن", inventory as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingItem(true)}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة صنف
-                </Button>
+                <>
+                  <Button variant="outline" className="border-border" onClick={() => setImportingInventory(true)}>
+                    استيراد CSV
+                  </Button>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingItem(true)}>
+                    <Plus className="ml-2 h-4 w-4" /> إضافة صنف
+                  </Button>
+                </>
               }
             />
             <DataTable head={["الصنف", "الكود", "الرصيد الحالي", "الحد الأدنى", "سعر الوحدة", "الحالة"]}>
@@ -389,6 +397,20 @@ function WorkshopPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <CsvImportDialog
+        open={importingInventory}
+        onOpenChange={setImportingInventory}
+        title="استيراد المخزون من CSV"
+        columns={[
+          { key: "name", label: "اسم الصنف" },
+          { key: "code", label: "الكود" },
+          { key: "stock", label: "الرصيد" },
+          { key: "min_stock", label: "الحد الأدنى" },
+          { key: "unit_price", label: "سعر الوحدة" },
+        ]}
+        onImport={bulkInsertInventory}
+        onDone={loadAll}
+      />
     </AppShell>
   );
 }

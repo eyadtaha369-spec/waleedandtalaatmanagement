@@ -8,4 +8,4 @@ if (!supabaseUrl || !supabaseKey) {
   console.warn("Supabase env vars are missing (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY).");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl || "https://placeholder.supabase.co", supabaseKey || "placeholder-anon-key");

@@ -16,8 +16,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
-import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi, checkInDriver, checkOutDriver, upsertAttendanceRecord } from "@/lib/queries";
+import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi, checkInDriver, checkOutDriver, upsertAttendanceRecord, bulkInsertBuses, bulkInsertDrivers } from "@/lib/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CsvImportDialog } from "@/components/csv-import-dialog";
 
 export const Route = createFileRoute("/fleet")({
   head: () => ({
@@ -43,6 +44,8 @@ function FleetPage() {
   const [selected, setSelected] = useState<Bus | null>(null);
   const [adding, setAdding] = useState(false);
   const [addingDriver, setAddingDriver] = useState(false);
+  const [importingBuses, setImportingBuses] = useState(false);
+  const [importingDrivers, setImportingDrivers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
   const [driverForm, setDriverForm] = useState({ name: "", phone: "", license: "", licenseExpiry: "" });
@@ -207,9 +210,14 @@ function FleetPage() {
               onQuery={setQuery}
               onExport={() => exportToExcel("الأتوبيسات", filtered as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAdding(true)}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة أتوبيس
-                </Button>
+                <>
+                  <Button variant="outline" className="border-border" onClick={() => setImportingBuses(true)}>
+                    استيراد CSV
+                  </Button>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAdding(true)}>
+                    <Plus className="ml-2 h-4 w-4" /> إضافة أتوبيس
+                  </Button>
+                </>
               }
             />
             <DataTable head={["الكود", "رقم اللوحة", "الموديل", "السعة", "قراءة العداد", "السائق", "الحالة", "تفاصيل"]}>
@@ -249,9 +257,14 @@ function FleetPage() {
               placeholder="ابحث باسم السائق..."
               onExport={() => exportToExcel("السائقون", drivers as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingDriver(true)}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة سائق
-                </Button>
+                <>
+                  <Button variant="outline" className="border-border" onClick={() => setImportingDrivers(true)}>
+                    استيراد CSV
+                  </Button>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingDriver(true)}>
+                    <Plus className="ml-2 h-4 w-4" /> إضافة سائق
+                  </Button>
+                </>
               }
             />
             <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "الأتوبيس الأساسي", "الاحتياطي", "الوردية"]}>
@@ -523,6 +536,34 @@ function FleetPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <CsvImportDialog
+        open={importingBuses}
+        onOpenChange={setImportingBuses}
+        title="استيراد الأتوبيسات من CSV"
+        columns={[
+          { key: "bus_code", label: "الكود" },
+          { key: "plate_number", label: "رقم اللوحة" },
+          { key: "model", label: "الموديل" },
+          { key: "capacity", label: "السعة" },
+          { key: "odometer", label: "العداد" },
+          { key: "status", label: "الحالة" },
+        ]}
+        onImport={bulkInsertBuses}
+        onDone={loadAll}
+      />
+      <CsvImportDialog
+        open={importingDrivers}
+        onOpenChange={setImportingDrivers}
+        title="استيراد السائقين من CSV"
+        columns={[
+          { key: "name", label: "الاسم" },
+          { key: "phone", label: "الهاتف" },
+          { key: "license_type", label: "نوع الرخصة" },
+          { key: "license_expiry", label: "انتهاء الرخصة" },
+        ]}
+        onImport={bulkInsertDrivers}
+        onDone={loadAll}
+      />
     </AppShell>
   );
 }

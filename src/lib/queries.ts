@@ -446,12 +446,12 @@ export async function fetchAlerts(): Promise<AlertRow[]> {
   return (data ?? []).map((a: any) => ({ id: a.id, type: a.type, text: a.text, level: a.level ?? "متوسط" }));
 }
 
-export async function fetchFuelChart(): Promise<{ bus: string; "لتر/100كم": number }[]> {
-  const { data, error } = await supabase.from("fuel_logs").select("liters, odo_start, odo_end, buses(bus_code)");
-  if (error) throw error;
+export function computeFuelEfficiency(
+  rows: { liters: number; odo_start: number; odo_end: number; bus_code: string }[],
+): { bus: string; "لتر/100كم": number }[] {
   const totals = new Map<string, { liters: number; km: number }>();
-  for (const row of (data ?? []) as any[]) {
-    const code = row.buses?.bus_code ?? "—";
+  for (const row of rows) {
+    const code = row.bus_code ?? "—";
     const km = Math.max((row.odo_end ?? 0) - (row.odo_start ?? 0), 0);
     const entry = totals.get(code) ?? { liters: 0, km: 0 };
     entry.liters += Number(row.liters ?? 0);
@@ -464,6 +464,39 @@ export async function fetchFuelChart(): Promise<{ bus: string; "لتر/100كم":
   }));
 }
 
+export async function fetchFuelChart(): Promise<{ bus: string; "لتر/100كم": number }[]> {
+  const { data, error } = await supabase.from("fuel_logs").select("liters, odo_start, odo_end, buses(bus_code)");
+  if (error) throw error;
+  const rows = (data ?? []).map((row: any) => ({
+    liters: row.liters,
+    odo_start: row.odo_start,
+    odo_end: row.odo_end,
+    bus_code: row.buses?.bus_code ?? "—",
+  }));
+  return computeFuelEfficiency(rows);
+}
+
+export function computeMonthlyFinance(
+  treasuryRows: { date: string; deposits: number }[],
+  expenseRows: { date: string; amount: number }[],
+): { month: string; الإيرادات: number; المصروفات: number }[] {
+  const monthKey = (d: string) => new Date(d).toLocaleDateString("ar-EG", { month: "long" });
+  const byMonth = new Map<string, { rev: number; exp: number }>();
+  for (const row of treasuryRows) {
+    const k = monthKey(row.date);
+    const e = byMonth.get(k) ?? { rev: 0, exp: 0 };
+    e.rev += Number(row.deposits ?? 0);
+    byMonth.set(k, e);
+  }
+  for (const row of expenseRows) {
+    const k = monthKey(row.date);
+    const e = byMonth.get(k) ?? { rev: 0, exp: 0 };
+    e.exp += Number(row.amount ?? 0);
+    byMonth.set(k, e);
+  }
+  return Array.from(byMonth.entries()).map(([month, v]) => ({ month, الإيرادات: v.rev, المصروفات: v.exp }));
+}
+
 export async function fetchMonthlyFinance(): Promise<{ month: string; الإيرادات: number; المصروفات: number }[]> {
   const [{ data: treasuryData, error: e1 }, { data: expenseData, error: e2 }] = await Promise.all([
     supabase.from("treasury").select("date, deposits"),
@@ -471,21 +504,7 @@ export async function fetchMonthlyFinance(): Promise<{ month: string; الإير
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
-  const monthKey = (d: string) => new Date(d).toLocaleDateString("ar-EG", { month: "long" });
-  const byMonth = new Map<string, { rev: number; exp: number }>();
-  for (const row of (treasuryData ?? []) as any[]) {
-    const k = monthKey(row.date);
-    const e = byMonth.get(k) ?? { rev: 0, exp: 0 };
-    e.rev += Number(row.deposits ?? 0);
-    byMonth.set(k, e);
-  }
-  for (const row of (expenseData ?? []) as any[]) {
-    const k = monthKey(row.date);
-    const e = byMonth.get(k) ?? { rev: 0, exp: 0 };
-    e.exp += Number(row.amount ?? 0);
-    byMonth.set(k, e);
-  }
-  return Array.from(byMonth.entries()).map(([month, v]) => ({ month, الإيرادات: v.rev, المصروفات: v.exp }));
+  return computeMonthlyFinance((treasuryData ?? []) as any, (expenseData ?? []) as any);
 }
 
 export async function fetchPayroll(): Promise<Payslip[]> {
@@ -525,6 +544,7 @@ export async function fetchAttendanceSummary(driverName: string, monthPrefix: st
 export interface Profile {
   id: string;
   email: string;
+  fullName: string | null;
   role: "admin" | "accountant" | "dispatcher" | "staff" | "pending";
 }
 
@@ -533,17 +553,23 @@ export async function fetchMyProfile(): Promise<Profile | null> {
   if (!auth.user) return null;
   const { data, error } = await supabase.from("profiles").select("*").eq("id", auth.user.id).maybeSingle();
   if (error) throw error;
-  return data as Profile | null;
+  if (!data) return null;
+  return { id: data.id, email: data.email, fullName: data.full_name, role: data.role };
 }
 
 export async function fetchTeam(): Promise<Profile[]> {
   const { data, error } = await supabase.from("profiles").select("*").order("email");
   if (error) throw error;
-  return (data ?? []) as Profile[];
+  return (data ?? []).map((d: any) => ({ id: d.id, email: d.email, fullName: d.full_name, role: d.role }));
 }
 
 export async function updateProfileRole(id: string, role: Profile["role"]) {
   const { error } = await supabase.from("profiles").update({ role }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateProfileName(id: string, fullName: string) {
+  const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", id);
   if (error) throw error;
 }
 
@@ -600,4 +626,100 @@ export async function globalSearch(term: string): Promise<SearchResult[]> {
   for (const s of students.data ?? []) results.push({ label: s.name, sublabel: `طالب • ${s.parent_phone ?? "—"}`, page: "/operations" });
   for (const r of routes.data ?? []) results.push({ label: r.route_name, sublabel: `خط سير`, page: "/operations" });
   return results;
+}
+
+// ---- Backup / export ----
+
+const BACKUP_TABLES = [
+  "buses", "drivers", "routes", "students", "maintenance_orders", "attendance",
+  "payments", "inventory", "fuel_logs", "treasury", "expenses", "loans",
+  "staff", "payslips", "alerts",
+] as const;
+
+export async function exportAllData(): Promise<Record<string, unknown[]>> {
+  const result: Record<string, unknown[]> = {};
+  for (const table of BACKUP_TABLES) {
+    const { data, error } = await supabase.from(table).select("*");
+    if (error) throw new Error(`تعذر تصدير جدول ${table}: ${error.message}`);
+    result[table] = data ?? [];
+  }
+  return result;
+}
+
+// ---- Bulk CSV import ----
+
+export async function bulkInsertBuses(rows: Record<string, string>[]) {
+  const payload = rows.map((r) => ({
+    bus_code: r["bus_code"] ?? r["الكود"],
+    plate_number: r["plate_number"] ?? r["رقم اللوحة"],
+    model: r["model"] ?? r["الموديل"],
+    capacity: Number(r["capacity"] ?? r["السعة"]) || 0,
+    odometer: Number(r["odometer"] ?? r["العداد"]) || 0,
+    status: r["status"] ?? r["الحالة"] ?? "تعمل",
+  }));
+  const { error } = await supabase.from("buses").insert(payload);
+  if (error) throw error;
+  return payload.length;
+}
+
+export async function bulkInsertDrivers(rows: Record<string, string>[]) {
+  const payload = rows.map((r) => ({
+    driver_code: `DRV-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+    name: r["name"] ?? r["الاسم"],
+    phone: r["phone"] ?? r["الهاتف"],
+    license_type: r["license_type"] ?? r["نوع الرخصة"],
+    license_expiry: (r["license_expiry"] ?? r["انتهاء الرخصة"]) || null,
+  }));
+  const { error } = await supabase.from("drivers").insert(payload);
+  if (error) throw error;
+  return payload.length;
+}
+
+export async function bulkInsertStudents(rows: Record<string, string>[]) {
+  const names = [...new Set(rows.map((r) => r["route_name"] ?? r["اسم الخط"]).filter(Boolean))];
+  const { data: routes } = await supabase.from("routes").select("id, route_name").in("route_name", names);
+  const routeMap = new Map((routes ?? []).map((r: any) => [r.route_name, r.id]));
+  const payload = rows.map((r) => ({
+    sub_code: `STU-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+    name: r["name"] ?? r["الاسم"],
+    parent_phone: r["parent_phone"] ?? r["هاتف ولي الأمر"],
+    route_id: routeMap.get(r["route_name"] ?? r["اسم الخط"]) ?? null,
+    total_amount: Number(r["total_amount"] ?? r["الاشتراك الشهري"]) || 0,
+    paid_amount: Number(r["paid_amount"] ?? r["المسدد"]) || 0,
+  }));
+  const { error } = await supabase.from("students").insert(payload);
+  if (error) throw error;
+  return payload.length;
+}
+
+export async function bulkInsertRoutes(rows: Record<string, string>[]) {
+  const codes = [...new Set(rows.map((r) => r["bus_code"] ?? r["كود الأتوبيس"]).filter(Boolean))];
+  const { data: buses } = await supabase.from("buses").select("id, bus_code").in("bus_code", codes);
+  const busMap = new Map((buses ?? []).map((b: any) => [b.bus_code, b.id]));
+  const payload = rows.map((r) => ({
+    route_code: `RT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+    route_name: r["route_name"] ?? r["اسم الخط"],
+    pickup_points: r["pickup_points"] ?? r["نقاط التجمع"],
+    departure_time: (r["departure_time"] ?? r["موعد التحرك"]) || null,
+    return_time: (r["return_time"] ?? r["موعد الوصول"]) || null,
+    bus_id: busMap.get(r["bus_code"] ?? r["كود الأتوبيس"]) ?? null,
+    seats: Number(r["seats"] ?? r["عدد المقاعد"]) || 0,
+    booked: 0,
+  }));
+  const { error } = await supabase.from("routes").insert(payload);
+  if (error) throw error;
+  return payload.length;
+}
+
+export async function bulkInsertInventory(rows: Record<string, string>[]) {
+  const payload = rows.map((r) => ({
+    name: r["name"] ?? r["اسم الصنف"],
+    code: r["code"] ?? r["الكود"],
+    stock: Number(r["stock"] ?? r["الرصيد"]) || 0,
+    min_stock: Number(r["min_stock"] ?? r["الحد الأدنى"]) || 0,
+    unit_price: Number(r["unit_price"] ?? r["سعر الوحدة"]) || 0,
+  }));
+  const { error } = await supabase.from("inventory").insert(payload);
+  if (error) throw error;
+  return payload.length;
 }

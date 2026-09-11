@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
@@ -15,7 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { attendance as attendanceSeed, buses as busSeed, drivers, type Bus } from "@/lib/fleet-data";
+import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
+import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi } from "@/lib/queries";
 
 export const Route = createFileRoute("/fleet")({
   head: () => ({
@@ -32,11 +33,35 @@ export const Route = createFileRoute("/fleet")({
 const busTone = (s: Bus["status"]) => (s === "تعمل" ? "good" : s === "بالورشة" ? "warn" : "bad") as const;
 
 function FleetPage() {
-  const [buses, setBuses] = useState(busSeed);
+  const [buses, setBuses] = useState<Bus[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [attendanceRows, setAttendanceRows] = useState<Attendance[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Bus | null>(null);
   const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "" });
+
+  const loadAll = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [b, d, a] = await Promise.all([fetchBuses(), fetchDrivers(), fetchAttendance()]);
+      setBuses(b);
+      setDrivers(d);
+      setAttendanceRows(a);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAll();
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -46,31 +71,36 @@ function FleetPage() {
     [buses, query],
   );
 
-  const addBus = () => {
+  const addBus = async () => {
     if (!form.code.trim()) return;
-    setBuses((prev) => [
-      ...prev,
-      {
-        id: String(Date.now()),
+    setSaving(true);
+    try {
+      await addBusApi({
         code: form.code,
-        plate: form.plate || "—",
-        model: form.model || "—",
+        plate: form.plate,
+        model: form.model,
         capacity: Number(form.capacity) || 0,
         odometer: Number(form.odometer) || 0,
-        licenseExpiry: "2027-01-01",
-        insuranceExpiry: "2027-01-01",
-        lastMaintenance: "—",
-        driver: "—",
-        status: "تعمل",
-      },
-    ]);
-    setForm({ code: "", plate: "", model: "", capacity: "", odometer: "" });
-    setAdding(false);
+      });
+      await loadAll();
+      setForm({ code: "", plate: "", model: "", capacity: "", odometer: "" });
+      setAdding(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة الأتوبيس");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <AppShell>
       <PageHeader title="إدارة الأسطول والسائقين" subtitle="الأتوبيسات، السائقون، وسجل الحضور اليومي" />
+
+      {error && (
+        <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       <Tabs defaultValue="buses">
         <TabsList className="no-print mb-4 border border-border bg-secondary/50">
@@ -92,24 +122,30 @@ function FleetPage() {
               }
             />
             <DataTable head={["الكود", "رقم اللوحة", "الموديل", "السعة", "قراءة العداد", "السائق", "الحالة", "تفاصيل"]}>
-              {filtered.map((b) => (
-                <tr key={b.id} className="transition-colors hover:bg-secondary/30">
-                  <td className="px-4 py-3 font-bold text-primary">{b.code}</td>
-                  <td className="px-4 py-3">{b.plate}</td>
-                  <td className="px-4 py-3">{b.model}</td>
-                  <td className="px-4 py-3">{b.capacity} راكب</td>
-                  <td className="px-4 py-3">{b.odometer.toLocaleString("ar-EG")} كم</td>
-                  <td className="px-4 py-3">{b.driver}</td>
-                  <td className="px-4 py-3">
-                    <StatusPill label={b.status} tone={busTone(b.status)} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => setSelected(b)}>
-                      عرض
-                    </Button>
-                  </td>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((b) => (
+                  <tr key={b.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3 font-bold text-primary">{b.code}</td>
+                    <td className="px-4 py-3">{b.plate}</td>
+                    <td className="px-4 py-3">{b.model}</td>
+                    <td className="px-4 py-3">{b.capacity} راكب</td>
+                    <td className="px-4 py-3">{b.odometer.toLocaleString("ar-EG")} كم</td>
+                    <td className="px-4 py-3">{b.driver}</td>
+                    <td className="px-4 py-3">
+                      <StatusPill label={b.status} tone={busTone(b.status)} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => setSelected(b)}>
+                        عرض
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </DataTable>
           </Panel>
         </TabsContent>
@@ -148,10 +184,10 @@ function FleetPage() {
               query={query}
               onQuery={setQuery}
               placeholder="ابحث باسم السائق..."
-              onExport={() => exportToExcel("الحضور", attendanceSeed as unknown as Record<string, string | number>[])}
+              onExport={() => exportToExcel("الحضور", attendanceRows as unknown as Record<string, string | number>[])}
             />
             <DataTable head={["السائق", "التاريخ", "الحضور", "الانصراف", "الحالة"]}>
-              {attendanceSeed
+              {attendanceRows
                 .filter((a) => a.driver.includes(query) || query === "")
                 .map((a) => (
                   <tr key={a.id} className="transition-colors hover:bg-secondary/30">
@@ -230,8 +266,8 @@ function FleetPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addBus}>
-              حفظ الأتوبيس
+            <Button className="bg-primary text-primary-foreground" onClick={addBus} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الأتوبيس"}
             </Button>
           </DialogFooter>
         </DialogContent>

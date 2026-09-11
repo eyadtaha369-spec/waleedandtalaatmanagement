@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -14,7 +15,16 @@ import {
 import { AlertTriangle, Bus, Coins, Users, Wrench, FileWarning } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader, Panel, StatCard, StatusPill } from "@/components/ui-kit";
-import { alerts, buses, currency, fuelChart, monthlyFinance, students } from "@/lib/fleet-data";
+import { currency, type Bus as BusType, type Student } from "@/lib/fleet-data";
+import {
+  fetchBuses,
+  fetchStudents,
+  fetchAlerts,
+  fetchFuelChart,
+  fetchMonthlyFinance,
+  fetchTreasury,
+  type AlertRow,
+} from "@/lib/queries";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -43,6 +53,38 @@ const tooltipStyle = {
 };
 
 function Dashboard() {
+  const [buses, setBuses] = useState<BusType[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [fuelChart, setFuelChart] = useState<{ bus: string; "لتر/100كم": number }[]>([]);
+  const [monthlyFinance, setMonthlyFinance] = useState<{ month: string; الإيرادات: number; المصروفات: number }[]>([]);
+  const [todayReceipts, setTodayReceipts] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [b, s, a, fc, mf, treasury] = await Promise.all([
+          fetchBuses(),
+          fetchStudents(),
+          fetchAlerts(),
+          fetchFuelChart(),
+          fetchMonthlyFinance(),
+          fetchTreasury(),
+        ]);
+        setBuses(b);
+        setStudents(s);
+        setAlerts(a);
+        setFuelChart(fc);
+        setMonthlyFinance(mf);
+        const today = new Date().toISOString().slice(0, 10);
+        setTodayReceipts(treasury.filter((t) => t.date === today).reduce((sum, t) => sum + t.deposits, 0));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "تعذر تحميل بيانات لوحة التحكم");
+      }
+    })();
+  }, []);
+
   const working = buses.filter((b) => b.status === "تعمل").length;
   const inShop = buses.filter((b) => b.status === "بالورشة").length;
   const stopped = buses.filter((b) => b.status === "متوقفة").length;
@@ -52,8 +94,14 @@ function Dashboard() {
     <AppShell>
       <PageHeader
         title="لوحة التحكّم التنفيذية"
-        subtitle="نظرة شاملة على أداء الأسطول والتشغيل والمالية — تحديث اليوم ١٠ سبتمبر ٢٠٢٦"
+        subtitle="نظرة شاملة على أداء الأسطول والتشغيل والمالية"
       />
+
+      {error && (
+        <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -62,8 +110,8 @@ function Dashboard() {
           hint={`${working} تعمل • ${inShop} بالورشة • ${stopped} معطلة`}
           icon={Bus}
         />
-        <StatCard label="الإيرادات والمقبوضات اليومية" value={currency(62450)} hint="مقبوضات نقدية وتحويلات اليوم" icon={Coins} />
-        <StatCard label="إجمالي الطلاب والمشتركين" value={`${students.length * 42} مشترك`} hint={`${late} حالات سداد متأخرة`} icon={Users} />
+        <StatCard label="الإيرادات والمقبوضات اليومية" value={currency(todayReceipts)} hint="مقبوضات نقدية وتحويلات اليوم" icon={Coins} />
+        <StatCard label="إجمالي الطلاب والمشتركين" value={`${students.length} مشترك`} hint={`${late} حالات سداد متأخرة`} icon={Users} />
         <StatCard label="التنبيهات العاجلة" value={`${alerts.filter((a) => a.level === "عاجل").length} تنبيهات`} hint="عقود وتراخيص ومخزون" icon={AlertTriangle} />
       </div>
 
@@ -84,6 +132,7 @@ function Dashboard() {
 
         <Panel title="مركز التنبيهات">
           <ul className="space-y-3">
+            {alerts.length === 0 && <li className="text-sm text-muted-foreground">لا توجد تنبيهات حالياً.</li>}
             {alerts.map((a) => (
               <li key={a.id} className="rounded-xl border border-border bg-secondary/30 p-3">
                 <div className="flex items-center justify-between gap-2">

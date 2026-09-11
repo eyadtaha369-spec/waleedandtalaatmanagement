@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Plus } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
@@ -15,13 +15,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { currency, type MaintenanceOrder, type InventoryItem, type FuelLog } from "@/lib/fleet-data";
 import {
-  currency,
-  fuelLogs,
-  inventory,
-  maintenanceOrders as orderSeed,
-  type MaintenanceOrder,
-} from "@/lib/fleet-data";
+  fetchMaintenanceOrders,
+  fetchInventory,
+  fetchFuelLogs,
+  addMaintenanceOrder,
+  updateMaintenanceStatus,
+} from "@/lib/queries";
 
 export const Route = createFileRoute("/workshop")({
   head: () => ({
@@ -38,41 +39,76 @@ export const Route = createFileRoute("/workshop")({
 const columns: MaintenanceOrder["status"][] = ["بانتظار القطع", "قيد التنفيذ", "مكتمل"];
 
 function WorkshopPage() {
-  const [orders, setOrders] = useState(orderSeed);
+  const [orders, setOrders] = useState<MaintenanceOrder[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ bus: "", issue: "", parts: "", cost: "" });
 
-  const addOrder = () => {
-    if (!form.bus.trim()) return;
-    setOrders((prev) => [
-      ...prev,
-      {
-        id: String(Date.now()),
-        code: `MO-${1046 + prev.length}`,
-        bus: form.bus,
-        issue: form.issue || "—",
-        parts: form.parts || "—",
-        cost: Number(form.cost) || 0,
-        status: "بانتظار القطع",
-      },
-    ]);
-    setForm({ bus: "", issue: "", parts: "", cost: "" });
-    setAdding(false);
+  const loadAll = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [o, i, f] = await Promise.all([fetchMaintenanceOrders(), fetchInventory(), fetchFuelLogs()]);
+      setOrders(o);
+      setInventory(i);
+      setFuelLogs(f);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const move = (id: string) =>
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === id
-          ? { ...o, status: columns[Math.min(columns.indexOf(o.status) + 1, columns.length - 1)] }
-          : o,
-      ),
-    );
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  const addOrder = async () => {
+    if (!form.bus.trim()) return;
+    setSaving(true);
+    try {
+      await addMaintenanceOrder({
+        busCode: form.bus,
+        issue: form.issue,
+        parts: form.parts,
+        cost: Number(form.cost) || 0,
+      });
+      await loadAll();
+      setForm({ bus: "", issue: "", parts: "", cost: "" });
+      setAdding(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة أمر الصيانة");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const move = async (id: string) => {
+    const order = orders.find((o) => o.id === id);
+    if (!order) return;
+    const next = columns[Math.min(columns.indexOf(order.status) + 1, columns.length - 1)] ?? order.status;
+    try {
+      await updateMaintenanceStatus(id, next);
+      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: next } : o)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تحديث حالة الأمر");
+    }
+  };
 
   return (
     <AppShell>
       <PageHeader title="الورشة والمخزون والسولار" subtitle="أوامر الصيانة، قطع الغيار، وسجل التزود بالوقود" />
+
+      {error && (
+        <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
       <Tabs defaultValue="orders">
         <TabsList className="no-print mb-4 border border-border bg-secondary/50">
@@ -94,41 +130,45 @@ function WorkshopPage() {
                 </Button>
               }
             />
-            <div className="grid gap-4 lg:grid-cols-3">
-              {columns.map((col) => (
-                <div key={col} className="rounded-xl border border-border bg-secondary/20 p-3">
-                  <h3 className="mb-3 flex items-center justify-between text-sm font-bold">
-                    <span>{col}</span>
-                    <StatusPill
-                      label={String(orders.filter((o) => o.status === col).length)}
-                      tone={col === "مكتمل" ? "good" : col === "قيد التنفيذ" ? "warn" : "muted"}
-                    />
-                  </h3>
-                  <div className="space-y-3">
-                    {orders
-                      .filter((o) => o.status === col && (o.code + o.bus + o.issue).includes(query))
-                      .map((o) => (
-                        <div key={o.id} className="rounded-lg border border-border bg-card p-3">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-primary">{o.code}</span>
-                            <span>{o.bus}</span>
+            {loading ? (
+              <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-3">
+                {columns.map((col) => (
+                  <div key={col} className="rounded-xl border border-border bg-secondary/20 p-3">
+                    <h3 className="mb-3 flex items-center justify-between text-sm font-bold">
+                      <span>{col}</span>
+                      <StatusPill
+                        label={String(orders.filter((o) => o.status === col).length)}
+                        tone={col === "مكتمل" ? "good" : col === "قيد التنفيذ" ? "warn" : "muted"}
+                      />
+                    </h3>
+                    <div className="space-y-3">
+                      {orders
+                        .filter((o) => o.status === col && (o.code + o.bus + o.issue).includes(query))
+                        .map((o) => (
+                          <div key={o.id} className="rounded-lg border border-border bg-card p-3">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-primary">{o.code}</span>
+                              <span>{o.bus}</span>
+                            </div>
+                            <p className="mt-2 text-sm font-semibold">{o.issue}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">قطع الغيار: {o.parts}</p>
+                            <div className="mt-3 flex items-center justify-between">
+                              <span className="text-sm font-bold text-warning">{currency(o.cost)}</span>
+                              {o.status !== "مكتمل" && (
+                                <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => move(o.id)}>
+                                  نقل للمرحلة التالية
+                                </Button>
+                              )}
+                            </div>
                           </div>
-                          <p className="mt-2 text-sm font-semibold">{o.issue}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">قطع الغيار: {o.parts}</p>
-                          <div className="mt-3 flex items-center justify-between">
-                            <span className="text-sm font-bold text-warning">{currency(o.cost)}</span>
-                            {o.status !== "مكتمل" && (
-                              <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => move(o.id)}>
-                                نقل للمرحلة التالية
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Panel>
         </TabsContent>
 
@@ -217,8 +257,8 @@ function WorkshopPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addOrder}>
-              حفظ الأمر
+            <Button className="bg-primary text-primary-foreground" onClick={addOrder} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الأمر"}
             </Button>
           </DialogFooter>
         </DialogContent>

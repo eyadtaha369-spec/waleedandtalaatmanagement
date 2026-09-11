@@ -52,7 +52,6 @@ const emptyForm = {
   shiftTo: "",
   date: new Date().toISOString().slice(0, 10),
   status: "حاضر",
-  overtimeHours: "",
   overtimeAllowance: "",
   dailyAdvance: "",
   penalty: "",
@@ -118,7 +117,6 @@ function PayrollPage() {
       shiftTo: s.shiftTo,
       date: s.date,
       status: s.status,
-      overtimeHours: s.overtimeHours ? String(s.overtimeHours) : "",
       overtimeAllowance: s.overtimeAllowance ? String(s.overtimeAllowance) : "",
       dailyAdvance: s.dailyAdvance ? String(s.dailyAdvance) : "",
       penalty: s.penalty ? String(s.penalty) : "",
@@ -140,7 +138,6 @@ function PayrollPage() {
         shiftTo: form.shiftTo,
         date: form.date,
         status: form.status,
-        overtimeHours: Number(form.overtimeHours) || 0,
         overtimeAllowance: Number(form.overtimeAllowance) || 0,
         dailyAdvance: Number(form.dailyAdvance) || 0,
         penalty: Number(form.penalty) || 0,
@@ -188,7 +185,7 @@ function PayrollPage() {
             <Plus className="ml-2 h-4 w-4" /> تسجيل وردية
           </Button>
         </div>
-        <DataTable head={["التاريخ", "اسم السائق", "الأتوبيس", "الوردية (من ⬅ إلى)", "الحالة", "الإضافي/البدل", "السُلفة", "الجزاءات", "الملاحظات", "الإجراءات"]}>
+        <DataTable head={["التاريخ", "اسم السائق", "الأتوبيس", "الوردية (من ⬅ إلى)", "الحالة", "إضافي", "السُلفة", "الجزاءات", "الملاحظات", "الإجراءات"]}>
           {loading ? (
             <tr>
               <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
@@ -348,13 +345,9 @@ function PayrollPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">ساعات إضافي</Label>
-                <Input value={form.overtimeHours} onChange={(e) => setForm({ ...form, overtimeHours: e.target.value })} type="number" className="border-border bg-input/60" />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">قيمة الإضافي/البدل</Label>
+                <Label className="text-xs text-muted-foreground">إضافي</Label>
                 <Input value={form.overtimeAllowance} onChange={(e) => setForm({ ...form, overtimeAllowance: e.target.value })} type="number" className="border-border bg-input/60" />
               </div>
               <div className="grid gap-1.5">

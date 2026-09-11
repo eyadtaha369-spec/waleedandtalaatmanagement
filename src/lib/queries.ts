@@ -744,7 +744,6 @@ export interface DailyShift {
   shiftTo: string;
   date: string;
   status: string;
-  overtimeHours: number;
   overtimeAllowance: number;
   dailyAdvance: number;
   penalty: number;
@@ -771,7 +770,6 @@ export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[
     shiftTo: a.shift_to ?? "",
     date: a.date,
     status: a.status ?? "حاضر",
-    overtimeHours: Number(a.overtime_hours ?? 0),
     overtimeAllowance: Number(a.overtime_allowance ?? 0),
     dailyAdvance: Number(a.daily_advance ?? 0),
     penalty: Number(a.penalty ?? 0),
@@ -788,7 +786,6 @@ export async function upsertDailyShift(input: {
   shiftTo: string;
   date: string;
   status: string;
-  overtimeHours: number;
   overtimeAllowance: number;
   dailyAdvance: number;
   penalty: number;
@@ -816,7 +813,6 @@ export async function upsertDailyShift(input: {
     shift_to: input.shiftTo || null,
     date: input.date,
     status: input.status,
-    overtime_hours: input.overtimeHours,
     overtime_allowance: input.overtimeAllowance,
     daily_advance: input.dailyAdvance,
     penalty: input.penalty,

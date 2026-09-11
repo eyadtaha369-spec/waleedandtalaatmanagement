@@ -79,6 +79,68 @@ export async function fetchAttendance(): Promise<Attendance[]> {
   }));
 }
 
+export async function checkInDriver(driverId: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date().toTimeString().slice(0, 5);
+  const { data: existing } = await supabase
+    .from("attendance")
+    .select("id")
+    .eq("driver_id", driverId)
+    .eq("date", today)
+    .maybeSingle();
+  if (existing) {
+    const { error } = await supabase.from("attendance").update({ check_in: now, status: "حاضر" }).eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("attendance").insert({ driver_id: driverId, date: today, check_in: now, status: "حاضر" });
+    if (error) throw error;
+  }
+}
+
+export async function checkOutDriver(driverId: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date().toTimeString().slice(0, 5);
+  const { data: existing } = await supabase
+    .from("attendance")
+    .select("id")
+    .eq("driver_id", driverId)
+    .eq("date", today)
+    .maybeSingle();
+  if (existing) {
+    const { error } = await supabase.from("attendance").update({ check_out: now }).eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("attendance").insert({ driver_id: driverId, date: today, check_out: now, status: "حاضر" });
+    if (error) throw error;
+  }
+}
+
+export async function upsertAttendanceRecord(input: {
+  id?: string | undefined;
+  driverName: string;
+  date: string;
+  checkIn: string;
+  checkOut: string;
+  status: string;
+}) {
+  const { data: driver } = await supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle();
+  if (!driver) throw new Error("لم يتم العثور على سائق بهذا الاسم");
+  const payload = {
+    driver_id: driver.id,
+    date: input.date,
+    check_in: input.checkIn || null,
+    check_out: input.checkOut || null,
+    status: input.status || "حاضر",
+  };
+  if (input.id) {
+    const { error } = await supabase.from("attendance").update(payload).eq("id", input.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("attendance").insert(payload);
+    if (error) throw error;
+  }
+}
+
 export async function addDriver(input: { name: string; phone: string; license: string; licenseExpiry: string }) {
   const { error } = await supabase.from("drivers").insert({
     driver_code: `DRV-${Date.now().toString().slice(-6)}`,

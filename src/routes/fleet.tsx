@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
-import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi } from "@/lib/queries";
+import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi, checkInDriver, checkOutDriver, upsertAttendanceRecord } from "@/lib/queries";
 
 export const Route = createFileRoute("/fleet")({
   head: () => ({
@@ -45,6 +45,17 @@ function FleetPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "" });
   const [driverForm, setDriverForm] = useState({ name: "", phone: "", license: "", licenseExpiry: "" });
+  const [attendanceBusy, setAttendanceBusy] = useState<string | null>(null);
+  const [addingAttendance, setAddingAttendance] = useState(false);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [attendanceForm, setAttendanceForm] = useState({
+    id: "",
+    driverName: "",
+    date: todayStr,
+    checkIn: "",
+    checkOut: "",
+    status: "حاضر",
+  });
 
   const loadAll = async () => {
     setLoading(true);
@@ -104,6 +115,67 @@ function FleetPage() {
       setAddingDriver(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر إضافة السائق");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCheckIn = async (driverId: string) => {
+    setAttendanceBusy(driverId);
+    try {
+      await checkInDriver(driverId);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تسجيل الحضور");
+    } finally {
+      setAttendanceBusy(null);
+    }
+  };
+
+  const handleCheckOut = async (driverId: string) => {
+    setAttendanceBusy(driverId);
+    try {
+      await checkOutDriver(driverId);
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تسجيل الانصراف");
+    } finally {
+      setAttendanceBusy(null);
+    }
+  };
+
+  const openAttendanceForm = (row?: Attendance) => {
+    if (row) {
+      setAttendanceForm({
+        id: row.id,
+        driverName: row.driver,
+        date: row.date,
+        checkIn: row.checkIn === "—" ? "" : row.checkIn,
+        checkOut: row.checkOut === "—" ? "" : row.checkOut,
+        status: row.status,
+      });
+    } else {
+      setAttendanceForm({ id: "", driverName: "", date: todayStr, checkIn: "", checkOut: "", status: "حاضر" });
+    }
+    setAddingAttendance(true);
+  };
+
+  const submitAttendance = async () => {
+    if (!attendanceForm.driverName.trim() || !attendanceForm.date.trim()) return;
+    setSaving(true);
+    try {
+      await upsertAttendanceRecord({
+        id: attendanceForm.id || undefined,
+        driverName: attendanceForm.driverName,
+        date: attendanceForm.date,
+        checkIn: attendanceForm.checkIn,
+        checkOut: attendanceForm.checkOut,
+        status: attendanceForm.status,
+      });
+      await loadAll();
+      setAddingAttendance(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر حفظ سجل الحضور");
     } finally {
       setSaving(false);
     }
@@ -201,14 +273,57 @@ function FleetPage() {
         </TabsContent>
 
         <TabsContent value="attendance">
-          <Panel title="سجل الحضور والانصراف">
+          <Panel title="تسجيل حضور اليوم">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {drivers.map((d) => {
+                const todayRow = attendanceRows.find((a) => a.driver === d.name && a.date === todayStr);
+                const busy = attendanceBusy === d.id;
+                return (
+                  <div key={d.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-secondary/25 p-3">
+                    <div>
+                      <p className="text-sm font-bold">{d.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {todayRow ? `حضور: ${todayRow.checkIn} • انصراف: ${todayRow.checkOut}` : "لم يسجل بعد اليوم"}
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <Button
+                        size="sm"
+                        className="bg-primary text-primary-foreground hover:bg-primary/90"
+                        disabled={busy || (!!todayRow && todayRow.checkIn !== "—")}
+                        onClick={() => handleCheckIn(d.id)}
+                      >
+                        حضور
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-border"
+                        disabled={busy || !todayRow || todayRow.checkIn === "—" || todayRow.checkOut !== "—"}
+                        onClick={() => handleCheckOut(d.id)}
+                      >
+                        انصراف
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+
+          <Panel title="سجل الحضور والانصراف" className="mt-4">
             <Toolbar
               query={query}
               onQuery={setQuery}
               placeholder="ابحث باسم السائق..."
               onExport={() => exportToExcel("الحضور", attendanceRows as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => openAttendanceForm()}>
+                  <Plus className="ml-2 h-4 w-4" /> سجل يدوي / تصحيح
+                </Button>
+              }
             />
-            <DataTable head={["السائق", "التاريخ", "الحضور", "الانصراف", "الحالة"]}>
+            <DataTable head={["السائق", "التاريخ", "الحضور", "الانصراف", "الحالة", ""]}>
               {attendanceRows
                 .filter((a) => a.driver.includes(query) || query === "")
                 .map((a) => (
@@ -222,6 +337,11 @@ function FleetPage() {
                         label={a.status}
                         tone={a.status === "حاضر" ? "good" : a.status === "متأخر" ? "warn" : "bad"}
                       />
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openAttendanceForm(a)}>
+                        تعديل
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -320,6 +440,63 @@ function FleetPage() {
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={addDriver} disabled={saving}>
               {saving ? "جارِ الحفظ..." : "حفظ السائق"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={addingAttendance} onOpenChange={setAddingAttendance}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">{attendanceForm.id ? "تعديل سجل حضور" : "سجل حضور يدوي"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">لتسجيل حضور بتاريخ سابق أو تصحيح سجل قائم</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">اسم السائق</Label>
+              <Input
+                value={attendanceForm.driverName}
+                onChange={(e) => setAttendanceForm({ ...attendanceForm, driverName: e.target.value })}
+                className="border-border bg-input/60"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">التاريخ (YYYY-MM-DD)</Label>
+              <Input
+                value={attendanceForm.date}
+                onChange={(e) => setAttendanceForm({ ...attendanceForm, date: e.target.value })}
+                className="border-border bg-input/60"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">وقت الحضور (HH:MM)</Label>
+                <Input
+                  value={attendanceForm.checkIn}
+                  onChange={(e) => setAttendanceForm({ ...attendanceForm, checkIn: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">وقت الانصراف (HH:MM)</Label>
+                <Input
+                  value={attendanceForm.checkOut}
+                  onChange={(e) => setAttendanceForm({ ...attendanceForm, checkOut: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الحالة (حاضر / متأخر / غائب)</Label>
+              <Input
+                value={attendanceForm.status}
+                onChange={(e) => setAttendanceForm({ ...attendanceForm, status: e.target.value })}
+                className="border-border bg-input/60"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitAttendance} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ السجل"}
             </Button>
           </DialogFooter>
         </DialogContent>

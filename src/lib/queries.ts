@@ -736,8 +736,15 @@ export interface DailyShift {
   id: string;
   driverId: string;
   driver: string;
+  busId: string | null;
+  bus: string;
+  routeId: string | null;
+  route: string;
+  shiftFrom: string;
+  shiftTo: string;
   date: string;
   status: string;
+  overtimeHours: number;
   overtimeAllowance: number;
   dailyAdvance: number;
   penalty: number;
@@ -747,7 +754,7 @@ export interface DailyShift {
 export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[]> {
   const { data, error } = await supabase
     .from("attendance")
-    .select("*, drivers(name)")
+    .select("*, drivers(name), buses(bus_code), routes(route_name)")
     .gte("date", `${monthPrefix}-01`)
     .lt("date", `${nextMonthPrefix(monthPrefix)}-01`)
     .order("date", { ascending: false });
@@ -756,8 +763,15 @@ export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[
     id: a.id,
     driverId: a.driver_id,
     driver: a.drivers?.name ?? "—",
+    busId: a.bus_id,
+    bus: a.buses?.bus_code ?? "—",
+    routeId: a.route_id,
+    route: a.routes?.route_name ?? "—",
+    shiftFrom: a.shift_from ?? "",
+    shiftTo: a.shift_to ?? "",
     date: a.date,
     status: a.status ?? "حاضر",
+    overtimeHours: Number(a.overtime_hours ?? 0),
     overtimeAllowance: Number(a.overtime_allowance ?? 0),
     dailyAdvance: Number(a.daily_advance ?? 0),
     penalty: Number(a.penalty ?? 0),
@@ -766,9 +780,15 @@ export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[
 }
 
 export async function upsertDailyShift(input: {
+  id?: string | undefined;
   driverName: string;
+  busCode: string;
+  routeName: string;
+  shiftFrom: string;
+  shiftTo: string;
   date: string;
   status: string;
+  overtimeHours: number;
   overtimeAllowance: number;
   dailyAdvance: number;
   penalty: number;
@@ -776,21 +796,45 @@ export async function upsertDailyShift(input: {
 }) {
   const { data: driver } = await supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle();
   if (!driver) throw new Error("لم يتم العثور على سائق بهذا الاسم");
+
+  let busId: string | null = null;
+  if (input.busCode.trim()) {
+    const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+    busId = bus?.id ?? null;
+  }
+  let routeId: string | null = null;
+  if (input.routeName.trim()) {
+    const { data: route } = await supabase.from("routes").select("id").eq("route_name", input.routeName).maybeSingle();
+    routeId = route?.id ?? null;
+  }
+
+  const payload = {
+    driver_id: driver.id,
+    bus_id: busId,
+    route_id: routeId,
+    shift_from: input.shiftFrom || null,
+    shift_to: input.shiftTo || null,
+    date: input.date,
+    status: input.status,
+    overtime_hours: input.overtimeHours,
+    overtime_allowance: input.overtimeAllowance,
+    daily_advance: input.dailyAdvance,
+    penalty: input.penalty,
+    notes: input.notes,
+  };
+
+  if (input.id) {
+    const { error } = await supabase.from("attendance").update(payload).eq("id", input.id);
+    if (error) throw error;
+    return;
+  }
+
   const { data: existing } = await supabase
     .from("attendance")
     .select("id")
     .eq("driver_id", driver.id)
     .eq("date", input.date)
     .maybeSingle();
-  const payload = {
-    driver_id: driver.id,
-    date: input.date,
-    status: input.status,
-    overtime_allowance: input.overtimeAllowance,
-    daily_advance: input.dailyAdvance,
-    penalty: input.penalty,
-    notes: input.notes,
-  };
   if (existing) {
     const { error } = await supabase.from("attendance").update(payload).eq("id", existing.id);
     if (error) throw error;
@@ -798,6 +842,11 @@ export async function upsertDailyShift(input: {
     const { error } = await supabase.from("attendance").insert(payload);
     if (error) throw error;
   }
+}
+
+export async function deleteDailyShift(id: string) {
+  const { error } = await supabase.from("attendance").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export interface DriverPayrollRow {

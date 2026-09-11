@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -112,5 +112,20 @@ describe("computeRunningBalance", () => {
 
   it("returns an empty array for a client with no transactions", () => {
     expect(computeRunningBalance([])).toEqual([]);
+  });
+});
+
+describe("nextMonthPrefix", () => {
+  it("advances within the same year", () => {
+    expect(nextMonthPrefix("2026-03")).toBe("2026-04");
+  });
+
+  it("rolls over from December into the next January", () => {
+    expect(nextMonthPrefix("2026-12")).toBe("2027-01");
+  });
+
+  it("pads single-digit months with a leading zero", () => {
+    expect(nextMonthPrefix("2026-01")).toBe("2026-02");
+    expect(nextMonthPrefix("2026-09")).toBe("2026-10");
   });
 });

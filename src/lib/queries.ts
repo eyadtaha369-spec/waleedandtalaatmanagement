@@ -524,12 +524,18 @@ export async function fetchPayroll(): Promise<Payslip[]> {
   }));
 }
 
+export function nextMonthPrefix(monthPrefix: string): string {
+  const [y, m] = monthPrefix.split("-").map(Number);
+  const next = new Date(Date.UTC(y!, m!, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export async function fetchAttendanceSummary(driverName: string, monthPrefix: string) {
   const { data, error } = await supabase
     .from("attendance")
     .select("status, drivers(name)")
     .gte("date", `${monthPrefix}-01`)
-    .lt("date", `${monthPrefix}-32`);
+    .lt("date", `${nextMonthPrefix(monthPrefix)}-01`);
   if (error) throw error;
   const rows = (data ?? []).filter((r: any) => r.drivers?.name === driverName);
   return {
@@ -743,7 +749,7 @@ export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[
     .from("attendance")
     .select("*, drivers(name)")
     .gte("date", `${monthPrefix}-01`)
-    .lt("date", `${monthPrefix}-32`)
+    .lt("date", `${nextMonthPrefix(monthPrefix)}-01`)
     .order("date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((a: any) => ({

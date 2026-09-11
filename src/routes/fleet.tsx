@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,34 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
-import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi, checkInDriver, checkOutDriver, upsertAttendanceRecord, bulkInsertBuses, bulkInsertDrivers } from "@/lib/queries";
+import {
+  fetchBuses,
+  fetchDrivers,
+  fetchAttendance,
+  addBus as addBusApi,
+  updateBus,
+  deleteBus,
+  addDriver as addDriverApi,
+  updateDriver,
+  deleteDriver,
+  checkInDriver,
+  checkOutDriver,
+  upsertAttendanceRecord,
+  deleteDailyShift,
+  bulkInsertBuses,
+  bulkInsertDrivers,
+} from "@/lib/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CsvImportDialog } from "@/components/csv-import-dialog";
 
@@ -34,6 +60,8 @@ export const Route = createFileRoute("/fleet")({
 
 const busTone = (s: Bus["status"]) => (s === "تعمل" ? "good" : s === "بالورشة" ? "warn" : "bad") as const;
 
+type DeleteTarget = { kind: "bus" | "driver" | "attendance"; id: string; label: string } | null;
+
 function FleetPage() {
   const [buses, setBuses] = useState<Bus[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -47,8 +75,8 @@ function FleetPage() {
   const [importingBuses, setImportingBuses] = useState(false);
   const [importingDrivers, setImportingDrivers] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
-  const [driverForm, setDriverForm] = useState({ name: "", phone: "", license: "", licenseExpiry: "" });
+  const [form, setForm] = useState({ id: "", code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
+  const [driverForm, setDriverForm] = useState({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
   const [attendanceBusy, setAttendanceBusy] = useState<string | null>(null);
   const [addingAttendance, setAddingAttendance] = useState(false);
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -60,6 +88,8 @@ function FleetPage() {
     checkOut: "",
     status: "حاضر",
   });
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadAll = async () => {
     setLoading(true);
@@ -88,38 +118,68 @@ function FleetPage() {
     [buses, query],
   );
 
-  const addBus = async () => {
+  const openAddBus = () => {
+    setForm({ id: "", code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
+    setAdding(true);
+  };
+
+  const openEditBus = (b: Bus) => {
+    setForm({ id: b.id, code: b.code, plate: b.plate, model: b.model, capacity: String(b.capacity), odometer: String(b.odometer), status: b.status });
+    setAdding(true);
+  };
+
+  const submitBus = async () => {
     if (!form.code.trim()) return;
     setSaving(true);
     try {
-      await addBusApi({
+      const payload = {
         code: form.code,
         plate: form.plate,
         model: form.model,
         capacity: Number(form.capacity) || 0,
         odometer: Number(form.odometer) || 0,
         status: form.status,
-      });
+      };
+      if (form.id) {
+        await updateBus(form.id, payload);
+      } else {
+        await addBusApi(payload);
+      }
       await loadAll();
-      setForm({ code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
+      setForm({ id: "", code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
       setAdding(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة الأتوبيس");
+      setError(e instanceof Error ? e.message : "تعذر حفظ الأتوبيس");
     } finally {
       setSaving(false);
     }
   };
 
-  const addDriver = async () => {
+  const openAddDriver = () => {
+    setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
+    setAddingDriver(true);
+  };
+
+  const openEditDriver = (d: Driver) => {
+    setDriverForm({ id: d.id, name: d.name, phone: d.phone, license: d.license, licenseExpiry: d.licenseExpiry === "—" ? "" : d.licenseExpiry });
+    setAddingDriver(true);
+  };
+
+  const submitDriver = async () => {
     if (!driverForm.name.trim()) return;
     setSaving(true);
     try {
-      await addDriverApi(driverForm);
+      const payload = { name: driverForm.name, phone: driverForm.phone, license: driverForm.license, licenseExpiry: driverForm.licenseExpiry };
+      if (driverForm.id) {
+        await updateDriver(driverForm.id, payload);
+      } else {
+        await addDriverApi(payload);
+      }
       await loadAll();
-      setDriverForm({ name: "", phone: "", license: "", licenseExpiry: "" });
+      setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
       setAddingDriver(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة السائق");
+      setError(e instanceof Error ? e.message : "تعذر حفظ السائق");
     } finally {
       setSaving(false);
     }
@@ -186,6 +246,22 @@ function FleetPage() {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.kind === "bus") await deleteBus(deleteTarget.id);
+      else if (deleteTarget.kind === "driver") await deleteDriver(deleteTarget.id);
+      else await deleteDailyShift(deleteTarget.id);
+      await loadAll();
+      setDeleteTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر الحذف");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <AppShell>
       <PageHeader title="إدارة الأسطول والسائقين" subtitle="الأتوبيسات، السائقون، وسجل الحضور اليومي" />
@@ -214,13 +290,13 @@ function FleetPage() {
                   <Button variant="outline" className="border-border" onClick={() => setImportingBuses(true)}>
                     استيراد CSV
                   </Button>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAdding(true)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddBus}>
                     <Plus className="ml-2 h-4 w-4" /> إضافة أتوبيس
                   </Button>
                 </>
               }
             />
-            <DataTable head={["الكود", "رقم اللوحة", "الموديل", "السعة", "قراءة العداد", "السائق", "الحالة", "تفاصيل"]}>
+            <DataTable head={["الكود", "رقم اللوحة", "الموديل", "السعة", "قراءة العداد", "السائق", "الحالة", "الإجراءات"]}>
               {loading ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
@@ -238,9 +314,22 @@ function FleetPage() {
                       <StatusPill label={b.status} tone={busTone(b.status)} />
                     </td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => setSelected(b)}>
-                        عرض
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => setSelected(b)}>
+                          عرض
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditBus(b)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "bus", id: b.id, label: `الأتوبيس ${b.code}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -261,13 +350,13 @@ function FleetPage() {
                   <Button variant="outline" className="border-border" onClick={() => setImportingDrivers(true)}>
                     استيراد CSV
                   </Button>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingDriver(true)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddDriver}>
                     <Plus className="ml-2 h-4 w-4" /> إضافة سائق
                   </Button>
                 </>
               }
             />
-            <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "الأتوبيس الأساسي", "الاحتياطي", "الوردية"]}>
+            <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "الأتوبيس الأساسي", "الاحتياطي", "الوردية", "الإجراءات"]}>
               {drivers
                 .filter((d) => d.name.includes(query) || query === "")
                 .map((d) => (
@@ -280,6 +369,21 @@ function FleetPage() {
                     <td className="px-4 py-3">{d.backupBus}</td>
                     <td className="px-4 py-3">
                       <StatusPill label={d.shift} tone={d.shift === "راحة" ? "muted" : "info"} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditDriver(d)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "driver", id: d.id, label: `السائق ${d.name}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -338,7 +442,7 @@ function FleetPage() {
                 </Button>
               }
             />
-            <DataTable head={["السائق", "التاريخ", "الحضور", "الانصراف", "الحالة", ""]}>
+            <DataTable head={["السائق", "التاريخ", "الحضور", "الانصراف", "الحالة", "الإجراءات"]}>
               {attendanceRows
                 .filter((a) => a.driver.includes(query) || query === "")
                 .map((a) => (
@@ -354,9 +458,19 @@ function FleetPage() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openAttendanceForm(a)}>
-                        تعديل
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openAttendanceForm(a)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "attendance", id: a.id, label: `حضور ${a.driver} بتاريخ ${a.date}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -401,7 +515,7 @@ function FleetPage() {
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة أتوبيس جديد</DialogTitle>
+            <DialogTitle className="text-primary">{form.id ? "تعديل بيانات الأتوبيس" : "إضافة أتوبيس جديد"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات الأتوبيس الأساسية</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -437,8 +551,8 @@ function FleetPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addBus} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الأتوبيس"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitBus} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : form.id ? "حفظ التعديلات" : "حفظ الأتوبيس"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -446,7 +560,7 @@ function FleetPage() {
       <Dialog open={addingDriver} onOpenChange={setAddingDriver}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة سائق جديد</DialogTitle>
+            <DialogTitle className="text-primary">{driverForm.id ? "تعديل بيانات السائق" : "إضافة سائق جديد"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات السائق الأساسية</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -468,8 +582,8 @@ function FleetPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addDriver} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ السائق"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitDriver} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : driverForm.id ? "حفظ التعديلات" : "حفظ السائق"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -564,6 +678,23 @@ function FleetPage() {
         onImport={bulkInsertDrivers}
         onDone={loadAll}
       />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent className="glass text-foreground" dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              سيتم حذف {deleteTarget?.label} نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">إلغاء</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "جارِ الحذف..." : "حذف"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }

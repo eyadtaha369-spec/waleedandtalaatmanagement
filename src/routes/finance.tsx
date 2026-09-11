@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { currency, type TreasuryEntry, type Expense, type Loan, type Payslip } from "@/lib/fleet-data";
 import {
   fetchTreasury,
@@ -23,9 +33,17 @@ import {
   fetchLoans,
   fetchPayroll,
   addTreasuryEntry,
+  updateTreasuryEntry,
+  deleteTreasuryEntry,
   addExpense,
+  updateExpense,
+  deleteExpense,
   addLoan,
+  updateLoan,
+  deleteLoan,
   addPayslip,
+  updatePayslip,
+  deletePayslip,
   fetchAttendanceSummary,
 } from "@/lib/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -42,6 +60,8 @@ export const Route = createFileRoute("/finance")({
   component: FinancePage,
 });
 
+type DeleteTarget = { kind: "treasury" | "expense" | "loan" | "payslip"; id: string; label: string } | null;
+
 function FinancePage() {
   const [treasury, setTreasury] = useState<TreasuryEntry[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -53,15 +73,17 @@ function FinancePage() {
   const [saving, setSaving] = useState(false);
 
   const [addingTreasury, setAddingTreasury] = useState(false);
-  const [treasuryForm, setTreasuryForm] = useState({ account: "", opening: "", deposits: "", withdrawals: "" });
+  const [treasuryForm, setTreasuryForm] = useState({ id: "", account: "", opening: "", deposits: "", withdrawals: "" });
   const [addingExpense, setAddingExpense] = useState(false);
-  const [expenseForm, setExpenseForm] = useState({ category: "", supplier: "", amount: "", supplierBalance: "" });
+  const [expenseForm, setExpenseForm] = useState({ id: "", category: "", supplier: "", amount: "", supplierBalance: "" });
   const [addingLoan, setAddingLoan] = useState(false);
-  const [loanForm, setLoanForm] = useState({ lender: "", total: "", paid: "", installment: "", nextDue: "" });
+  const [loanForm, setLoanForm] = useState({ id: "", lender: "", total: "", paid: "", installment: "", nextDue: "" });
   const [addingPayslip, setAddingPayslip] = useState(false);
-  const [payslipForm, setPayslipForm] = useState({ employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+  const [payslipForm, setPayslipForm] = useState({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
   const [payslipMonth, setPayslipMonth] = useState(new Date().toISOString().slice(0, 7));
   const [attendanceSummary, setAttendanceSummary] = useState<{ present: number; late: number; absent: number } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadAll = async () => {
     setLoading(true);
@@ -83,62 +105,76 @@ function FinancePage() {
     loadAll();
   }, []);
 
+  const openAddTreasury = () => {
+    setTreasuryForm({ id: "", account: "", opening: "", deposits: "", withdrawals: "" });
+    setAddingTreasury(true);
+  };
+  const openEditTreasury = (t: TreasuryEntry) => {
+    setTreasuryForm({ id: t.id, account: t.account, opening: String(t.opening), deposits: String(t.deposits), withdrawals: String(t.withdrawals) });
+    setAddingTreasury(true);
+  };
   const submitTreasury = async () => {
     if (!treasuryForm.account.trim()) return;
     setSaving(true);
     try {
-      await addTreasuryEntry({
-        account: treasuryForm.account,
-        opening: Number(treasuryForm.opening) || 0,
-        deposits: Number(treasuryForm.deposits) || 0,
-        withdrawals: Number(treasuryForm.withdrawals) || 0,
-      });
+      const payload = { account: treasuryForm.account, opening: Number(treasuryForm.opening) || 0, deposits: Number(treasuryForm.deposits) || 0, withdrawals: Number(treasuryForm.withdrawals) || 0 };
+      if (treasuryForm.id) await updateTreasuryEntry(treasuryForm.id, payload);
+      else await addTreasuryEntry(payload);
       await loadAll();
-      setTreasuryForm({ account: "", opening: "", deposits: "", withdrawals: "" });
+      setTreasuryForm({ id: "", account: "", opening: "", deposits: "", withdrawals: "" });
       setAddingTreasury(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة الرصيد");
+      setError(e instanceof Error ? e.message : "تعذر حفظ الرصيد");
     } finally {
       setSaving(false);
     }
   };
 
+  const openAddExpense = () => {
+    setExpenseForm({ id: "", category: "", supplier: "", amount: "", supplierBalance: "" });
+    setAddingExpense(true);
+  };
+  const openEditExpense = (e: Expense) => {
+    setExpenseForm({ id: e.id, category: e.category, supplier: e.supplier === "—" ? "" : e.supplier, amount: String(e.amount), supplierBalance: String(e.supplierBalance) });
+    setAddingExpense(true);
+  };
   const submitExpense = async () => {
     if (!expenseForm.category.trim()) return;
     setSaving(true);
     try {
-      await addExpense({
-        category: expenseForm.category,
-        supplier: expenseForm.supplier,
-        amount: Number(expenseForm.amount) || 0,
-        supplierBalance: Number(expenseForm.supplierBalance) || 0,
-      });
+      const payload = { category: expenseForm.category, supplier: expenseForm.supplier, amount: Number(expenseForm.amount) || 0, supplierBalance: Number(expenseForm.supplierBalance) || 0 };
+      if (expenseForm.id) await updateExpense(expenseForm.id, payload);
+      else await addExpense(payload);
       await loadAll();
-      setExpenseForm({ category: "", supplier: "", amount: "", supplierBalance: "" });
+      setExpenseForm({ id: "", category: "", supplier: "", amount: "", supplierBalance: "" });
       setAddingExpense(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة المصروف");
+      setError(e instanceof Error ? e.message : "تعذر حفظ المصروف");
     } finally {
       setSaving(false);
     }
   };
 
+  const openAddLoan = () => {
+    setLoanForm({ id: "", lender: "", total: "", paid: "", installment: "", nextDue: "" });
+    setAddingLoan(true);
+  };
+  const openEditLoan = (l: Loan) => {
+    setLoanForm({ id: l.id, lender: l.lender, total: String(l.total), paid: String(l.paid), installment: String(l.installment), nextDue: l.nextDue === "—" ? "" : l.nextDue });
+    setAddingLoan(true);
+  };
   const submitLoan = async () => {
     if (!loanForm.lender.trim()) return;
     setSaving(true);
     try {
-      await addLoan({
-        lender: loanForm.lender,
-        total: Number(loanForm.total) || 0,
-        paid: Number(loanForm.paid) || 0,
-        installment: Number(loanForm.installment) || 0,
-        nextDue: loanForm.nextDue,
-      });
+      const payload = { lender: loanForm.lender, total: Number(loanForm.total) || 0, paid: Number(loanForm.paid) || 0, installment: Number(loanForm.installment) || 0, nextDue: loanForm.nextDue };
+      if (loanForm.id) await updateLoan(loanForm.id, payload);
+      else await addLoan(payload);
       await loadAll();
-      setLoanForm({ lender: "", total: "", paid: "", installment: "", nextDue: "" });
+      setLoanForm({ id: "", lender: "", total: "", paid: "", installment: "", nextDue: "" });
       setAddingLoan(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة القرض");
+      setError(e instanceof Error ? e.message : "تعذر حفظ القرض");
     } finally {
       setSaving(false);
     }
@@ -153,26 +189,48 @@ function FinancePage() {
     }
   };
 
+  const openAddPayslip = () => {
+    setPayslipForm({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+    setAttendanceSummary(null);
+    setAddingPayslip(true);
+  };
+  const openEditPayslip = (p: Payslip) => {
+    setPayslipForm({ id: p.id, employeeName: p.employee, role: p.role === "—" ? "" : p.role, baseSalary: String(p.base), overtime: String(p.overtime), advances: String(p.advances), penalties: String(p.penalties) });
+    setAttendanceSummary(null);
+    setAddingPayslip(true);
+  };
   const submitPayslip = async () => {
     if (!payslipForm.employeeName.trim()) return;
     setSaving(true);
     try {
-      await addPayslip({
-        employeeName: payslipForm.employeeName,
-        role: payslipForm.role,
-        baseSalary: Number(payslipForm.baseSalary) || 0,
-        overtime: Number(payslipForm.overtime) || 0,
-        advances: Number(payslipForm.advances) || 0,
-        penalties: Number(payslipForm.penalties) || 0,
-      });
+      const payload = { employeeName: payslipForm.employeeName, role: payslipForm.role, baseSalary: Number(payslipForm.baseSalary) || 0, overtime: Number(payslipForm.overtime) || 0, advances: Number(payslipForm.advances) || 0, penalties: Number(payslipForm.penalties) || 0 };
+      if (payslipForm.id) await updatePayslip(payslipForm.id, payload);
+      else await addPayslip(payload);
       await loadAll();
-      setPayslipForm({ employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+      setPayslipForm({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
       setAttendanceSummary(null);
       setAddingPayslip(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة كشف المرتب");
+      setError(e instanceof Error ? e.message : "تعذر حفظ كشف المرتب");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.kind === "treasury") await deleteTreasuryEntry(deleteTarget.id);
+      else if (deleteTarget.kind === "expense") await deleteExpense(deleteTarget.id);
+      else if (deleteTarget.kind === "loan") await deleteLoan(deleteTarget.id);
+      else await deletePayslip(deleteTarget.id);
+      await loadAll();
+      setDeleteTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر الحذف");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -202,15 +260,15 @@ function FinancePage() {
               placeholder="ابحث باسم الحساب..."
               onExport={() => exportToExcel("الخزينة", treasury as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingTreasury(true)}>
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddTreasury}>
                   <Plus className="ml-2 h-4 w-4" /> إضافة رصيد
                 </Button>
               }
             />
-            <DataTable head={["التاريخ", "الحساب", "رصيد أول المدة", "إيداعات", "مسحوبات", "رصيد آخر المدة"]}>
+            <DataTable head={["التاريخ", "الحساب", "رصيد أول المدة", "إيداعات", "مسحوبات", "رصيد آخر المدة", "الإجراءات"]}>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+                  <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
                 </tr>
               ) : (
                 treasury
@@ -224,6 +282,21 @@ function FinancePage() {
                       <td className="px-4 py-3 text-destructive">{currency(t.withdrawals)}</td>
                       <td className="px-4 py-3 font-bold text-primary">
                         {currency(t.opening + t.deposits - t.withdrawals)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditTreasury(t)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteTarget({ kind: "treasury", id: t.id, label: `رصيد ${t.account} بتاريخ ${t.date}` })}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -240,12 +313,12 @@ function FinancePage() {
               placeholder="ابحث باسم المورد أو البند..."
               onExport={() => exportToExcel("المصروفات", expenses as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingExpense(true)}>
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddExpense}>
                   <Plus className="ml-2 h-4 w-4" /> إضافة مصروف
                 </Button>
               }
             />
-            <DataTable head={["التاريخ", "البند", "المورد", "المبلغ", "رصيد المورد"]}>
+            <DataTable head={["التاريخ", "البند", "المورد", "المبلغ", "رصيد المورد", "الإجراءات"]}>
               {expenses
                 .filter((e) => (e.supplier + e.category).includes(query) || query === "")
                 .map((e) => (
@@ -257,6 +330,21 @@ function FinancePage() {
                     <td className="px-4 py-3 font-bold">{e.supplier}</td>
                     <td className="px-4 py-3 text-destructive">{currency(e.amount)}</td>
                     <td className="px-4 py-3 text-warning">{currency(e.supplierBalance)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditExpense(e)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "expense", id: e.id, label: `مصروف ${e.category}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
             </DataTable>
@@ -271,7 +359,7 @@ function FinancePage() {
               placeholder="ابحث باسم الجهة المقرضة..."
               onExport={() => exportToExcel("القروض", loans as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingLoan(true)}>
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddLoan}>
                   <Plus className="ml-2 h-4 w-4" /> إضافة قرض
                 </Button>
               }
@@ -283,7 +371,22 @@ function FinancePage() {
                   const pct = l.total > 0 ? Math.round((l.paid / l.total) * 100) : 0;
                   return (
                     <div key={l.id} className="rounded-xl border border-border bg-secondary/25 p-4">
-                      <h3 className="font-bold">{l.lender}</h3>
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="font-bold">{l.lender}</h3>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-primary hover:bg-primary/10" onClick={() => openEditLoan(l)}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteTarget({ kind: "loan", id: l.id, label: `قرض ${l.lender}` })}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
                       <p className="mt-2 text-sm text-muted-foreground">إجمالي القرض: {currency(l.total)}</p>
                       <div className="mt-3">
                         <div className="mb-1 flex justify-between text-xs">
@@ -311,12 +414,12 @@ function FinancePage() {
               placeholder="ابحث باسم الموظف..."
               onExport={() => exportToExcel("المرتبات", payroll as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingPayslip(true)}>
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddPayslip}>
                   <Plus className="ml-2 h-4 w-4" /> إضافة كشف مرتب
                 </Button>
               }
             />
-            <DataTable head={["الموظف", "الوظيفة", "الأساسي", "الإضافي", "السُلف", "الجزاءات", "الصافي"]}>
+            <DataTable head={["الموظف", "الوظيفة", "الأساسي", "الإضافي", "السُلف", "الجزاءات", "الصافي", "الإجراءات"]}>
               {payroll
                 .filter((p) => p.employee.includes(query) || query === "")
                 .map((p) => (
@@ -330,6 +433,21 @@ function FinancePage() {
                     <td className="px-4 py-3 font-bold text-primary">
                       {currency(p.base + p.overtime - p.advances - p.penalties)}
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditPayslip(p)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "payslip", id: p.id, label: `كشف مرتب ${p.employee}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
             </DataTable>
@@ -340,7 +458,7 @@ function FinancePage() {
       <Dialog open={addingTreasury} onOpenChange={setAddingTreasury}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة رصيد يومي</DialogTitle>
+            <DialogTitle className="text-primary">{treasuryForm.id ? "تعديل رصيد يومي" : "إضافة رصيد يومي"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات الحساب لليوم</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -363,7 +481,7 @@ function FinancePage() {
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitTreasury} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الرصيد"}
+              {saving ? "جارِ الحفظ..." : treasuryForm.id ? "حفظ التعديلات" : "حفظ الرصيد"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -372,7 +490,7 @@ function FinancePage() {
       <Dialog open={addingExpense} onOpenChange={setAddingExpense}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة مصروف</DialogTitle>
+            <DialogTitle className="text-primary">{expenseForm.id ? "تعديل المصروف" : "إضافة مصروف"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات المصروف والمورد</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -408,7 +526,7 @@ function FinancePage() {
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitExpense} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ المصروف"}
+              {saving ? "جارِ الحفظ..." : expenseForm.id ? "حفظ التعديلات" : "حفظ المصروف"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -417,7 +535,7 @@ function FinancePage() {
       <Dialog open={addingLoan} onOpenChange={setAddingLoan}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة قرض</DialogTitle>
+            <DialogTitle className="text-primary">{loanForm.id ? "تعديل القرض" : "إضافة قرض"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات القرض والجهة المقرضة</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -441,7 +559,7 @@ function FinancePage() {
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitLoan} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ القرض"}
+              {saving ? "جارِ الحفظ..." : loanForm.id ? "حفظ التعديلات" : "حفظ القرض"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -450,7 +568,7 @@ function FinancePage() {
       <Dialog open={addingPayslip} onOpenChange={setAddingPayslip}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة كشف مرتب</DialogTitle>
+            <DialogTitle className="text-primary">{payslipForm.id ? "تعديل كشف المرتب" : "إضافة كشف مرتب"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات الموظف والمرتب لهذا الشهر</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -503,11 +621,28 @@ function FinancePage() {
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitPayslip} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الكشف"}
+              {saving ? "جارِ الحفظ..." : payslipForm.id ? "حفظ التعديلات" : "حفظ الكشف"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent className="glass text-foreground" dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              سيتم حذف {deleteTarget?.label} نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">إلغاء</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "جارِ الحذف..." : "حذف"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }

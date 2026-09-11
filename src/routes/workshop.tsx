@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { AlertTriangle, Plus } from "lucide-react";
+import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -15,15 +15,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { currency, type MaintenanceOrder, type InventoryItem, type FuelLog } from "@/lib/fleet-data";
 import {
   fetchMaintenanceOrders,
   fetchInventory,
   fetchFuelLogs,
   addMaintenanceOrder,
+  updateMaintenanceOrder,
+  deleteMaintenanceOrder,
   updateMaintenanceStatus,
   addInventoryItem,
+  updateInventoryItem,
+  deleteInventoryItem,
   addFuelLog,
+  updateFuelLog,
+  deleteFuelLog,
   bulkInsertInventory,
 } from "@/lib/queries";
 import { CsvImportDialog } from "@/components/csv-import-dialog";
@@ -42,6 +58,8 @@ export const Route = createFileRoute("/workshop")({
 
 const columns: MaintenanceOrder["status"][] = ["بانتظار القطع", "قيد التنفيذ", "مكتمل"];
 
+type DeleteTarget = { kind: "order" | "item" | "fuel"; id: string; label: string } | null;
+
 function WorkshopPage() {
   const [orders, setOrders] = useState<MaintenanceOrder[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -51,12 +69,14 @@ function WorkshopPage() {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ bus: "", issue: "", parts: "", cost: "" });
+  const [form, setForm] = useState({ id: "", bus: "", issue: "", parts: "", cost: "" });
   const [addingItem, setAddingItem] = useState(false);
   const [importingInventory, setImportingInventory] = useState(false);
-  const [itemForm, setItemForm] = useState({ name: "", code: "", stock: "", minStock: "", unitPrice: "" });
+  const [itemForm, setItemForm] = useState({ id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "" });
   const [addingFuel, setAddingFuel] = useState(false);
-  const [fuelForm, setFuelForm] = useState({ busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
+  const [fuelForm, setFuelForm] = useState({ id: "", busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadAll = async () => {
     setLoading(true);
@@ -77,21 +97,32 @@ function WorkshopPage() {
     loadAll();
   }, []);
 
-  const addOrder = async () => {
+  const openAddOrder = () => {
+    setForm({ id: "", bus: "", issue: "", parts: "", cost: "" });
+    setAdding(true);
+  };
+
+  const openEditOrder = (o: MaintenanceOrder) => {
+    setForm({ id: o.id, bus: o.bus === "—" ? "" : o.bus, issue: o.issue === "—" ? "" : o.issue, parts: o.parts === "—" ? "" : o.parts, cost: String(o.cost) });
+    setAdding(true);
+  };
+
+  const submitOrder = async () => {
     if (!form.bus.trim()) return;
     setSaving(true);
     try {
-      await addMaintenanceOrder({
-        busCode: form.bus,
-        issue: form.issue,
-        parts: form.parts,
-        cost: Number(form.cost) || 0,
-      });
+      const payload = { busCode: form.bus, issue: form.issue, parts: form.parts, cost: Number(form.cost) || 0 };
+      if (form.id) {
+        const order = orders.find((o) => o.id === form.id);
+        await updateMaintenanceOrder(form.id, { ...payload, status: order?.status ?? "بانتظار القطع" });
+      } else {
+        await addMaintenanceOrder(payload);
+      }
       await loadAll();
-      setForm({ bus: "", issue: "", parts: "", cost: "" });
+      setForm({ id: "", bus: "", issue: "", parts: "", cost: "" });
       setAdding(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة أمر الصيانة");
+      setError(e instanceof Error ? e.message : "تعذر حفظ أمر الصيانة");
     } finally {
       setSaving(false);
     }
@@ -109,46 +140,79 @@ function WorkshopPage() {
     }
   };
 
-  const addItem = async () => {
+  const openAddItem = () => {
+    setItemForm({ id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "" });
+    setAddingItem(true);
+  };
+
+  const openEditItem = (i: InventoryItem) => {
+    setItemForm({ id: i.id, name: i.name, code: i.code, stock: String(i.stock), minStock: String(i.minStock), unitPrice: String(i.unitPrice) });
+    setAddingItem(true);
+  };
+
+  const submitItem = async () => {
     if (!itemForm.name.trim()) return;
     setSaving(true);
     try {
-      await addInventoryItem({
-        name: itemForm.name,
-        code: itemForm.code,
-        stock: Number(itemForm.stock) || 0,
-        minStock: Number(itemForm.minStock) || 0,
-        unitPrice: Number(itemForm.unitPrice) || 0,
-      });
+      const payload = { name: itemForm.name, code: itemForm.code, stock: Number(itemForm.stock) || 0, minStock: Number(itemForm.minStock) || 0, unitPrice: Number(itemForm.unitPrice) || 0 };
+      if (itemForm.id) {
+        await updateInventoryItem(itemForm.id, payload);
+      } else {
+        await addInventoryItem(payload);
+      }
       await loadAll();
-      setItemForm({ name: "", code: "", stock: "", minStock: "", unitPrice: "" });
+      setItemForm({ id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "" });
       setAddingItem(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة الصنف");
+      setError(e instanceof Error ? e.message : "تعذر حفظ الصنف");
     } finally {
       setSaving(false);
     }
   };
 
-  const addFuel = async () => {
+  const openAddFuel = () => {
+    setFuelForm({ id: "", busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
+    setAddingFuel(true);
+  };
+
+  const openEditFuel = (f: FuelLog) => {
+    setFuelForm({ id: f.id, busCode: f.bus === "—" ? "" : f.bus, odoStart: String(f.odoStart), odoEnd: String(f.odoEnd), liters: String(f.liters), cost: String(f.cost), station: f.station === "—" ? "" : f.station });
+    setAddingFuel(true);
+  };
+
+  const submitFuel = async () => {
     if (!fuelForm.busCode.trim()) return;
     setSaving(true);
     try {
-      await addFuelLog({
-        busCode: fuelForm.busCode,
-        odoStart: Number(fuelForm.odoStart) || 0,
-        odoEnd: Number(fuelForm.odoEnd) || 0,
-        liters: Number(fuelForm.liters) || 0,
-        cost: Number(fuelForm.cost) || 0,
-        station: fuelForm.station,
-      });
+      const payload = { busCode: fuelForm.busCode, odoStart: Number(fuelForm.odoStart) || 0, odoEnd: Number(fuelForm.odoEnd) || 0, liters: Number(fuelForm.liters) || 0, cost: Number(fuelForm.cost) || 0, station: fuelForm.station };
+      if (fuelForm.id) {
+        await updateFuelLog(fuelForm.id, payload);
+      } else {
+        await addFuelLog(payload);
+      }
       await loadAll();
-      setFuelForm({ busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
+      setFuelForm({ id: "", busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
       setAddingFuel(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة سجل السولار");
+      setError(e instanceof Error ? e.message : "تعذر حفظ سجل السولار");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.kind === "order") await deleteMaintenanceOrder(deleteTarget.id);
+      else if (deleteTarget.kind === "item") await deleteInventoryItem(deleteTarget.id);
+      else await deleteFuelLog(deleteTarget.id);
+      await loadAll();
+      setDeleteTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر الحذف");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -177,7 +241,7 @@ function WorkshopPage() {
               placeholder="ابحث برقم الأمر أو كود الأتوبيس..."
               onExport={() => exportToExcel("أوامر الصيانة", orders as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAdding(true)}>
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddOrder}>
                   <Plus className="ml-2 h-4 w-4" /> أمر صيانة جديد
                 </Button>
               }
@@ -208,11 +272,24 @@ function WorkshopPage() {
                             <p className="mt-1 text-xs text-muted-foreground">قطع الغيار: {o.parts}</p>
                             <div className="mt-3 flex items-center justify-between">
                               <span className="text-sm font-bold text-warning">{currency(o.cost)}</span>
-                              {o.status !== "مكتمل" && (
-                                <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => move(o.id)}>
-                                  نقل للمرحلة التالية
+                              <div className="flex items-center gap-1">
+                                {o.status !== "مكتمل" && (
+                                  <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => move(o.id)}>
+                                    نقل للمرحلة التالية
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-primary hover:bg-primary/10" onClick={() => openEditOrder(o)}>
+                                  <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                              )}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteTarget({ kind: "order", id: o.id, label: `أمر الصيانة ${o.code}` })}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -236,13 +313,13 @@ function WorkshopPage() {
                   <Button variant="outline" className="border-border" onClick={() => setImportingInventory(true)}>
                     استيراد CSV
                   </Button>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingItem(true)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddItem}>
                     <Plus className="ml-2 h-4 w-4" /> إضافة صنف
                   </Button>
                 </>
               }
             />
-            <DataTable head={["الصنف", "الكود", "الرصيد الحالي", "الحد الأدنى", "سعر الوحدة", "الحالة"]}>
+            <DataTable head={["الصنف", "الكود", "الرصيد الحالي", "الحد الأدنى", "سعر الوحدة", "الحالة", "الإجراءات"]}>
               {inventory
                 .filter((i) => i.name.includes(query) || query === "")
                 .map((i) => (
@@ -261,6 +338,21 @@ function WorkshopPage() {
                         <StatusPill label="رصيد كافٍ" tone="good" />
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditItem(i)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "item", id: i.id, label: `الصنف ${i.name}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
             </DataTable>
@@ -275,12 +367,12 @@ function WorkshopPage() {
               placeholder="ابحث بكود الأتوبيس أو المحطة..."
               onExport={() => exportToExcel("سجل السولار", fuelLogs as unknown as Record<string, string | number>[])}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingFuel(true)}>
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddFuel}>
                   <Plus className="ml-2 h-4 w-4" /> إضافة سجل
                 </Button>
               }
             />
-            <DataTable head={["التاريخ", "الأتوبيس", "عداد البداية", "عداد النهاية", "المسافة", "الكمية (لتر)", "التكلفة", "المحطة"]}>
+            <DataTable head={["التاريخ", "الأتوبيس", "عداد البداية", "عداد النهاية", "المسافة", "الكمية (لتر)", "التكلفة", "المحطة", "الإجراءات"]}>
               {fuelLogs
                 .filter((f) => (f.bus + f.station).includes(query) || query === "")
                 .map((f) => (
@@ -293,6 +385,21 @@ function WorkshopPage() {
                     <td className="px-4 py-3">{f.liters}</td>
                     <td className="px-4 py-3 text-warning">{currency(f.cost)}</td>
                     <td className="px-4 py-3">{f.station}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditFuel(f)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "fuel", id: f.id, label: `سجل سولار ${f.bus} بتاريخ ${f.date}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
             </DataTable>
@@ -303,7 +410,7 @@ function WorkshopPage() {
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">أمر صيانة جديد</DialogTitle>
+            <DialogTitle className="text-primary">{form.id ? "تعديل أمر الصيانة" : "أمر صيانة جديد"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">سجل العطل وقطع الغيار المطلوبة</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -325,8 +432,8 @@ function WorkshopPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addOrder} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الأمر"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitOrder} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : form.id ? "حفظ التعديلات" : "حفظ الأمر"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -334,7 +441,7 @@ function WorkshopPage() {
       <Dialog open={addingItem} onOpenChange={setAddingItem}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة صنف للمخزن</DialogTitle>
+            <DialogTitle className="text-primary">{itemForm.id ? "تعديل بيانات الصنف" : "إضافة صنف للمخزن"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات الصنف والحد الأدنى</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -357,8 +464,8 @@ function WorkshopPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addItem} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الصنف"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitItem} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : itemForm.id ? "حفظ التعديلات" : "حفظ الصنف"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -367,7 +474,7 @@ function WorkshopPage() {
       <Dialog open={addingFuel} onOpenChange={setAddingFuel}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة سجل تزود بالسولار</DialogTitle>
+            <DialogTitle className="text-primary">{fuelForm.id ? "تعديل سجل السولار" : "إضافة سجل تزود بالسولار"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات التزود بالوقود</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -391,8 +498,8 @@ function WorkshopPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addFuel} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ السجل"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitFuel} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : fuelForm.id ? "حفظ التعديلات" : "حفظ السجل"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -411,6 +518,23 @@ function WorkshopPage() {
         onImport={bulkInsertInventory}
         onDone={loadAll}
       />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent className="glass text-foreground" dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              سيتم حذف {deleteTarget?.label} نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">إلغاء</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "جارِ الحذف..." : "حذف"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }

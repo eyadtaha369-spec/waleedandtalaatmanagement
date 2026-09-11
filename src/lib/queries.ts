@@ -970,3 +970,203 @@ export async function addLedgerTransaction(input: {
   });
   if (error) throw error;
 }
+
+// ---- Update / delete: every editable entity ----
+
+export async function updateBus(id: string, input: { code: string; plate: string; model: string; capacity: number; odometer: number; status?: string }) {
+  const { error } = await supabase.from("buses").update({
+    bus_code: input.code,
+    plate_number: input.plate,
+    model: input.model,
+    capacity: input.capacity,
+    odometer: input.odometer,
+    status: input.status ?? "تعمل",
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteBus(id: string) {
+  const { error } = await supabase.from("buses").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateDriver(id: string, input: { name: string; phone: string; license: string; licenseExpiry: string }) {
+  const { error } = await supabase.from("drivers").update({
+    name: input.name,
+    phone: input.phone,
+    license_type: input.license,
+    license_expiry: input.licenseExpiry || null,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteDriver(id: string) {
+  const { error } = await supabase.from("drivers").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateRoute(id: string, input: { name: string; pickupPoints: string; departure: string; arrival: string; busCode: string; seats: number }) {
+  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+  const { error } = await supabase.from("routes").update({
+    route_name: input.name,
+    pickup_points: input.pickupPoints,
+    departure_time: input.departure || null,
+    return_time: input.arrival || null,
+    bus_id: bus?.id ?? null,
+    seats: input.seats,
+  }).eq("id", id);
+  if (error) {
+    if (error.code === "23505") throw new Error(`الأتوبيس ${input.busCode} مخصص بالفعل لخط آخر`);
+    throw error;
+  }
+}
+export async function deleteRoute(id: string) {
+  const { error } = await supabase.from("routes").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateStudent(id: string, input: { name: string; guardianPhone: string; routeName: string }) {
+  const { data: route } = await supabase.from("routes").select("id").eq("route_name", input.routeName).maybeSingle();
+  const { error } = await supabase.from("students").update({
+    name: input.name,
+    parent_phone: input.guardianPhone,
+    route_id: route?.id ?? null,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteStudent(id: string) {
+  const { error } = await supabase.from("students").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateMaintenanceOrder(id: string, input: { busCode: string; issue: string; parts: string; cost: number; status: string }) {
+  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+  const { error } = await supabase.from("maintenance_orders").update({
+    bus_id: bus?.id ?? null,
+    issue_description: input.issue,
+    parts: input.parts,
+    total_cost: input.cost,
+    status: input.status,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteMaintenanceOrder(id: string) {
+  const { error } = await supabase.from("maintenance_orders").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateInventoryItem(id: string, input: { name: string; code: string; stock: number; minStock: number; unitPrice: number }) {
+  const { error } = await supabase.from("inventory").update({
+    name: input.name,
+    code: input.code,
+    stock: input.stock,
+    min_stock: input.minStock,
+    unit_price: input.unitPrice,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteInventoryItem(id: string) {
+  const { error } = await supabase.from("inventory").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateFuelLog(id: string, input: { busCode: string; odoStart: number; odoEnd: number; liters: number; cost: number; station: string }) {
+  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+  const { error } = await supabase.from("fuel_logs").update({
+    bus_id: bus?.id ?? null,
+    odo_start: input.odoStart,
+    odo_end: input.odoEnd,
+    liters: input.liters,
+    cost: input.cost,
+    station: input.station,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteFuelLog(id: string) {
+  const { error } = await supabase.from("fuel_logs").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateTreasuryEntry(id: string, input: { account: string; opening: number; deposits: number; withdrawals: number }) {
+  const { error } = await supabase.from("treasury").update({
+    account: input.account,
+    opening: input.opening,
+    deposits: input.deposits,
+    withdrawals: input.withdrawals,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteTreasuryEntry(id: string) {
+  const { error } = await supabase.from("treasury").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateExpense(id: string, input: { category: string; supplier: string; amount: number; supplierBalance: number }) {
+  const { error } = await supabase.from("expenses").update({
+    category: input.category,
+    supplier: input.supplier,
+    amount: input.amount,
+    supplier_balance: input.supplierBalance,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteExpense(id: string) {
+  const { error } = await supabase.from("expenses").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateLoan(id: string, input: { lender: string; total: number; paid: number; installment: number; nextDue: string }) {
+  const { error } = await supabase.from("loans").update({
+    lender: input.lender,
+    total: input.total,
+    paid: input.paid,
+    installment: input.installment,
+    next_due: input.nextDue || null,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteLoan(id: string) {
+  const { error } = await supabase.from("loans").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updatePayslip(id: string, input: { employeeName: string; role: string; baseSalary: number; overtime: number; advances: number; penalties: number }) {
+  let { data: staff } = await supabase.from("staff").select("id").eq("name", input.employeeName).maybeSingle();
+  if (!staff) {
+    const { data: newStaff, error: staffError } = await supabase
+      .from("staff")
+      .insert({ name: input.employeeName, role: input.role, base_salary: input.baseSalary })
+      .select("id")
+      .single();
+    if (staffError) throw staffError;
+    staff = newStaff;
+  } else {
+    await supabase.from("staff").update({ role: input.role, base_salary: input.baseSalary }).eq("id", staff.id);
+  }
+  const { error } = await supabase.from("payslips").update({
+    staff_id: staff!.id,
+    overtime: input.overtime,
+    advances: input.advances,
+    penalties: input.penalties,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deletePayslip(id: string) {
+  const { error } = await supabase.from("payslips").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateLedgerTransaction(id: string, input: { studentName: string; type: "مدين" | "دائن"; amount: number; method: string; notes: string }) {
+  const { data: student } = await supabase.from("students").select("id").eq("name", input.studentName).maybeSingle();
+  if (!student) throw new Error("لم يتم العثور على عميل بهذا الاسم");
+  const { error } = await supabase.from("payments").update({
+    student_id: student.id,
+    type: input.type,
+    amount: input.amount,
+    method: input.method,
+    notes: input.notes,
+  }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteLedgerTransaction(id: string) {
+  const { error } = await supabase.from("payments").delete().eq("id", id);
+  if (error) throw error;
+}

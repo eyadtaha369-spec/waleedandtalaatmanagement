@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { currency, type BusRoute, type Student } from "@/lib/fleet-data";
 import {
   fetchRoutes,
@@ -23,7 +33,11 @@ import {
   fetchPaymentHistory,
   addPayment,
   addRoute as addRouteApi,
+  updateRoute,
+  deleteRoute,
   addStudent as addStudentApi,
+  updateStudent,
+  deleteStudent,
   bulkInsertRoutes,
   bulkInsertStudents,
 } from "@/lib/queries";
@@ -41,6 +55,8 @@ export const Route = createFileRoute("/operations")({
   component: OperationsPage,
 });
 
+type DeleteTarget = { kind: "route" | "student"; id: string; label: string } | null;
+
 function OperationsPage() {
   const [routes, setRoutes] = useState<BusRoute[]>([]);
   const [studentsList, setStudentsList] = useState<Student[]>([]);
@@ -53,11 +69,13 @@ function OperationsPage() {
   const [payMethod, setPayMethod] = useState("");
   const [saving, setSaving] = useState(false);
   const [addingRoute, setAddingRoute] = useState(false);
-  const [routeForm, setRouteForm] = useState({ name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
+  const [routeForm, setRouteForm] = useState({ id: "", name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
   const [addingStudent, setAddingStudent] = useState(false);
-  const [studentForm, setStudentForm] = useState({ name: "", guardianPhone: "", routeName: "", monthly: "" });
+  const [studentForm, setStudentForm] = useState({ id: "", name: "", guardianPhone: "", routeName: "", monthly: "" });
   const [importingRoutes, setImportingRoutes] = useState(false);
   const [importingStudents, setImportingStudents] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadAll = async () => {
     setLoading(true);
@@ -105,33 +123,85 @@ function OperationsPage() {
     }
   };
 
-  const addRoute = async () => {
+  const openAddRoute = () => {
+    setRouteForm({ id: "", name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
+    setAddingRoute(true);
+  };
+
+  const openEditRoute = (r: BusRoute) => {
+    setRouteForm({
+      id: r.id,
+      name: r.name,
+      pickupPoints: r.pickupPoints === "—" ? "" : r.pickupPoints,
+      departure: r.departure === "—" ? "" : r.departure,
+      arrival: r.arrival === "—" ? "" : r.arrival,
+      busCode: r.bus === "—" ? "" : r.bus,
+      seats: String(r.seats),
+    });
+    setAddingRoute(true);
+  };
+
+  const submitRoute = async () => {
     if (!routeForm.name.trim()) return;
     setSaving(true);
     try {
-      await addRouteApi({ ...routeForm, seats: Number(routeForm.seats) || 0 });
+      const payload = { name: routeForm.name, pickupPoints: routeForm.pickupPoints, departure: routeForm.departure, arrival: routeForm.arrival, busCode: routeForm.busCode, seats: Number(routeForm.seats) || 0 };
+      if (routeForm.id) {
+        await updateRoute(routeForm.id, payload);
+      } else {
+        await addRouteApi(payload);
+      }
       await loadAll();
-      setRouteForm({ name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
+      setRouteForm({ id: "", name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
       setAddingRoute(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة الخط");
+      setError(e instanceof Error ? e.message : "تعذر حفظ الخط");
     } finally {
       setSaving(false);
     }
   };
 
-  const addStudent = async () => {
+  const openAddStudent = () => {
+    setStudentForm({ id: "", name: "", guardianPhone: "", routeName: "", monthly: "" });
+    setAddingStudent(true);
+  };
+
+  const openEditStudent = (s: Student) => {
+    setStudentForm({ id: s.id, name: s.name, guardianPhone: s.guardianPhone === "—" ? "" : s.guardianPhone, routeName: s.route === "—" ? "" : s.route, monthly: String(s.monthly) });
+    setAddingStudent(true);
+  };
+
+  const submitStudent = async () => {
     if (!studentForm.name.trim()) return;
     setSaving(true);
     try {
-      await addStudentApi({ ...studentForm, monthly: Number(studentForm.monthly) || 0 });
+      if (studentForm.id) {
+        await updateStudent(studentForm.id, { name: studentForm.name, guardianPhone: studentForm.guardianPhone, routeName: studentForm.routeName });
+      } else {
+        await addStudentApi({ name: studentForm.name, guardianPhone: studentForm.guardianPhone, routeName: studentForm.routeName, monthly: Number(studentForm.monthly) || 0 });
+      }
       await loadAll();
-      setStudentForm({ name: "", guardianPhone: "", routeName: "", monthly: "" });
+      setStudentForm({ id: "", name: "", guardianPhone: "", routeName: "", monthly: "" });
       setAddingStudent(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر إضافة الطالب");
+      setError(e instanceof Error ? e.message : "تعذر حفظ الطالب");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.kind === "route") await deleteRoute(deleteTarget.id);
+      else await deleteStudent(deleteTarget.id);
+      await loadAll();
+      setDeleteTarget(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر الحذف");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -163,7 +233,7 @@ function OperationsPage() {
                   <Button variant="outline" className="border-border" onClick={() => setImportingRoutes(true)}>
                     استيراد CSV
                   </Button>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingRoute(true)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddRoute}>
                     <Plus className="ml-2 h-4 w-4" /> إضافة خط
                   </Button>
                 </>
@@ -181,7 +251,20 @@ function OperationsPage() {
                       <div key={r.id} className="rounded-xl border border-border bg-secondary/25 p-4">
                         <div className="flex items-center justify-between gap-2">
                           <h3 className="font-bold text-foreground">{r.name}</h3>
-                          <StatusPill label={`الأتوبيس ${r.bus}`} tone="info" />
+                          <div className="flex items-center gap-1">
+                            <StatusPill label={`الأتوبيس ${r.bus}`} tone="info" />
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-primary hover:bg-primary/10" onClick={() => openEditRoute(r)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeleteTarget({ kind: "route", id: r.id, label: `الخط ${r.name}` })}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                         <p className="mt-2 text-sm text-muted-foreground">نقاط التجمع: {r.pickupPoints}</p>
                         <div className="mt-3 flex gap-4 text-sm">
@@ -217,13 +300,13 @@ function OperationsPage() {
                   <Button variant="outline" className="border-border" onClick={() => setImportingStudents(true)}>
                     استيراد CSV
                   </Button>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingStudent(true)}>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddStudent}>
                     <Plus className="ml-2 h-4 w-4" /> إضافة طالب
                   </Button>
                 </>
               }
             />
-            <DataTable head={["الطالب", "الخط", "هاتف ولي الأمر", "الاشتراك الشهري", "المسدد", "المتبقي", "الحالة", "السجل"]}>
+            <DataTable head={["الطالب", "الخط", "هاتف ولي الأمر", "الاشتراك الشهري", "المسدد", "المتبقي", "الحالة", "الإجراءات"]}>
               {loading ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
@@ -244,9 +327,22 @@ function OperationsPage() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => setStudent(s)}>
-                        المدفوعات
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => setStudent(s)}>
+                          المدفوعات
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditStudent(s)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "student", id: s.id, label: `الطالب ${s.name}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -280,7 +376,7 @@ function OperationsPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">المبلغ</Label>
-              <Input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="border-border bg-input/60" />
+              <Input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} type="number" className="border-border bg-input/60" />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">طريقة الدفع</Label>
@@ -297,7 +393,7 @@ function OperationsPage() {
       <Dialog open={addingRoute} onOpenChange={setAddingRoute}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة خط جديد</DialogTitle>
+            <DialogTitle className="text-primary">{routeForm.id ? "تعديل بيانات الخط" : "إضافة خط جديد"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات خط السير</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -321,8 +417,8 @@ function OperationsPage() {
             ))}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addRoute} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الخط"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitRoute} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : routeForm.id ? "حفظ التعديلات" : "حفظ الخط"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -331,16 +427,14 @@ function OperationsPage() {
       <Dialog open={addingStudent} onOpenChange={setAddingStudent}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">إضافة طالب جديد</DialogTitle>
+            <DialogTitle className="text-primary">{studentForm.id ? "تعديل بيانات الطالب" : "إضافة طالب جديد"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">أدخل بيانات الطالب والاشتراك</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            {[
-              ["name", "اسم الطالب"],
-              ["guardianPhone", "هاتف ولي الأمر", "tel"],
-              ["routeName", "اسم الخط"],
-              ["monthly", "الاشتراك الشهري", "number"],
-            ].map(([key, label, type]) => (
+            {(studentForm.id
+              ? [["name", "اسم الطالب"], ["guardianPhone", "هاتف ولي الأمر", "tel"], ["routeName", "اسم الخط"]]
+              : [["name", "اسم الطالب"], ["guardianPhone", "هاتف ولي الأمر", "tel"], ["routeName", "اسم الخط"], ["monthly", "الاشتراك الشهري", "number"]]
+            ).map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
@@ -351,10 +445,15 @@ function OperationsPage() {
                 />
               </div>
             ))}
+            {studentForm.id && (
+              <p className="text-xs text-muted-foreground">
+                لتعديل الاشتراك الشهري أو المبالغ المسددة استخدم "المدفوعات" أو صفحة كشف الحساب — التعديل هنا للبيانات الأساسية فقط.
+              </p>
+            )}
           </div>
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={addStudent} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "حفظ الطالب"}
+            <Button className="bg-primary text-primary-foreground" onClick={submitStudent} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : studentForm.id ? "حفظ التعديلات" : "حفظ الطالب"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -388,6 +487,23 @@ function OperationsPage() {
         onImport={bulkInsertStudents}
         onDone={loadAll}
       />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent className="glass text-foreground" dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              سيتم حذف {deleteTarget?.label} نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">إلغاء</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "جارِ الحذف..." : "حذف"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppShell>
   );
 }

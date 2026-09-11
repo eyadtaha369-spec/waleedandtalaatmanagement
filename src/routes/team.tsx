@@ -1,10 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill } from "@/components/ui-kit";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { fetchTeam, updateProfileRole, fetchMyProfile, type Profile } from "@/lib/queries";
+import { supabase } from "@/lib/supabase";
+import { createStaffAccount } from "@/lib/team-actions";
 
 export const Route = createFileRoute("/team")({
   head: () => ({
@@ -26,6 +40,13 @@ function TeamPage() {
   const [me, setMe] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [newAccount, setNewAccount] = useState<{ email: string; password: string; role: Profile["role"] }>({
+    email: "",
+    password: "",
+    role: "staff",
+  });
 
   const load = async () => {
     setLoading(true);
@@ -55,6 +76,26 @@ function TeamPage() {
     }
   };
 
+  const submitNewAccount = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const accessToken = session.session?.access_token;
+      if (!accessToken) throw new Error("جلسة غير صالحة");
+      await createStaffAccount({
+        data: { accessToken, email: newAccount.email, password: newAccount.password, role: newAccount.role as any },
+      });
+      await load();
+      setNewAccount({ email: "", password: "", role: "staff" });
+      setAdding(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إنشاء الحساب");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const isAdmin = me?.role === "admin";
 
   return (
@@ -69,11 +110,18 @@ function TeamPage() {
 
       {!isAdmin && !loading && (
         <p className="mb-4 rounded-lg border border-primary/40 bg-primary/10 p-3 text-sm text-primary">
-          يمكنك عرض الفريق فقط — تعديل الصلاحيات متاح للمدير.
+          يمكنك عرض الفريق فقط — تعديل الصلاحيات وإضافة حسابات متاح للمدير.
         </p>
       )}
 
       <Panel title="أعضاء الفريق">
+        {isAdmin && (
+          <div className="mb-4 flex justify-end">
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAdding(true)}>
+              <Plus className="ml-2 h-4 w-4" /> إضافة حساب
+            </Button>
+          </div>
+        )}
         <DataTable head={["البريد الإلكتروني", "الصلاحية"]}>
           {loading ? (
             <tr>
@@ -106,6 +154,59 @@ function TeamPage() {
           )}
         </DataTable>
       </Panel>
+
+      <Dialog open={adding} onOpenChange={setAdding}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة حساب جديد</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              التسجيل الذاتي معطّل — الحسابات تُنشأ من هنا فقط
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">البريد الإلكتروني</Label>
+              <Input
+                value={newAccount.email}
+                onChange={(e) => setNewAccount({ ...newAccount, email: e.target.value })}
+                type="email"
+                className="border-border bg-input/60"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">كلمة المرور المبدئية</Label>
+              <Input
+                value={newAccount.password}
+                onChange={(e) => setNewAccount({ ...newAccount, password: e.target.value })}
+                type="password"
+                className="border-border bg-input/60"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الصلاحية</Label>
+              <Select value={newAccount.role} onValueChange={(v) => setNewAccount({ ...newAccount, role: v as Profile["role"] })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(roleLabels) as Profile["role"][])
+                    .filter((r) => r !== "pending")
+                    .map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {roleLabels[r]}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitNewAccount} disabled={saving}>
+              {saving ? "جارِ الإنشاء..." : "إنشاء الحساب"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

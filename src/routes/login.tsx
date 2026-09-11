@@ -16,7 +16,7 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const navigate = useNavigate();
   const { session, loading: authLoading } = useAuth();
-  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
+  const [mode, setMode] = useState<"signin" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -38,11 +38,6 @@ function LoginPage() {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
         navigate({ to: "/" });
-      } else if (mode === "signup") {
-        const { error: err } = await supabase.auth.signUp({ email, password });
-        if (err) throw err;
-        setInfo("تم إنشاء الحساب. سيحتاج للموافقة من أحد المديرين قبل أن يتمكن من الدخول للبيانات. إذا طُلب تأكيد البريد الإلكتروني تحقق من صندوق الوارد أولًا.");
-        setMode("signin");
       } else {
         const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/reset-password`,
@@ -63,7 +58,7 @@ function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6">
         <h1 className="text-center text-xl font-extrabold text-primary">وليد وطلعت</h1>
         <p className="mt-1 text-center text-sm text-muted-foreground">
-          {mode === "signin" ? "تسجيل الدخول إلى لوحة الإدارة" : mode === "signup" ? "إنشاء حساب جديد" : "استعادة كلمة المرور"}
+          {mode === "signin" ? "تسجيل الدخول إلى لوحة الإدارة" : "استعادة كلمة المرور"}
         </p>
 
         {error && (
@@ -91,27 +86,19 @@ function LoginPage() {
         </div>
 
         <Button className="mt-5 w-full bg-primary text-primary-foreground" onClick={submit} disabled={submitting}>
-          {submitting
-            ? "جارِ التنفيذ..."
-            : mode === "signin"
-              ? "تسجيل الدخول"
-              : mode === "signup"
-                ? "إنشاء الحساب"
-                : "إرسال رابط إعادة التعيين"}
+          {submitting ? "جارِ التنفيذ..." : mode === "signin" ? "تسجيل الدخول" : "إرسال رابط إعادة التعيين"}
         </Button>
 
-        {mode === "signin" && (
-          <button className="mt-3 w-full text-center text-xs text-muted-foreground hover:text-primary" onClick={() => setMode("forgot")}>
-            نسيت كلمة المرور؟
-          </button>
-        )}
-
         <button
-          className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-primary"
-          onClick={() => setMode(mode === "signup" ? "signin" : "signup")}
+          className="mt-3 w-full text-center text-xs text-muted-foreground hover:text-primary"
+          onClick={() => setMode(mode === "signin" ? "forgot" : "signin")}
         >
-          {mode === "signup" ? "لديك حساب بالفعل؟ تسجيل الدخول" : "ليس لديك حساب؟ إنشاء حساب جديد"}
+          {mode === "signin" ? "نسيت كلمة المرور؟" : "الرجوع لتسجيل الدخول"}
         </button>
+
+        <p className="mt-4 text-center text-[11px] text-muted-foreground">
+          الحسابات تُنشأ بواسطة المدير فقط — تواصل مع مديرك للحصول على حساب.
+        </p>
       </div>
     </div>
   );

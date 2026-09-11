@@ -1,17 +1,19 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Bus,
   Coins,
   LayoutDashboard,
+  LogOut,
   Menu,
   Route as RouteIcon,
   Search,
   Wrench,
   Bell,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/lib/auth";
 import brandLogo from "@/assets/brand-logo.jpeg.asset.json";
 
 const nav = [
@@ -25,6 +27,22 @@ const nav = [
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(true);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { session, loading, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!loading && !session) {
+      navigate({ to: "/login" });
+    }
+  }, [loading, session, navigate]);
+
+  if (loading || !session) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">جارِ التحقق من الدخول...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen w-full" dir="rtl">
@@ -99,6 +117,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               <p className="text-sm font-bold">م. وليد طلعت</p>
               <p className="text-[11px] text-muted-foreground">مدير التشغيل</p>
             </div>
+            <button
+              onClick={() => signOut()}
+              className="rounded-lg border border-border p-2 text-destructive hover:bg-destructive/10"
+              aria-label="تسجيل الخروج"
+              title="تسجيل الخروج"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
           </div>
         </header>
 

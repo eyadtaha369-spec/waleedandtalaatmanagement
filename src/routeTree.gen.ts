@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FinanceRouteImport } from './routes/finance'
 import { Route as FleetRouteImport } from './routes/fleet'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
 import { Route as WorkshopRouteImport } from './routes/workshop'
 
@@ -30,6 +31,11 @@ const FleetRoute = FleetRouteImport.update({
   path: '/fleet',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OperationsRoute = OperationsRouteImport.update({
   id: '/operations',
   path: '/operations',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/workshop': typeof WorkshopRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/workshop': typeof WorkshopRoute
 }
@@ -60,21 +68,31 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/finance' | '/fleet' | '/operations' | '/workshop'
+  fullPaths:
+    '/' | '/finance' | '/fleet' | '/login' | '/operations' | '/workshop'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/finance' | '/fleet' | '/operations' | '/workshop'
-  id: '__root__' | '/' | '/finance' | '/fleet' | '/operations' | '/workshop'
+  to: '/' | '/finance' | '/fleet' | '/login' | '/operations' | '/workshop'
+  id:
+    | '__root__'
+    | '/'
+    | '/finance'
+    | '/fleet'
+    | '/login'
+    | '/operations'
+    | '/workshop'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FinanceRoute: typeof FinanceRoute
   FleetRoute: typeof FleetRoute
+  LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
   WorkshopRoute: typeof WorkshopRoute
 }
@@ -102,6 +120,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FleetRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/operations': {
       id: '/operations'
       path: '/operations'
@@ -123,6 +148,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FinanceRoute: FinanceRoute,
   FleetRoute: FleetRoute,
+  LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
   WorkshopRoute: WorkshopRoute,
 }

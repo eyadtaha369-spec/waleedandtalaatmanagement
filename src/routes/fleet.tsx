@@ -396,14 +396,15 @@ function FleetPage() {
               ["code", "كود الأتوبيس (WV-007)"],
               ["plate", "رقم اللوحة"],
               ["model", "الموديل"],
-              ["capacity", "السعة"],
-              ["odometer", "قراءة العداد"],
-            ].map(([key, label]) => (
+              ["capacity", "السعة", "number"],
+              ["odometer", "قراءة العداد", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={form[key as keyof typeof form]}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -438,15 +439,16 @@ function FleetPage() {
           <div className="grid gap-3">
             {[
               ["name", "الاسم"],
-              ["phone", "الهاتف"],
+              ["phone", "الهاتف", "tel"],
               ["license", "نوع الرخصة"],
-              ["licenseExpiry", "تاريخ انتهاء الرخصة (YYYY-MM-DD)"],
-            ].map(([key, label]) => (
+              ["licenseExpiry", "تاريخ انتهاء الرخصة (YYYY-MM-DD)", "date"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={driverForm[key as keyof typeof driverForm]}
                   onChange={(e) => setDriverForm({ ...driverForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>

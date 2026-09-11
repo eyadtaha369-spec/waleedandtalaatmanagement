@@ -303,13 +303,14 @@ function WorkshopPage() {
               ["bus", "كود الأتوبيس"],
               ["issue", "وصف العطل"],
               ["parts", "قطع الغيار"],
-              ["cost", "التكلفة الإجمالية"],
-            ].map(([key, label]) => (
+              ["cost", "التكلفة الإجمالية", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={form[key as keyof typeof form]}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -332,15 +333,16 @@ function WorkshopPage() {
             {[
               ["name", "اسم الصنف"],
               ["code", "الكود"],
-              ["stock", "الرصيد الحالي"],
-              ["minStock", "الحد الأدنى"],
-              ["unitPrice", "سعر الوحدة"],
-            ].map(([key, label]) => (
+              ["stock", "الرصيد الحالي", "number"],
+              ["minStock", "الحد الأدنى", "number"],
+              ["unitPrice", "سعر الوحدة", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={itemForm[key as keyof typeof itemForm]}
                   onChange={(e) => setItemForm({ ...itemForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -363,17 +365,18 @@ function WorkshopPage() {
           <div className="grid gap-3">
             {[
               ["busCode", "كود الأتوبيس"],
-              ["odoStart", "عداد البداية"],
-              ["odoEnd", "عداد النهاية"],
-              ["liters", "الكمية (لتر)"],
-              ["cost", "التكلفة"],
+              ["odoStart", "عداد البداية", "number"],
+              ["odoEnd", "عداد النهاية", "number"],
+              ["liters", "الكمية (لتر)", "number"],
+              ["cost", "التكلفة", "number"],
               ["station", "المحطة"],
-            ].map(([key, label]) => (
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={fuelForm[key as keyof typeof fuelForm]}
                   onChange={(e) => setFuelForm({ ...fuelForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>

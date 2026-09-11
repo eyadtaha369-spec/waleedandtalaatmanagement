@@ -525,7 +525,7 @@ export async function fetchAttendanceSummary(driverName: string, monthPrefix: st
 export interface Profile {
   id: string;
   email: string;
-  role: "admin" | "accountant" | "dispatcher" | "staff";
+  role: "admin" | "accountant" | "dispatcher" | "staff" | "pending";
 }
 
 export async function fetchMyProfile(): Promise<Profile | null> {
@@ -577,3 +577,27 @@ export async function fetchAuditLog(limit = 100): Promise<AuditEntry[]> {
   }));
 }
 
+// ---- Global search ----
+
+export interface SearchResult {
+  label: string;
+  sublabel: string;
+  page: "/fleet" | "/operations" | "/workshop";
+}
+
+export async function globalSearch(term: string): Promise<SearchResult[]> {
+  if (!term.trim()) return [];
+  const like = `%${term}%`;
+  const [buses, drivers, students, routes] = await Promise.all([
+    supabase.from("buses").select("bus_code, plate_number").or(`bus_code.ilike.${like},plate_number.ilike.${like}`).limit(5),
+    supabase.from("drivers").select("name, phone").ilike("name", like).limit(5),
+    supabase.from("students").select("name, parent_phone").ilike("name", like).limit(5),
+    supabase.from("routes").select("route_name, pickup_points").ilike("route_name", like).limit(5),
+  ]);
+  const results: SearchResult[] = [];
+  for (const b of buses.data ?? []) results.push({ label: b.bus_code, sublabel: `أتوبيس • ${b.plate_number ?? "—"}`, page: "/fleet" });
+  for (const d of drivers.data ?? []) results.push({ label: d.name, sublabel: `سائق • ${d.phone ?? "—"}`, page: "/fleet" });
+  for (const s of students.data ?? []) results.push({ label: s.name, sublabel: `طالب • ${s.parent_phone ?? "—"}`, page: "/operations" });
+  for (const r of routes.data ?? []) results.push({ label: r.route_name, sublabel: `خط سير`, page: "/operations" });
+  return results;
+}

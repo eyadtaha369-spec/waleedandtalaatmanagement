@@ -346,15 +346,16 @@ function FinancePage() {
           <div className="grid gap-3">
             {[
               ["account", "اسم الحساب"],
-              ["opening", "رصيد أول المدة (للحساب الجديد فقط — يُحسب تلقائيًا بعد أول سجل)"],
-              ["deposits", "إيداعات"],
-              ["withdrawals", "مسحوبات"],
-            ].map(([key, label]) => (
+              ["opening", "رصيد أول المدة (للحساب الجديد فقط — يُحسب تلقائيًا بعد أول سجل)", "number"],
+              ["deposits", "إيداعات", "number"],
+              ["withdrawals", "مسحوبات", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={treasuryForm[key as keyof typeof treasuryForm]}
                   onChange={(e) => setTreasuryForm({ ...treasuryForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -391,14 +392,15 @@ function FinancePage() {
             </div>
             {[
               ["supplier", "المورد"],
-              ["amount", "المبلغ"],
-              ["supplierBalance", "رصيد المورد بعد الدفع"],
-            ].map(([key, label]) => (
+              ["amount", "المبلغ", "number"],
+              ["supplierBalance", "رصيد المورد بعد الدفع", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={expenseForm[key as keyof typeof expenseForm]}
                   onChange={(e) => setExpenseForm({ ...expenseForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -421,16 +423,17 @@ function FinancePage() {
           <div className="grid gap-3">
             {[
               ["lender", "الجهة المقرضة"],
-              ["total", "إجمالي القرض"],
-              ["paid", "المسدد حتى الآن"],
-              ["installment", "القسط الشهري"],
-              ["nextDue", "تاريخ الاستحقاق القادم (YYYY-MM-DD)"],
-            ].map(([key, label]) => (
+              ["total", "إجمالي القرض", "number"],
+              ["paid", "المسدد حتى الآن", "number"],
+              ["installment", "القسط الشهري", "number"],
+              ["nextDue", "تاريخ الاستحقاق القادم (YYYY-MM-DD)", "date"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={loanForm[key as keyof typeof loanForm]}
                   onChange={(e) => setLoanForm({ ...loanForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -454,12 +457,13 @@ function FinancePage() {
             {[
               ["employeeName", "اسم الموظف"],
               ["role", "الوظيفة"],
-            ].map(([key, label]) => (
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={payslipForm[key as keyof typeof payslipForm]}
                   onChange={(e) => setPayslipForm({ ...payslipForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -481,16 +485,17 @@ function FinancePage() {
               </p>
             )}
             {[
-              ["baseSalary", "الأساسي"],
-              ["overtime", "الإضافي"],
-              ["advances", "السُلف"],
-              ["penalties", "الجزاءات"],
-            ].map(([key, label]) => (
+              ["baseSalary", "الأساسي", "number"],
+              ["overtime", "الإضافي", "number"],
+              ["advances", "السُلف", "number"],
+              ["penalties", "الجزاءات", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={payslipForm[key as keyof typeof payslipForm]}
                   onChange={(e) => setPayslipForm({ ...payslipForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>

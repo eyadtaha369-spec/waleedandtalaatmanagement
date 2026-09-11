@@ -12,11 +12,19 @@ import {
   Wrench,
   Bell,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth";
-import { fetchMyProfile, fetchAlerts, type Profile } from "@/lib/queries";
+import { fetchMyProfile, fetchAlerts, globalSearch, type Profile, type AlertRow, type SearchResult } from "@/lib/queries";
 import brandLogo from "@/assets/brand-logo.jpeg.asset.json";
 
 const nav = [
@@ -34,6 +42,7 @@ const roleLabels: Record<string, string> = {
   accountant: "محاسب",
   dispatcher: "منسق تشغيل",
   staff: "موظف",
+  pending: "بانتظار الموافقة",
 };
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -42,7 +51,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { session, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [alertCount, setAlertCount] = useState(0);
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!loading && !session) {
@@ -53,14 +66,52 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (session) {
       fetchMyProfile().then(setProfile).catch(() => setProfile(null));
-      fetchAlerts().then((a) => setAlertCount(a.length)).catch(() => setAlertCount(0));
+      fetchAlerts().then(setAlerts).catch(() => setAlerts([]));
     }
   }, [session]);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!searchTerm.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        setSearchResults(await globalSearch(searchTerm));
+        setSearchOpen(true);
+      } catch {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [searchTerm]);
 
   if (loading || !session) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">جارِ التحقق من الدخول...</p>
+      </div>
+    );
+  }
+
+  if (profile && profile.role === "pending") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4" dir="rtl">
+        <div className="max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <h1 className="text-lg font-extrabold text-primary">حسابك بانتظار الموافقة</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            تم إنشاء حسابك بنجاح، لكن يجب أن يوافق أحد المديرين على صلاحياتك قبل أن تتمكن من الدخول إلى البيانات.
+          </p>
+          <button
+            onClick={() => signOut()}
+            className="mt-5 rounded-lg border border-border px-4 py-2 text-sm font-semibold text-destructive hover:bg-destructive/10"
+          >
+            تسجيل الخروج
+          </button>
+        </div>
       </div>
     );
   }
@@ -125,19 +176,62 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="relative hidden max-w-md flex-1 sm:block">
             <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onFocus={() => searchResults.length > 0 && setSearchOpen(true)}
+              onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
               placeholder="بحث عام: كود أتوبيس، سائق، طالب، خط سير..."
               className="border-border bg-input/60 pr-9 placeholder:text-muted-foreground"
             />
+            {searchOpen && searchResults.length > 0 && (
+              <div className="absolute top-full mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
+                {searchResults.map((r, i) => (
+                  <Link
+                    key={i}
+                    to={r.page}
+                    className="block border-b border-border px-3 py-2 text-sm last:border-0 hover:bg-secondary/40"
+                    onClick={() => setSearchOpen(false)}
+                  >
+                    <p className="font-bold">{r.label}</p>
+                    <p className="text-xs text-muted-foreground">{r.sublabel}</p>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
           <div className="mr-auto flex items-center gap-3">
-            <span className="relative rounded-lg border border-border p-2">
-              <Bell className="h-5 w-5 text-primary" />
-              {alertCount > 0 && (
-                <span className="absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
-                  {alertCount}
-                </span>
-              )}
-            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="relative rounded-lg border border-border p-2">
+                  <Bell className="h-5 w-5 text-primary" />
+                  {alerts.length > 0 && (
+                    <span className="absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                      {alerts.length}
+                    </span>
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel>التنبيهات</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {alerts.length === 0 ? (
+                  <p className="px-2 py-3 text-center text-xs text-muted-foreground">لا توجد تنبيهات حالياً</p>
+                ) : (
+                  alerts.slice(0, 8).map((a) => (
+                    <DropdownMenuItem key={a.id} className="whitespace-normal text-xs">
+                      <span className={cn("ml-2 shrink-0 font-bold", a.level === "عاجل" ? "text-destructive" : "text-warning")}>
+                        [{a.type}]
+                      </span>
+                      {a.text}
+                    </DropdownMenuItem>
+                  ))
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link to="/" className="justify-center text-xs text-primary">عرض كل التنبيهات في اللوحة الرئيسية</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div className="hidden text-left sm:block">
               <p className="text-sm font-bold">{session.user.email}</p>
               <p className="text-[11px] text-muted-foreground">{profile ? roleLabels[profile.role] : "—"}</p>

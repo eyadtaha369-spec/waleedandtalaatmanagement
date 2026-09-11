@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill } from "@/components/ui-kit";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { fetchTeam, updateProfileRole, fetchMyProfile, type Profile } from "@/lib/queries";
 
 export const Route = createFileRoute("/team")({
@@ -13,10 +14,11 @@ export const Route = createFileRoute("/team")({
 });
 
 const roleLabels: Record<Profile["role"], string> = {
+  pending: "بانتظار الموافقة",
   admin: "مدير (صلاحيات كاملة)",
   accountant: "محاسب (مالية وتشغيل)",
   dispatcher: "منسق تشغيل (بدون مالية)",
-  staff: "موظف (عرض فقط للأساسيات)",
+  staff: "موظف (عرض فقط)",
 };
 
 function TeamPage() {
@@ -30,7 +32,7 @@ function TeamPage() {
     setError(null);
     try {
       const [t, m] = await Promise.all([fetchTeam(), fetchMyProfile()]);
-      setTeam(t);
+      setTeam([...t].sort((a, b) => (a.role === "pending" ? -1 : b.role === "pending" ? 1 : 0)));
       setMe(m);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل بيانات الفريق");
@@ -79,7 +81,7 @@ function TeamPage() {
             </tr>
           ) : (
             team.map((p) => (
-              <tr key={p.id} className="transition-colors hover:bg-secondary/30">
+              <tr key={p.id} className={cn("transition-colors hover:bg-secondary/30", p.role === "pending" && "bg-destructive/5")}>
                 <td className="px-4 py-3 font-bold">{p.email}</td>
                 <td className="px-4 py-3">
                   {isAdmin ? (
@@ -96,7 +98,7 @@ function TeamPage() {
                       </SelectContent>
                     </Select>
                   ) : (
-                    <StatusPill label={roleLabels[p.role]} tone="info" />
+                    <StatusPill label={roleLabels[p.role]} tone={p.role === "pending" ? "bad" : "info"} />
                   )}
                 </td>
               </tr>

@@ -289,16 +289,17 @@ function OperationsPage() {
             {[
               ["name", "اسم الخط"],
               ["pickupPoints", "نقاط التجمع"],
-              ["departure", "موعد التحرك (HH:MM)"],
-              ["arrival", "موعد الوصول (HH:MM)"],
+              ["departure", "موعد التحرك (HH:MM)", "time"],
+              ["arrival", "موعد الوصول (HH:MM)", "time"],
               ["busCode", "كود الأتوبيس"],
-              ["seats", "عدد المقاعد"],
-            ].map(([key, label]) => (
+              ["seats", "عدد المقاعد", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={routeForm[key as keyof typeof routeForm]}
                   onChange={(e) => setRouteForm({ ...routeForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>
@@ -321,15 +322,16 @@ function OperationsPage() {
           <div className="grid gap-3">
             {[
               ["name", "اسم الطالب"],
-              ["guardianPhone", "هاتف ولي الأمر"],
+              ["guardianPhone", "هاتف ولي الأمر", "tel"],
               ["routeName", "اسم الخط"],
-              ["monthly", "الاشتراك الشهري"],
-            ].map(([key, label]) => (
+              ["monthly", "الاشتراك الشهري", "number"],
+            ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
                 <Input
                   value={studentForm[key as keyof typeof studentForm]}
                   onChange={(e) => setStudentForm({ ...studentForm, [key]: e.target.value })}
+                  type={type || "text"}
                   className="border-border bg-input/60"
                 />
               </div>

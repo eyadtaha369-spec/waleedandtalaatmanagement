@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
-import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi } from "@/lib/queries";
+import { fetchBuses, fetchDrivers, fetchAttendance, addBus as addBusApi, addDriver as addDriverApi } from "@/lib/queries";
 
 export const Route = createFileRoute("/fleet")({
   head: () => ({
@@ -41,8 +41,10 @@ function FleetPage() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Bus | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addingDriver, setAddingDriver] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ code: "", plate: "", model: "", capacity: "", odometer: "" });
+  const [driverForm, setDriverForm] = useState({ name: "", phone: "", license: "", licenseExpiry: "" });
 
   const loadAll = async () => {
     setLoading(true);
@@ -87,6 +89,21 @@ function FleetPage() {
       setAdding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر إضافة الأتوبيس");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addDriver = async () => {
+    if (!driverForm.name.trim()) return;
+    setSaving(true);
+    try {
+      await addDriverApi(driverForm);
+      await loadAll();
+      setDriverForm({ name: "", phone: "", license: "", licenseExpiry: "" });
+      setAddingDriver(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة السائق");
     } finally {
       setSaving(false);
     }
@@ -157,6 +174,11 @@ function FleetPage() {
               onQuery={setQuery}
               placeholder="ابحث باسم السائق..."
               onExport={() => exportToExcel("السائقون", drivers as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingDriver(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة سائق
+                </Button>
+              }
             />
             <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "الأتوبيس الأساسي", "الاحتياطي", "الوردية"]}>
               {drivers
@@ -268,6 +290,36 @@ function FleetPage() {
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={addBus} disabled={saving}>
               {saving ? "جارِ الحفظ..." : "حفظ الأتوبيس"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={addingDriver} onOpenChange={setAddingDriver}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة سائق جديد</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات السائق الأساسية</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["name", "الاسم"],
+              ["phone", "الهاتف"],
+              ["license", "نوع الرخصة"],
+              ["licenseExpiry", "تاريخ انتهاء الرخصة (YYYY-MM-DD)"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={driverForm[key as keyof typeof driverForm]}
+                  onChange={(e) => setDriverForm({ ...driverForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={addDriver} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ السائق"}
             </Button>
           </DialogFooter>
         </DialogContent>

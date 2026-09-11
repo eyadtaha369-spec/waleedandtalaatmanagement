@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { Plus } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { currency, type BusRoute, type Student } from "@/lib/fleet-data";
-import { fetchRoutes, fetchStudents, fetchPaymentHistory, addPayment } from "@/lib/queries";
+import {
+  fetchRoutes,
+  fetchStudents,
+  fetchPaymentHistory,
+  addPayment,
+  addRoute as addRouteApi,
+  addStudent as addStudentApi,
+} from "@/lib/queries";
 
 export const Route = createFileRoute("/operations")({
   head: () => ({
@@ -41,6 +49,10 @@ function OperationsPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("");
   const [saving, setSaving] = useState(false);
+  const [addingRoute, setAddingRoute] = useState(false);
+  const [routeForm, setRouteForm] = useState({ name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [studentForm, setStudentForm] = useState({ name: "", guardianPhone: "", routeName: "", monthly: "" });
 
   const loadAll = async () => {
     setLoading(true);
@@ -88,6 +100,36 @@ function OperationsPage() {
     }
   };
 
+  const addRoute = async () => {
+    if (!routeForm.name.trim()) return;
+    setSaving(true);
+    try {
+      await addRouteApi({ ...routeForm, seats: Number(routeForm.seats) || 0 });
+      await loadAll();
+      setRouteForm({ name: "", pickupPoints: "", departure: "", arrival: "", busCode: "", seats: "" });
+      setAddingRoute(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة الخط");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addStudent = async () => {
+    if (!studentForm.name.trim()) return;
+    setSaving(true);
+    try {
+      await addStudentApi({ ...studentForm, monthly: Number(studentForm.monthly) || 0 });
+      await loadAll();
+      setStudentForm({ name: "", guardianPhone: "", routeName: "", monthly: "" });
+      setAddingStudent(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة الطالب");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <AppShell>
       <PageHeader title="الخطوط والاشتراكات" subtitle="خطوط السير ونقاط التجمع واشتراكات الطلاب" />
@@ -111,6 +153,11 @@ function OperationsPage() {
               onQuery={setQuery}
               placeholder="ابحث باسم الخط..."
               onExport={() => exportToExcel("الخطوط", routes as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingRoute(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة خط
+                </Button>
+              }
             />
             {loading ? (
               <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
@@ -155,6 +202,11 @@ function OperationsPage() {
               onQuery={setQuery}
               placeholder="ابحث باسم الطالب أو الخط..."
               onExport={() => exportToExcel("الاشتراكات", filteredStudents as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingStudent(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة طالب
+                </Button>
+              }
             />
             <DataTable head={["الطالب", "الخط", "هاتف ولي الأمر", "الاشتراك الشهري", "المسدد", "المتبقي", "الحالة", "السجل"]}>
               {loading ? (
@@ -223,6 +275,69 @@ function OperationsPage() {
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={recordPayment} disabled={saving}>
               {saving ? "جارِ الحفظ..." : "تسجيل دفع قسط جديد"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={addingRoute} onOpenChange={setAddingRoute}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة خط جديد</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات خط السير</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["name", "اسم الخط"],
+              ["pickupPoints", "نقاط التجمع"],
+              ["departure", "موعد التحرك (HH:MM)"],
+              ["arrival", "موعد الوصول (HH:MM)"],
+              ["busCode", "كود الأتوبيس"],
+              ["seats", "عدد المقاعد"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={routeForm[key as keyof typeof routeForm]}
+                  onChange={(e) => setRouteForm({ ...routeForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={addRoute} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الخط"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingStudent} onOpenChange={setAddingStudent}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة طالب جديد</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات الطالب والاشتراك</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["name", "اسم الطالب"],
+              ["guardianPhone", "هاتف ولي الأمر"],
+              ["routeName", "اسم الخط"],
+              ["monthly", "الاشتراك الشهري"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={studentForm[key as keyof typeof studentForm]}
+                  onChange={(e) => setStudentForm({ ...studentForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={addStudent} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الطالب"}
             </Button>
           </DialogFooter>
         </DialogContent>

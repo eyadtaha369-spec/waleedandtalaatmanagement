@@ -22,6 +22,8 @@ import {
   fetchFuelLogs,
   addMaintenanceOrder,
   updateMaintenanceStatus,
+  addInventoryItem,
+  addFuelLog,
 } from "@/lib/queries";
 
 export const Route = createFileRoute("/workshop")({
@@ -48,6 +50,10 @@ function WorkshopPage() {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ bus: "", issue: "", parts: "", cost: "" });
+  const [addingItem, setAddingItem] = useState(false);
+  const [itemForm, setItemForm] = useState({ name: "", code: "", stock: "", minStock: "", unitPrice: "" });
+  const [addingFuel, setAddingFuel] = useState(false);
+  const [fuelForm, setFuelForm] = useState({ busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
 
   const loadAll = async () => {
     setLoading(true);
@@ -97,6 +103,49 @@ function WorkshopPage() {
       setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: next } : o)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحديث حالة الأمر");
+    }
+  };
+
+  const addItem = async () => {
+    if (!itemForm.name.trim()) return;
+    setSaving(true);
+    try {
+      await addInventoryItem({
+        name: itemForm.name,
+        code: itemForm.code,
+        stock: Number(itemForm.stock) || 0,
+        minStock: Number(itemForm.minStock) || 0,
+        unitPrice: Number(itemForm.unitPrice) || 0,
+      });
+      await loadAll();
+      setItemForm({ name: "", code: "", stock: "", minStock: "", unitPrice: "" });
+      setAddingItem(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة الصنف");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addFuel = async () => {
+    if (!fuelForm.busCode.trim()) return;
+    setSaving(true);
+    try {
+      await addFuelLog({
+        busCode: fuelForm.busCode,
+        odoStart: Number(fuelForm.odoStart) || 0,
+        odoEnd: Number(fuelForm.odoEnd) || 0,
+        liters: Number(fuelForm.liters) || 0,
+        cost: Number(fuelForm.cost) || 0,
+        station: fuelForm.station,
+      });
+      await loadAll();
+      setFuelForm({ busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
+      setAddingFuel(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة سجل السولار");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -179,6 +228,11 @@ function WorkshopPage() {
               onQuery={setQuery}
               placeholder="ابحث باسم الصنف..."
               onExport={() => exportToExcel("المخزن", inventory as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingItem(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة صنف
+                </Button>
+              }
             />
             <DataTable head={["الصنف", "الكود", "الرصيد الحالي", "الحد الأدنى", "سعر الوحدة", "الحالة"]}>
               {inventory
@@ -212,6 +266,11 @@ function WorkshopPage() {
               onQuery={setQuery}
               placeholder="ابحث بكود الأتوبيس أو المحطة..."
               onExport={() => exportToExcel("سجل السولار", fuelLogs as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingFuel(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة سجل
+                </Button>
+              }
             />
             <DataTable head={["التاريخ", "الأتوبيس", "عداد البداية", "عداد النهاية", "المسافة", "الكمية (لتر)", "التكلفة", "المحطة"]}>
               {fuelLogs
@@ -259,6 +318,70 @@ function WorkshopPage() {
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={addOrder} disabled={saving}>
               {saving ? "جارِ الحفظ..." : "حفظ الأمر"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={addingItem} onOpenChange={setAddingItem}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة صنف للمخزن</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات الصنف والحد الأدنى</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["name", "اسم الصنف"],
+              ["code", "الكود"],
+              ["stock", "الرصيد الحالي"],
+              ["minStock", "الحد الأدنى"],
+              ["unitPrice", "سعر الوحدة"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={itemForm[key as keyof typeof itemForm]}
+                  onChange={(e) => setItemForm({ ...itemForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={addItem} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الصنف"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingFuel} onOpenChange={setAddingFuel}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة سجل تزود بالسولار</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات التزود بالوقود</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["busCode", "كود الأتوبيس"],
+              ["odoStart", "عداد البداية"],
+              ["odoEnd", "عداد النهاية"],
+              ["liters", "الكمية (لتر)"],
+              ["cost", "التكلفة"],
+              ["station", "المحطة"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={fuelForm[key as keyof typeof fuelForm]}
+                  onChange={(e) => setFuelForm({ ...fuelForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={addFuel} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ السجل"}
             </Button>
           </DialogFooter>
         </DialogContent>

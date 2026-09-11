@@ -1,11 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { currency, type TreasuryEntry, type Expense, type Loan, type Payslip } from "@/lib/fleet-data";
-import { fetchTreasury, fetchExpenses, fetchLoans, fetchPayroll } from "@/lib/queries";
+import {
+  fetchTreasury,
+  fetchExpenses,
+  fetchLoans,
+  fetchPayroll,
+  addTreasuryEntry,
+  addExpense,
+  addLoan,
+  addPayslip,
+} from "@/lib/queries";
 
 export const Route = createFileRoute("/finance")({
   head: () => ({
@@ -27,24 +48,119 @@ function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [addingTreasury, setAddingTreasury] = useState(false);
+  const [treasuryForm, setTreasuryForm] = useState({ account: "", opening: "", deposits: "", withdrawals: "" });
+  const [addingExpense, setAddingExpense] = useState(false);
+  const [expenseForm, setExpenseForm] = useState({ category: "", supplier: "", amount: "", supplierBalance: "" });
+  const [addingLoan, setAddingLoan] = useState(false);
+  const [loanForm, setLoanForm] = useState({ lender: "", total: "", paid: "", installment: "", nextDue: "" });
+  const [addingPayslip, setAddingPayslip] = useState(false);
+  const [payslipForm, setPayslipForm] = useState({ employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+
+  const loadAll = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [t, e, l, p] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchPayroll()]);
+      setTreasury(t);
+      setExpenses(e);
+      setLoans(l);
+      setPayroll(p);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر تحميل البيانات");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [t, e, l, p] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchPayroll()]);
-        setTreasury(t);
-        setExpenses(e);
-        setLoans(l);
-        setPayroll(p);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "تعذر تحميل البيانات");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadAll();
   }, []);
+
+  const submitTreasury = async () => {
+    if (!treasuryForm.account.trim()) return;
+    setSaving(true);
+    try {
+      await addTreasuryEntry({
+        account: treasuryForm.account,
+        opening: Number(treasuryForm.opening) || 0,
+        deposits: Number(treasuryForm.deposits) || 0,
+        withdrawals: Number(treasuryForm.withdrawals) || 0,
+      });
+      await loadAll();
+      setTreasuryForm({ account: "", opening: "", deposits: "", withdrawals: "" });
+      setAddingTreasury(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة الرصيد");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitExpense = async () => {
+    if (!expenseForm.category.trim()) return;
+    setSaving(true);
+    try {
+      await addExpense({
+        category: expenseForm.category,
+        supplier: expenseForm.supplier,
+        amount: Number(expenseForm.amount) || 0,
+        supplierBalance: Number(expenseForm.supplierBalance) || 0,
+      });
+      await loadAll();
+      setExpenseForm({ category: "", supplier: "", amount: "", supplierBalance: "" });
+      setAddingExpense(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة المصروف");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitLoan = async () => {
+    if (!loanForm.lender.trim()) return;
+    setSaving(true);
+    try {
+      await addLoan({
+        lender: loanForm.lender,
+        total: Number(loanForm.total) || 0,
+        paid: Number(loanForm.paid) || 0,
+        installment: Number(loanForm.installment) || 0,
+        nextDue: loanForm.nextDue,
+      });
+      await loadAll();
+      setLoanForm({ lender: "", total: "", paid: "", installment: "", nextDue: "" });
+      setAddingLoan(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة القرض");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitPayslip = async () => {
+    if (!payslipForm.employeeName.trim()) return;
+    setSaving(true);
+    try {
+      await addPayslip({
+        employeeName: payslipForm.employeeName,
+        role: payslipForm.role,
+        baseSalary: Number(payslipForm.baseSalary) || 0,
+        overtime: Number(payslipForm.overtime) || 0,
+        advances: Number(payslipForm.advances) || 0,
+        penalties: Number(payslipForm.penalties) || 0,
+      });
+      await loadAll();
+      setPayslipForm({ employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
+      setAddingPayslip(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر إضافة كشف المرتب");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <AppShell>
@@ -71,6 +187,11 @@ function FinancePage() {
               onQuery={setQuery}
               placeholder="ابحث باسم الحساب..."
               onExport={() => exportToExcel("الخزينة", treasury as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingTreasury(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة رصيد
+                </Button>
+              }
             />
             <DataTable head={["التاريخ", "الحساب", "رصيد أول المدة", "إيداعات", "مسحوبات", "رصيد آخر المدة"]}>
               {loading ? (
@@ -104,6 +225,11 @@ function FinancePage() {
               onQuery={setQuery}
               placeholder="ابحث باسم المورد أو البند..."
               onExport={() => exportToExcel("المصروفات", expenses as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingExpense(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة مصروف
+                </Button>
+              }
             />
             <DataTable head={["التاريخ", "البند", "المورد", "المبلغ", "رصيد المورد"]}>
               {expenses
@@ -130,6 +256,11 @@ function FinancePage() {
               onQuery={setQuery}
               placeholder="ابحث باسم الجهة المقرضة..."
               onExport={() => exportToExcel("القروض", loans as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingLoan(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة قرض
+                </Button>
+              }
             />
             <div className="grid gap-4 lg:grid-cols-3">
               {loans
@@ -165,6 +296,11 @@ function FinancePage() {
               onQuery={setQuery}
               placeholder="ابحث باسم الموظف..."
               onExport={() => exportToExcel("المرتبات", payroll as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setAddingPayslip(true)}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة كشف مرتب
+                </Button>
+              }
             />
             <DataTable head={["الموظف", "الوظيفة", "الأساسي", "الإضافي", "السُلف", "الجزاءات", "الصافي"]}>
               {payroll
@@ -186,6 +322,133 @@ function FinancePage() {
           </Panel>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={addingTreasury} onOpenChange={setAddingTreasury}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة رصيد يومي</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات الحساب لليوم</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["account", "اسم الحساب"],
+              ["opening", "رصيد أول المدة"],
+              ["deposits", "إيداعات"],
+              ["withdrawals", "مسحوبات"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={treasuryForm[key as keyof typeof treasuryForm]}
+                  onChange={(e) => setTreasuryForm({ ...treasuryForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitTreasury} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الرصيد"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingExpense} onOpenChange={setAddingExpense}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة مصروف</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات المصروف والمورد</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["category", "البند (مثال: قطع غيار)"],
+              ["supplier", "المورد"],
+              ["amount", "المبلغ"],
+              ["supplierBalance", "رصيد المورد بعد الدفع"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={expenseForm[key as keyof typeof expenseForm]}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitExpense} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ المصروف"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingLoan} onOpenChange={setAddingLoan}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة قرض</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات القرض والجهة المقرضة</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["lender", "الجهة المقرضة"],
+              ["total", "إجمالي القرض"],
+              ["paid", "المسدد حتى الآن"],
+              ["installment", "القسط الشهري"],
+              ["nextDue", "تاريخ الاستحقاق القادم (YYYY-MM-DD)"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={loanForm[key as keyof typeof loanForm]}
+                  onChange={(e) => setLoanForm({ ...loanForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitLoan} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ القرض"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingPayslip} onOpenChange={setAddingPayslip}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">إضافة كشف مرتب</DialogTitle>
+            <DialogDescription className="text-muted-foreground">أدخل بيانات الموظف والمرتب لهذا الشهر</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["employeeName", "اسم الموظف"],
+              ["role", "الوظيفة"],
+              ["baseSalary", "الأساسي"],
+              ["overtime", "الإضافي"],
+              ["advances", "السُلف"],
+              ["penalties", "الجزاءات"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input
+                  value={payslipForm[key as keyof typeof payslipForm]}
+                  onChange={(e) => setPayslipForm({ ...payslipForm, [key]: e.target.value })}
+                  className="border-border bg-input/60"
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitPayslip} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ الكشف"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

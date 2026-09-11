@@ -79,6 +79,17 @@ export async function fetchAttendance(): Promise<Attendance[]> {
   }));
 }
 
+export async function addDriver(input: { name: string; phone: string; license: string; licenseExpiry: string }) {
+  const { error } = await supabase.from("drivers").insert({
+    driver_code: `DRV-${Date.now().toString().slice(-6)}`,
+    name: input.name,
+    phone: input.phone,
+    license_type: input.license,
+    license_expiry: input.licenseExpiry || null,
+  });
+  if (error) throw error;
+}
+
 // ---- Operations ----
 
 export async function fetchRoutes(): Promise<BusRoute[]> {
@@ -96,6 +107,28 @@ export async function fetchRoutes(): Promise<BusRoute[]> {
   }));
 }
 
+export async function addRoute(input: {
+  name: string;
+  pickupPoints: string;
+  departure: string;
+  arrival: string;
+  busCode: string;
+  seats: number;
+}) {
+  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+  const { error } = await supabase.from("routes").insert({
+    route_code: `RT-${Date.now().toString().slice(-6)}`,
+    route_name: input.name,
+    pickup_points: input.pickupPoints,
+    departure_time: input.departure || null,
+    return_time: input.arrival || null,
+    bus_id: bus?.id ?? null,
+    seats: input.seats,
+    booked: 0,
+  });
+  if (error) throw error;
+}
+
 export async function fetchStudents(): Promise<Student[]> {
   const { data, error } = await supabase.from("students").select("*, routes(route_name)").order("name");
   if (error) throw error;
@@ -108,6 +141,25 @@ export async function fetchStudents(): Promise<Student[]> {
     paid: Number(s.paid_amount ?? 0),
     status: s.payment_status ?? "قيد السداد",
   }));
+}
+
+export async function addStudent(input: {
+  name: string;
+  guardianPhone: string;
+  routeName: string;
+  monthly: number;
+}) {
+  const { data: route } = await supabase.from("routes").select("id").eq("route_name", input.routeName).maybeSingle();
+  const { error } = await supabase.from("students").insert({
+    sub_code: `STU-${Date.now().toString().slice(-6)}`,
+    name: input.name,
+    parent_phone: input.guardianPhone,
+    route_id: route?.id ?? null,
+    total_amount: input.monthly,
+    paid_amount: 0,
+    payment_status: "متأخر",
+  });
+  if (error) throw error;
 }
 
 export async function fetchPaymentHistory(studentId: string) {
@@ -175,6 +227,17 @@ export async function fetchInventory(): Promise<InventoryItem[]> {
   }));
 }
 
+export async function addInventoryItem(input: { name: string; code: string; stock: number; minStock: number; unitPrice: number }) {
+  const { error } = await supabase.from("inventory").insert({
+    name: input.name,
+    code: input.code,
+    stock: input.stock,
+    min_stock: input.minStock,
+    unit_price: input.unitPrice,
+  });
+  if (error) throw error;
+}
+
 export async function fetchFuelLogs(): Promise<FuelLog[]> {
   const { data, error } = await supabase
     .from("fuel_logs")
@@ -193,6 +256,19 @@ export async function fetchFuelLogs(): Promise<FuelLog[]> {
   }));
 }
 
+export async function addFuelLog(input: { busCode: string; odoStart: number; odoEnd: number; liters: number; cost: number; station: string }) {
+  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+  const { error } = await supabase.from("fuel_logs").insert({
+    bus_id: bus?.id ?? null,
+    odo_start: input.odoStart,
+    odo_end: input.odoEnd,
+    liters: input.liters,
+    cost: input.cost,
+    station: input.station,
+  });
+  if (error) throw error;
+}
+
 // ---- Finance ----
 
 export async function fetchTreasury(): Promise<TreasuryEntry[]> {
@@ -208,6 +284,16 @@ export async function fetchTreasury(): Promise<TreasuryEntry[]> {
   }));
 }
 
+export async function addTreasuryEntry(input: { account: string; opening: number; deposits: number; withdrawals: number }) {
+  const { error } = await supabase.from("treasury").insert({
+    account: input.account,
+    opening: input.opening,
+    deposits: input.deposits,
+    withdrawals: input.withdrawals,
+  });
+  if (error) throw error;
+}
+
 export async function fetchExpenses(): Promise<Expense[]> {
   const { data, error } = await supabase.from("expenses").select("*").order("date", { ascending: false });
   if (error) throw error;
@@ -221,6 +307,16 @@ export async function fetchExpenses(): Promise<Expense[]> {
   }));
 }
 
+export async function addExpense(input: { category: string; supplier: string; amount: number; supplierBalance: number }) {
+  const { error } = await supabase.from("expenses").insert({
+    category: input.category,
+    supplier: input.supplier,
+    amount: input.amount,
+    supplier_balance: input.supplierBalance,
+  });
+  if (error) throw error;
+}
+
 export async function fetchLoans(): Promise<Loan[]> {
   const { data, error } = await supabase.from("loans").select("*").order("next_due");
   if (error) throw error;
@@ -232,6 +328,37 @@ export async function fetchLoans(): Promise<Loan[]> {
     installment: Number(l.installment ?? 0),
     nextDue: l.next_due ?? "—",
   }));
+}
+
+export async function addLoan(input: { lender: string; total: number; paid: number; installment: number; nextDue: string }) {
+  const { error } = await supabase.from("loans").insert({
+    lender: input.lender,
+    total: input.total,
+    paid: input.paid,
+    installment: input.installment,
+    next_due: input.nextDue || null,
+  });
+  if (error) throw error;
+}
+
+export async function addPayslip(input: { employeeName: string; role: string; baseSalary: number; overtime: number; advances: number; penalties: number }) {
+  let { data: staff } = await supabase.from("staff").select("id").eq("name", input.employeeName).maybeSingle();
+  if (!staff) {
+    const { data: newStaff, error: staffError } = await supabase
+      .from("staff")
+      .insert({ name: input.employeeName, role: input.role, base_salary: input.baseSalary })
+      .select("id")
+      .single();
+    if (staffError) throw staffError;
+    staff = newStaff;
+  }
+  const { error } = await supabase.from("payslips").insert({
+    staff_id: staff!.id,
+    overtime: input.overtime,
+    advances: input.advances,
+    penalties: input.penalties,
+  });
+  if (error) throw error;
 }
 
 // ---- Dashboard ----

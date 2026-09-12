@@ -34,14 +34,17 @@ import {
   updateMaintenanceOrder,
   deleteMaintenanceOrder,
   updateMaintenanceStatus,
-  addInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,
   addFuelLog,
   updateFuelLog,
   deleteFuelLog,
   bulkInsertInventory,
+  receiveInventoryStock,
+  fetchSuppliers,
+  type Supplier,
 } from "@/lib/queries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CsvImportDialog } from "@/components/csv-import-dialog";
 
 export const Route = createFileRoute("/workshop")({
@@ -69,10 +72,13 @@ function WorkshopPage() {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ id: "", bus: "", issue: "", parts: "", cost: "" });
+  const [form, setForm] = useState({ id: "", bus: "", issue: "", parts: "", cost: "", inventoryItemName: "", quantityUsed: "" });
   const [addingItem, setAddingItem] = useState(false);
   const [importingInventory, setImportingInventory] = useState(false);
   const [itemForm, setItemForm] = useState({ id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "" });
+  const [receiving, setReceiving] = useState(false);
+  const [receiveForm, setReceiveForm] = useState({ itemName: "", itemCode: "", supplierName: "", quantity: "", unitPrice: "" });
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [addingFuel, setAddingFuel] = useState(false);
   const [fuelForm, setFuelForm] = useState({ id: "", busCode: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" });
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
@@ -82,10 +88,11 @@ function WorkshopPage() {
     setLoading(true);
     setError(null);
     try {
-      const [o, i, f] = await Promise.all([fetchMaintenanceOrders(), fetchInventory(), fetchFuelLogs()]);
+      const [o, i, f, s] = await Promise.all([fetchMaintenanceOrders(), fetchInventory(), fetchFuelLogs(), fetchSuppliers()]);
       setOrders(o);
       setInventory(i);
       setFuelLogs(f);
+      setSuppliers(s);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
     } finally {
@@ -98,12 +105,20 @@ function WorkshopPage() {
   }, []);
 
   const openAddOrder = () => {
-    setForm({ id: "", bus: "", issue: "", parts: "", cost: "" });
+    setForm({ id: "", bus: "", issue: "", parts: "", cost: "", inventoryItemName: "", quantityUsed: "" });
     setAdding(true);
   };
 
   const openEditOrder = (o: MaintenanceOrder) => {
-    setForm({ id: o.id, bus: o.bus === "—" ? "" : o.bus, issue: o.issue === "—" ? "" : o.issue, parts: o.parts === "—" ? "" : o.parts, cost: String(o.cost) });
+    setForm({
+      id: o.id,
+      bus: o.bus === "—" ? "" : o.bus,
+      issue: o.issue === "—" ? "" : o.issue,
+      parts: o.parts === "—" ? "" : o.parts,
+      cost: String(o.cost),
+      inventoryItemName: o.inventoryItem || "",
+      quantityUsed: o.quantityUsed ? String(o.quantityUsed) : "",
+    });
     setAdding(true);
   };
 
@@ -111,7 +126,14 @@ function WorkshopPage() {
     if (!form.bus.trim()) return;
     setSaving(true);
     try {
-      const payload = { busCode: form.bus, issue: form.issue, parts: form.parts, cost: Number(form.cost) || 0 };
+      const payload = {
+        busCode: form.bus,
+        issue: form.issue,
+        parts: form.parts,
+        cost: Number(form.cost) || 0,
+        inventoryItemName: form.inventoryItemName,
+        quantityUsed: Number(form.quantityUsed) || 0,
+      };
       if (form.id) {
         const order = orders.find((o) => o.id === form.id);
         await updateMaintenanceOrder(form.id, { ...payload, status: order?.status ?? "بانتظار القطع" });
@@ -119,7 +141,7 @@ function WorkshopPage() {
         await addMaintenanceOrder(payload);
       }
       await loadAll();
-      setForm({ id: "", bus: "", issue: "", parts: "", cost: "" });
+      setForm({ id: "", bus: "", issue: "", parts: "", cost: "", inventoryItemName: "", quantityUsed: "" });
       setAdding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر حفظ أمر الصيانة");
@@ -140,9 +162,30 @@ function WorkshopPage() {
     }
   };
 
-  const openAddItem = () => {
-    setItemForm({ id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "" });
-    setAddingItem(true);
+  const openReceiveStock = () => {
+    setReceiveForm({ itemName: "", itemCode: "", supplierName: "", quantity: "", unitPrice: "" });
+    setReceiving(true);
+  };
+
+  const submitReceiveStock = async () => {
+    if (!receiveForm.itemName.trim() || !receiveForm.quantity.trim()) return;
+    setSaving(true);
+    try {
+      await receiveInventoryStock({
+        itemName: receiveForm.itemName,
+        itemCode: receiveForm.itemCode,
+        supplierName: receiveForm.supplierName,
+        quantity: Number(receiveForm.quantity) || 0,
+        unitPrice: Number(receiveForm.unitPrice) || 0,
+      });
+      await loadAll();
+      setReceiveForm({ itemName: "", itemCode: "", supplierName: "", quantity: "", unitPrice: "" });
+      setReceiving(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تسجيل التوريد");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openEditItem = (i: InventoryItem) => {
@@ -155,11 +198,7 @@ function WorkshopPage() {
     setSaving(true);
     try {
       const payload = { name: itemForm.name, code: itemForm.code, stock: Number(itemForm.stock) || 0, minStock: Number(itemForm.minStock) || 0, unitPrice: Number(itemForm.unitPrice) || 0 };
-      if (itemForm.id) {
-        await updateInventoryItem(itemForm.id, payload);
-      } else {
-        await addInventoryItem(payload);
-      }
+      await updateInventoryItem(itemForm.id, payload);
       await loadAll();
       setItemForm({ id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "" });
       setAddingItem(false);
@@ -270,6 +309,9 @@ function WorkshopPage() {
                             </div>
                             <p className="mt-2 text-sm font-semibold">{o.issue}</p>
                             <p className="mt-1 text-xs text-muted-foreground">قطع الغيار: {o.parts}</p>
+                            {o.inventoryItem && (
+                              <p className="mt-1 text-xs text-primary">مخصوم من المخزن: {o.inventoryItem} × {o.quantityUsed}</p>
+                            )}
                             <div className="mt-3 flex items-center justify-between">
                               <span className="text-sm font-bold text-warning">{currency(o.cost)}</span>
                               <div className="flex items-center gap-1">
@@ -313,8 +355,8 @@ function WorkshopPage() {
                   <Button variant="outline" className="border-border" onClick={() => setImportingInventory(true)}>
                     استيراد CSV
                   </Button>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddItem}>
-                    <Plus className="ml-2 h-4 w-4" /> إضافة صنف
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openReceiveStock}>
+                    <Plus className="ml-2 h-4 w-4" /> استلام مخزون / توريد جديد
                   </Button>
                 </>
               }
@@ -417,7 +459,7 @@ function WorkshopPage() {
             {[
               ["bus", "كود الأتوبيس"],
               ["issue", "وصف العطل"],
-              ["parts", "قطع الغيار"],
+              ["parts", "قطع الغيار (وصف نصي)"],
               ["cost", "التكلفة الإجمالية", "number"],
             ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
@@ -430,6 +472,28 @@ function WorkshopPage() {
                 />
               </div>
             ))}
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <p className="mb-2 text-xs font-bold text-primary">خصم قطعة من المخزن تلقائيًا (اختياري)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">الصنف</Label>
+                  <Select value={form.inventoryItemName} onValueChange={(v) => setForm({ ...form, inventoryItemName: v })}>
+                    <SelectTrigger className="border-border bg-input/60">
+                      <SelectValue placeholder="بدون خصم" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {inventory.map((i) => (
+                        <SelectItem key={i.id} value={i.name}>{i.name} (متاح: {i.stock})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">الكمية المستخدمة</Label>
+                  <Input value={form.quantityUsed} onChange={(e) => setForm({ ...form, quantityUsed: e.target.value })} type="number" className="border-border bg-input/60" />
+                </div>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitOrder} disabled={saving}>
@@ -441,8 +505,8 @@ function WorkshopPage() {
       <Dialog open={addingItem} onOpenChange={setAddingItem}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">{itemForm.id ? "تعديل بيانات الصنف" : "إضافة صنف للمخزن"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">أدخل بيانات الصنف والحد الأدنى</DialogDescription>
+            <DialogTitle className="text-primary">تعديل بيانات الصنف</DialogTitle>
+            <DialogDescription className="text-muted-foreground">تصحيح بيانات صنف موجود (لإضافة كمية جديدة استخدم "استلام مخزون")</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             {[
@@ -465,7 +529,62 @@ function WorkshopPage() {
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitItem} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : itemForm.id ? "حفظ التعديلات" : "حفظ الصنف"}
+              {saving ? "جارِ الحفظ..." : "حفظ التعديلات"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={receiving} onOpenChange={setReceiving}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">استلام مخزون / توريد جديد</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              يزيد الرصيد فورًا، ويُضاف الإجمالي إلى رصيد المورد تلقائيًا في "حسابات الموردين"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">اسم الصنف</Label>
+              <Input value={receiveForm.itemName} onChange={(e) => setReceiveForm({ ...receiveForm, itemName: e.target.value })} className="border-border bg-input/60" list="inventory-item-names" />
+              <datalist id="inventory-item-names">
+                {inventory.map((i) => (
+                  <option key={i.id} value={i.name} />
+                ))}
+              </datalist>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">كود الصنف (إن كان جديدًا)</Label>
+              <Input value={receiveForm.itemCode} onChange={(e) => setReceiveForm({ ...receiveForm, itemCode: e.target.value })} className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">المورد</Label>
+              <Input value={receiveForm.supplierName} onChange={(e) => setReceiveForm({ ...receiveForm, supplierName: e.target.value })} className="border-border bg-input/60" list="supplier-names" />
+              <datalist id="supplier-names">
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.name} />
+                ))}
+              </datalist>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">الكمية</Label>
+                <Input value={receiveForm.quantity} onChange={(e) => setReceiveForm({ ...receiveForm, quantity: e.target.value })} type="number" className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">سعر الوحدة</Label>
+                <Input value={receiveForm.unitPrice} onChange={(e) => setReceiveForm({ ...receiveForm, unitPrice: e.target.value })} type="number" className="border-border bg-input/60" />
+              </div>
+            </div>
+            {receiveForm.quantity && receiveForm.unitPrice && (
+              <p className="rounded-lg border border-border bg-secondary/30 p-3 text-sm">
+                الإجمالي: <b className="text-primary">{(Number(receiveForm.quantity) * Number(receiveForm.unitPrice)).toLocaleString("ar-EG")} ج.م</b>
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitReceiveStock} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "تسجيل التوريد"}
             </Button>
           </DialogFooter>
         </DialogContent>

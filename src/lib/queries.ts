@@ -27,6 +27,7 @@ export async function fetchBuses(): Promise<Bus[]> {
     code: b.bus_code,
     plate: b.plate_number ?? "—",
     model: b.model ?? "—",
+    busType: b.bus_type ?? "أتوبيس 50",
     capacity: b.capacity ?? 0,
     odometer: b.odometer ?? 0,
     licenseExpiry: b.license_expiry ?? "—",
@@ -37,11 +38,12 @@ export async function fetchBuses(): Promise<Bus[]> {
   }));
 }
 
-export async function addBus(input: { code: string; plate: string; model: string; capacity: number; odometer: number; status?: string }) {
+export async function addBus(input: { code: string; plate: string; model: string; busType?: string; capacity: number; odometer: number; status?: string }) {
   const { error } = await supabase.from("buses").insert({
     bus_code: input.code,
     plate_number: input.plate,
     model: input.model,
+    bus_type: input.busType ?? "أتوبيس 50",
     capacity: input.capacity,
     odometer: input.odometer,
     status: input.status ?? "تعمل",
@@ -248,7 +250,7 @@ export async function addPayment(studentId: string, amount: number, method: stri
 export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
   const { data, error } = await supabase
     .from("maintenance_orders")
-    .select("*, buses(bus_code)")
+    .select("*, buses(bus_code), inventory(name)")
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((o: any) => ({
@@ -259,11 +261,16 @@ export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
     parts: o.parts ?? "—",
     cost: Number(o.total_cost ?? 0),
     status: o.status ?? "بانتظار القطع",
+    inventoryItem: o.inventory?.name ?? "",
+    quantityUsed: Number(o.quantity_used ?? 0),
   }));
 }
 
-export async function addMaintenanceOrder(input: { busCode: string; issue: string; parts: string; cost: number }) {
-  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+export async function addMaintenanceOrder(input: { busCode: string; issue: string; parts: string; cost: number; inventoryItemName?: string; quantityUsed?: number }) {
+  const [{ data: bus }, inventoryId] = await Promise.all([
+    supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle(),
+    resolveInventoryIdByName(input.inventoryItemName),
+  ]);
   const { error } = await supabase.from("maintenance_orders").insert({
     order_number: `MO-${Date.now().toString().slice(-6)}`,
     bus_id: bus?.id ?? null,
@@ -271,8 +278,16 @@ export async function addMaintenanceOrder(input: { busCode: string; issue: strin
     parts: input.parts,
     total_cost: input.cost,
     status: "بانتظار القطع",
+    inventory_id: inventoryId,
+    quantity_used: input.quantityUsed ?? 0,
   });
   if (error) throw error;
+}
+
+async function resolveInventoryIdByName(name?: string): Promise<string | null> {
+  if (!name || !name.trim()) return null;
+  const { data } = await supabase.from("inventory").select("id").eq("name", name).maybeSingle();
+  return data?.id ?? null;
 }
 
 export async function updateMaintenanceStatus(id: string, status: string) {
@@ -973,11 +988,12 @@ export async function addLedgerTransaction(input: {
 
 // ---- Update / delete: every editable entity ----
 
-export async function updateBus(id: string, input: { code: string; plate: string; model: string; capacity: number; odometer: number; status?: string }) {
+export async function updateBus(id: string, input: { code: string; plate: string; model: string; busType?: string; capacity: number; odometer: number; status?: string }) {
   const { error } = await supabase.from("buses").update({
     bus_code: input.code,
     plate_number: input.plate,
     model: input.model,
+    bus_type: input.busType ?? "أتوبيس 50",
     capacity: input.capacity,
     odometer: input.odometer,
     status: input.status ?? "تعمل",
@@ -1037,14 +1053,19 @@ export async function deleteStudent(id: string) {
   if (error) throw error;
 }
 
-export async function updateMaintenanceOrder(id: string, input: { busCode: string; issue: string; parts: string; cost: number; status: string }) {
-  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+export async function updateMaintenanceOrder(id: string, input: { busCode: string; issue: string; parts: string; cost: number; status: string; inventoryItemName?: string; quantityUsed?: number }) {
+  const [{ data: bus }, inventoryId] = await Promise.all([
+    supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle(),
+    resolveInventoryIdByName(input.inventoryItemName),
+  ]);
   const { error } = await supabase.from("maintenance_orders").update({
     bus_id: bus?.id ?? null,
     issue_description: input.issue,
     parts: input.parts,
     total_cost: input.cost,
     status: input.status,
+    inventory_id: inventoryId,
+    quantity_used: input.quantityUsed ?? 0,
   }).eq("id", id);
   if (error) throw error;
 }
@@ -1204,6 +1225,7 @@ export interface DailyOperation {
   date: string;
   busId: string | null;
   bus: string;
+  busType: string;
   driverId: string | null;
   driver: string;
   gasCost: number;
@@ -1223,7 +1245,7 @@ export interface DailyOperation {
 export async function fetchDailyOperations(monthPrefix: string): Promise<DailyOperation[]> {
   const { data, error } = await supabase
     .from("daily_bus_operations")
-    .select("*, buses(bus_code), drivers(name), client1:client_id_1(client_name), client2:client_id_2(client_name)")
+    .select("*, buses(bus_code, bus_type), drivers(name), client1:client_id_1(client_name), client2:client_id_2(client_name)")
     .gte("op_date", `${monthPrefix}-01`)
     .lt("op_date", `${nextMonthPrefix(monthPrefix)}-01`)
     .order("op_date", { ascending: false });
@@ -1233,6 +1255,7 @@ export async function fetchDailyOperations(monthPrefix: string): Promise<DailyOp
     date: o.op_date,
     busId: o.bus_id,
     bus: o.buses?.bus_code ?? "—",
+    busType: o.bus_type ?? o.buses?.bus_type ?? "—",
     driverId: o.driver_id,
     driver: o.drivers?.name ?? "—",
     gasCost: Number(o.gas_cost ?? 0),
@@ -1253,6 +1276,7 @@ export async function fetchDailyOperations(monthPrefix: string): Promise<DailyOp
 interface DailyOperationInput {
   date: string;
   busCode: string;
+  busType?: string;
   driverName: string;
   gasCost: number;
   gasLiters: number;
@@ -1268,7 +1292,7 @@ interface DailyOperationInput {
 
 async function resolveDailyOperationPayload(input: DailyOperationInput) {
   const [{ data: bus }, { data: driver }, { data: client1 }, { data: client2 }] = await Promise.all([
-    input.busCode.trim() ? supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle() : Promise.resolve({ data: null }),
+    input.busCode.trim() ? supabase.from("buses").select("id, bus_type").eq("bus_code", input.busCode).maybeSingle() : Promise.resolve({ data: null }),
     input.driverName.trim() ? supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle() : Promise.resolve({ data: null }),
     input.client1Name.trim() ? supabase.from("clients").select("id").eq("client_name", input.client1Name).maybeSingle() : Promise.resolve({ data: null }),
     input.client2Name.trim() ? supabase.from("clients").select("id").eq("client_name", input.client2Name).maybeSingle() : Promise.resolve({ data: null }),
@@ -1276,6 +1300,7 @@ async function resolveDailyOperationPayload(input: DailyOperationInput) {
   return {
     op_date: input.date,
     bus_id: bus?.id ?? null,
+    bus_type: input.busType || (bus as any)?.bus_type || null,
     driver_id: driver?.id ?? null,
     gas_cost: input.gasCost,
     gas_liters: input.gasLiters,
@@ -1310,6 +1335,7 @@ export async function deleteDailyOperation(id: string) {
 export interface ClientInvoiceRow {
   date: string;
   busCode: string;
+  busType: string;
   driver: string;
   route: string;
   amount: number;
@@ -1319,8 +1345,8 @@ export async function fetchClientInvoiceRows(clientName: string, monthPrefix: st
   const ops = await fetchDailyOperations(monthPrefix);
   const rows: ClientInvoiceRow[] = [];
   for (const o of ops) {
-    if (o.client1 === clientName) rows.push({ date: o.date, busCode: o.bus, driver: o.driver, route: o.route1, amount: o.fare1 });
-    if (o.client2 === clientName) rows.push({ date: o.date, busCode: o.bus, driver: o.driver, route: o.route2, amount: o.fare2 });
+    if (o.client1 === clientName) rows.push({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route1, amount: o.fare1 });
+    if (o.client2 === clientName) rows.push({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route2, amount: o.fare2 });
   }
   return rows;
 }
@@ -1344,4 +1370,204 @@ export function computeMonthlyPL(
   const totalGas = operations.reduce((sum, o) => sum + o.gasCost, 0);
   const totalExpenses = totalGas + generalExpenseTotal + netDriverPayrollTotal;
   return { totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
+}
+
+// ---- Employees (non-driver staff: mechanics, warehouse, admin) ----
+
+export interface Employee {
+  id: string;
+  name: string;
+  phone: string;
+  jobTitle: string;
+  baseSalary: number;
+}
+
+export async function fetchEmployees(): Promise<Employee[]> {
+  const { data, error } = await supabase.from("employees").select("*").order("name");
+  if (error) throw error;
+  return (data ?? []).map((e: any) => ({ id: e.id, name: e.name, phone: e.phone ?? "", jobTitle: e.job_title ?? "", baseSalary: Number(e.base_salary ?? 0) }));
+}
+export async function addEmployee(input: { name: string; phone: string; jobTitle: string; baseSalary: number }) {
+  const { error } = await supabase.from("employees").insert({ name: input.name, phone: input.phone, job_title: input.jobTitle, base_salary: input.baseSalary });
+  if (error) throw error;
+}
+export async function updateEmployee(id: string, input: { name: string; phone: string; jobTitle: string; baseSalary: number }) {
+  const { error } = await supabase.from("employees").update({ name: input.name, phone: input.phone, job_title: input.jobTitle, base_salary: input.baseSalary }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteEmployee(id: string) {
+  const { error } = await supabase.from("employees").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export interface EmployeeAttendanceRow {
+  id: string;
+  employeeId: string;
+  employee: string;
+  date: string;
+  status: string;
+  notes: string;
+}
+
+export async function fetchEmployeeAttendance(): Promise<EmployeeAttendanceRow[]> {
+  const { data, error } = await supabase
+    .from("employee_attendance")
+    .select("*, employees(name)")
+    .order("date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((a: any) => ({
+    id: a.id,
+    employeeId: a.employee_id,
+    employee: a.employees?.name ?? "—",
+    date: a.date,
+    status: a.status ?? "حاضر",
+    notes: a.notes ?? "",
+  }));
+}
+
+export async function upsertEmployeeAttendance(input: { id?: string | undefined; employeeName: string; date: string; status: string; notes: string }) {
+  const { data: employee } = await supabase.from("employees").select("id").eq("name", input.employeeName).maybeSingle();
+  if (!employee) throw new Error("لم يتم العثور على موظف بهذا الاسم");
+  const payload = { employee_id: employee.id, date: input.date, status: input.status, notes: input.notes };
+  if (input.id) {
+    const { error } = await supabase.from("employee_attendance").update(payload).eq("id", input.id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("employee_attendance").insert(payload);
+    if (error) throw error;
+  }
+}
+export async function deleteEmployeeAttendance(id: string) {
+  const { error } = await supabase.from("employee_attendance").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---- Client routes (registered under each corporate client, replaces free-typing) ----
+
+export interface ClientRoute {
+  id: string;
+  clientId: string;
+  routeName: string;
+  vehicleCapacity: number;
+}
+
+export async function fetchClientRoutes(clientId: string): Promise<ClientRoute[]> {
+  const { data, error } = await supabase.from("client_routes").select("*").eq("client_id", clientId).order("route_name");
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ id: r.id, clientId: r.client_id, routeName: r.route_name, vehicleCapacity: Number(r.vehicle_capacity ?? 0) }));
+}
+export async function addClientRoute(input: { clientId: string; routeName: string; vehicleCapacity: number }) {
+  const { error } = await supabase.from("client_routes").insert({ client_id: input.clientId, route_name: input.routeName, vehicle_capacity: input.vehicleCapacity });
+  if (error) throw error;
+}
+export async function updateClientRoute(id: string, input: { routeName: string; vehicleCapacity: number }) {
+  const { error } = await supabase.from("client_routes").update({ route_name: input.routeName, vehicle_capacity: input.vehicleCapacity }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteClientRoute(id: string) {
+  const { error } = await supabase.from("client_routes").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---- Suppliers & inventory receiving ----
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string;
+  balanceDue: number;
+}
+
+export async function fetchSuppliers(): Promise<Supplier[]> {
+  const { data, error } = await supabase.from("suppliers").select("*").order("supplier_name");
+  if (error) throw error;
+  return (data ?? []).map((s: any) => ({ id: s.id, name: s.supplier_name, phone: s.phone ?? "", balanceDue: Number(s.balance_due ?? 0) }));
+}
+export async function addSupplier(input: { name: string; phone: string }) {
+  const { error } = await supabase.from("suppliers").insert({ supplier_name: input.name, phone: input.phone });
+  if (error) throw error;
+}
+export async function updateSupplier(id: string, input: { name: string; phone: string }) {
+  const { error } = await supabase.from("suppliers").update({ supplier_name: input.name, phone: input.phone }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteSupplier(id: string) {
+  const { error } = await supabase.from("suppliers").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string }) {
+  const { error } = await supabase.from("supplier_payments").insert({ supplier_id: input.supplierId, amount: input.amount, method: input.method, notes: input.notes });
+  if (error) throw error;
+}
+
+export interface SupplierLedgerEntry {
+  id: string;
+  date: string;
+  kind: "شراء" | "سداد";
+  description: string;
+  amount: number;
+}
+
+export async function fetchSupplierLedger(supplierId: string): Promise<SupplierLedgerEntry[]> {
+  const [{ data: purchases }, { data: payments }] = await Promise.all([
+    supabase.from("inventory_transactions").select("*, inventory(name)").eq("supplier_id", supplierId).eq("type", "IN").order("created_at", { ascending: false }),
+    supabase.from("supplier_payments").select("*").eq("supplier_id", supplierId).order("date", { ascending: false }),
+  ]);
+  const entries: SupplierLedgerEntry[] = [];
+  for (const p of purchases ?? []) {
+    entries.push({
+      id: p.id,
+      date: (p.created_at as string).slice(0, 10),
+      kind: "شراء",
+      description: `${p.inventory?.name ?? "صنف"} × ${p.quantity}`,
+      amount: Number(p.total_cost ?? 0),
+    });
+  }
+  for (const pay of payments ?? []) {
+    entries.push({ id: pay.id, date: pay.date, kind: "سداد", description: pay.notes || pay.method || "دفعة", amount: -Number(pay.amount ?? 0) });
+  }
+  return entries.sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export async function receiveInventoryStock(input: {
+  itemName: string;
+  itemCode: string;
+  supplierName: string;
+  quantity: number;
+  unitPrice: number;
+}) {
+  let { data: item } = await supabase.from("inventory").select("id").eq("name", input.itemName).maybeSingle();
+  if (!item) {
+    const { data: newItem, error: itemErr } = await supabase
+      .from("inventory")
+      .insert({ name: input.itemName, code: input.itemCode || `SKU-${Date.now().toString().slice(-6)}`, stock: 0, min_stock: 0, unit_price: input.unitPrice })
+      .select("id")
+      .single();
+    if (itemErr) throw itemErr;
+    item = newItem;
+  }
+  let supplierId: string | null = null;
+  if (input.supplierName.trim()) {
+    const { data: supplier } = await supabase.from("suppliers").select("id").eq("supplier_name", input.supplierName).maybeSingle();
+    if (supplier) {
+      supplierId = supplier.id;
+    } else {
+      const { data: newSupplier, error: supErr } = await supabase.from("suppliers").insert({ supplier_name: input.supplierName }).select("id").single();
+      if (supErr) throw supErr;
+      supplierId = newSupplier.id;
+    }
+  }
+  const totalCost = input.quantity * input.unitPrice;
+  const { error } = await supabase.from("inventory_transactions").insert({
+    inventory_id: item!.id,
+    type: "IN",
+    quantity: input.quantity,
+    unit_price: input.unitPrice,
+    total_cost: totalCost,
+    supplier_id: supplierId,
+  });
+  if (error) throw error;
+  // keep unit_price on the item itself current for display purposes
+  await supabase.from("inventory").update({ unit_price: input.unitPrice }).eq("id", item!.id);
 }

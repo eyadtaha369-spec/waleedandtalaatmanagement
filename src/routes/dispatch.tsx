@@ -202,20 +202,21 @@ function DispatchPage() {
             </>
           }
         />
-        <DataTable head={["التاريخ", "الأتوبيس", "السائق", "الوقود", "الشركة 1 / الخط", "قيمة 1", "الشركة 2 / الخط", "قيمة 2", "الإجراءات"]}>
+        <DataTable head={["اليوم والتاريخ", "الأتوبيس", "نوع السيارة", "السائق", "الوقود", "الشركة 1 / الخط", "قيمة 1", "الشركة 2 / الخط", "قيمة 2", "الإجراءات"]}>
           {loading ? (
             <tr>
-              <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+              <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
             </tr>
           ) : filtered.length === 0 ? (
             <tr>
-              <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات مسجلة لهذا الشهر بعد.</td>
+              <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات مسجلة لهذا الشهر بعد.</td>
             </tr>
           ) : (
             filtered.map((o) => (
               <tr key={o.id} className="transition-colors hover:bg-secondary/30">
-                <td className="px-4 py-3">{o.date}</td>
+                <td className="px-4 py-3">{new Date(o.date).toLocaleDateString("ar-EG", { weekday: "long" })} — {o.date}</td>
                 <td className="px-4 py-3 font-bold text-primary">{o.bus}</td>
+                <td className="px-4 py-3 text-xs">{o.busType}</td>
                 <td className="px-4 py-3">{o.driver}</td>
                 <td className="px-4 py-3 text-warning">{currency(o.gasCost)}</td>
                 <td className="px-4 py-3 text-xs">{o.client1 !== "—" ? `${o.client1} / ${o.route1 || "—"}` : "—"}</td>

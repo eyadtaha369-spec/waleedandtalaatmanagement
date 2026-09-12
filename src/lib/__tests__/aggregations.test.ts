@@ -133,16 +133,16 @@ describe("nextMonthPrefix", () => {
 describe("computeClientInvoiceSummary", () => {
   it("sums amounts and counts shifts across all rows", () => {
     const result = computeClientInvoiceSummary([
-      { date: "2026-01-01", busCode: "WV-001", driver: "أحمد", route: "خط 1", amount: 500 },
-      { date: "2026-01-02", busCode: "WV-002", driver: "محمد", route: "خط 2", amount: 700 },
+      { date: "2026-01-01", busCode: "WV-001", busType: "أتوبيس 50", driver: "أحمد", route: "خط 1", amount: 500 },
+      { date: "2026-01-02", busCode: "WV-002", busType: "أتوبيس 33", driver: "محمد", route: "خط 2", amount: 700 },
     ]);
     expect(result).toEqual({ totalShifts: 2, totalBusesDeployed: 2, totalDue: 1200 });
   });
 
   it("counts each bus only once even if it ran multiple shifts", () => {
     const result = computeClientInvoiceSummary([
-      { date: "2026-01-01", busCode: "WV-001", driver: "أحمد", route: "خط 1", amount: 500 },
-      { date: "2026-01-02", busCode: "WV-001", driver: "أحمد", route: "خط 2", amount: 300 },
+      { date: "2026-01-01", busCode: "WV-001", busType: "أتوبيس 50", driver: "أحمد", route: "خط 1", amount: 500 },
+      { date: "2026-01-02", busCode: "WV-001", busType: "أتوبيس 50", driver: "أحمد", route: "خط 2", amount: 300 },
     ]);
     expect(result.totalBusesDeployed).toBe(1);
     expect(result.totalShifts).toBe(2);

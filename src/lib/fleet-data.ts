@@ -5,6 +5,7 @@ export interface Bus {
   code: string;
   plate: string;
   model: string;
+  busType: string;
   capacity: number;
   odometer: number;
   licenseExpiry: string;
@@ -69,6 +70,8 @@ export interface MaintenanceOrder {
   parts: string;
   cost: number;
   status: "بانتظار القطع" | "قيد التنفيذ" | "مكتمل";
+  inventoryItem: string;
+  quantityUsed: number;
 }
 
 

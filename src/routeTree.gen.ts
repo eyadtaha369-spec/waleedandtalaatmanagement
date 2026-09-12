@@ -21,6 +21,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
 import { Route as PayrollRouteImport } from './routes/payroll'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SuppliersRouteImport } from './routes/suppliers'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as WorkshopRouteImport } from './routes/workshop'
 
@@ -84,6 +85,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SuppliersRoute = SuppliersRouteImport.update({
+  id: '/suppliers',
+  path: '/suppliers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamRoute = TeamRouteImport.update({
   id: '/team',
   path: '/team',
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/suppliers': typeof SuppliersRoute
   '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
 }
@@ -124,6 +131,7 @@ export interface FileRoutesByTo {
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/suppliers': typeof SuppliersRoute
   '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
 }
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/suppliers': typeof SuppliersRoute
   '/team': typeof TeamRoute
   '/workshop': typeof WorkshopRoute
 }
@@ -159,6 +168,7 @@ export interface FileRouteTypes {
     | '/operations'
     | '/payroll'
     | '/reset-password'
+    | '/suppliers'
     | '/team'
     | '/workshop'
   fileRoutesByTo: FileRoutesByTo
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
     | '/operations'
     | '/payroll'
     | '/reset-password'
+    | '/suppliers'
     | '/team'
     | '/workshop'
   id:
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
     | '/operations'
     | '/payroll'
     | '/reset-password'
+    | '/suppliers'
     | '/team'
     | '/workshop'
   fileRoutesById: FileRoutesById
@@ -208,6 +220,7 @@ export interface RootRouteChildren {
   OperationsRoute: typeof OperationsRoute
   PayrollRoute: typeof PayrollRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SuppliersRoute: typeof SuppliersRoute
   TeamRoute: typeof TeamRoute
   WorkshopRoute: typeof WorkshopRoute
 }
@@ -298,6 +311,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/suppliers': {
+      id: '/suppliers'
+      path: '/suppliers'
+      fullPath: '/suppliers'
+      preLoaderRoute: typeof SuppliersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/team': {
       id: '/team'
       path: '/team'
@@ -328,6 +348,7 @@ const rootRouteChildren: RootRouteChildren = {
   OperationsRoute: OperationsRoute,
   PayrollRoute: PayrollRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SuppliersRoute: SuppliersRoute,
   TeamRoute: TeamRoute,
   WorkshopRoute: WorkshopRoute,
 }

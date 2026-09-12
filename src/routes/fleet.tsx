@@ -42,6 +42,15 @@ import {
   deleteDailyShift,
   bulkInsertBuses,
   bulkInsertDrivers,
+  fetchEmployees,
+  addEmployee,
+  updateEmployee,
+  deleteEmployee,
+  fetchEmployeeAttendance,
+  upsertEmployeeAttendance,
+  deleteEmployeeAttendance,
+  type Employee,
+  type EmployeeAttendanceRow,
 } from "@/lib/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CsvImportDialog } from "@/components/csv-import-dialog";
@@ -59,26 +68,32 @@ export const Route = createFileRoute("/fleet")({
 });
 
 const busTone = (s: Bus["status"]) => (s === "تعمل" ? "good" : s === "بالورشة" ? "warn" : "bad") as const;
+const busTypes = ["أتوبيس 50", "أتوبيس 33", "هاي إي اس (فان)", "ملاكي"];
 
-type DeleteTarget = { kind: "bus" | "driver" | "attendance"; id: string; label: string } | null;
+type DeleteTarget = { kind: "bus" | "driver" | "attendance" | "employee" | "employeeAttendance"; id: string; label: string } | null;
 
 function FleetPage() {
   const [buses, setBuses] = useState<Bus[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [attendanceRows, setAttendanceRows] = useState<Attendance[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeAttendanceRows, setEmployeeAttendanceRows] = useState<EmployeeAttendanceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Bus | null>(null);
   const [adding, setAdding] = useState(false);
   const [addingDriver, setAddingDriver] = useState(false);
+  const [addingEmployee, setAddingEmployee] = useState(false);
   const [importingBuses, setImportingBuses] = useState(false);
   const [importingDrivers, setImportingDrivers] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ id: "", code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
+  const [form, setForm] = useState({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
   const [driverForm, setDriverForm] = useState({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
+  const [employeeForm, setEmployeeForm] = useState({ id: "", name: "", phone: "", jobTitle: "ميكانيكي", baseSalary: "" });
   const [attendanceBusy, setAttendanceBusy] = useState<string | null>(null);
   const [addingAttendance, setAddingAttendance] = useState(false);
+  const [addingEmployeeAttendance, setAddingEmployeeAttendance] = useState(false);
   const todayStr = new Date().toISOString().slice(0, 10);
   const [attendanceForm, setAttendanceForm] = useState({
     id: "",
@@ -88,6 +103,7 @@ function FleetPage() {
     checkOut: "",
     status: "حاضر",
   });
+  const [employeeAttendanceForm, setEmployeeAttendanceForm] = useState({ id: "", employeeName: "", date: todayStr, status: "حاضر", notes: "" });
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -95,10 +111,12 @@ function FleetPage() {
     setLoading(true);
     setError(null);
     try {
-      const [b, d, a] = await Promise.all([fetchBuses(), fetchDrivers(), fetchAttendance()]);
+      const [b, d, a, emp, empAtt] = await Promise.all([fetchBuses(), fetchDrivers(), fetchAttendance(), fetchEmployees(), fetchEmployeeAttendance()]);
       setBuses(b);
       setDrivers(d);
       setAttendanceRows(a);
+      setEmployees(emp);
+      setEmployeeAttendanceRows(empAtt);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
     } finally {
@@ -119,12 +137,12 @@ function FleetPage() {
   );
 
   const openAddBus = () => {
-    setForm({ id: "", code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
+    setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
     setAdding(true);
   };
 
   const openEditBus = (b: Bus) => {
-    setForm({ id: b.id, code: b.code, plate: b.plate, model: b.model, capacity: String(b.capacity), odometer: String(b.odometer), status: b.status });
+    setForm({ id: b.id, code: b.code, plate: b.plate, model: b.model, busType: b.busType || "أتوبيس 50", capacity: String(b.capacity), odometer: String(b.odometer), status: b.status });
     setAdding(true);
   };
 
@@ -136,6 +154,7 @@ function FleetPage() {
         code: form.code,
         plate: form.plate,
         model: form.model,
+        busType: form.busType,
         capacity: Number(form.capacity) || 0,
         odometer: Number(form.odometer) || 0,
         status: form.status,
@@ -146,10 +165,63 @@ function FleetPage() {
         await addBusApi(payload);
       }
       await loadAll();
-      setForm({ id: "", code: "", plate: "", model: "", capacity: "", odometer: "", status: "تعمل" });
+      setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
       setAdding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر حفظ الأتوبيس");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openAddEmployee = () => {
+    setEmployeeForm({ id: "", name: "", phone: "", jobTitle: "ميكانيكي", baseSalary: "" });
+    setAddingEmployee(true);
+  };
+  const openEditEmployee = (e: Employee) => {
+    setEmployeeForm({ id: e.id, name: e.name, phone: e.phone, jobTitle: e.jobTitle || "ميكانيكي", baseSalary: String(e.baseSalary) });
+    setAddingEmployee(true);
+  };
+  const submitEmployee = async () => {
+    if (!employeeForm.name.trim()) return;
+    setSaving(true);
+    try {
+      const payload = { name: employeeForm.name, phone: employeeForm.phone, jobTitle: employeeForm.jobTitle, baseSalary: Number(employeeForm.baseSalary) || 0 };
+      if (employeeForm.id) await updateEmployee(employeeForm.id, payload);
+      else await addEmployee(payload);
+      await loadAll();
+      setEmployeeForm({ id: "", name: "", phone: "", jobTitle: "ميكانيكي", baseSalary: "" });
+      setAddingEmployee(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر حفظ بيانات الموظف");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEmployeeAttendanceForm = (row?: EmployeeAttendanceRow) => {
+    if (row) {
+      setEmployeeAttendanceForm({ id: row.id, employeeName: row.employee, date: row.date, status: row.status, notes: row.notes });
+    } else {
+      setEmployeeAttendanceForm({ id: "", employeeName: "", date: todayStr, status: "حاضر", notes: "" });
+    }
+    setAddingEmployeeAttendance(true);
+  };
+  const submitEmployeeAttendance = async () => {
+    if (!employeeAttendanceForm.employeeName.trim()) return;
+    setSaving(true);
+    try {
+      await upsertEmployeeAttendance({
+        id: employeeAttendanceForm.id || undefined,
+        employeeName: employeeAttendanceForm.employeeName,
+        date: employeeAttendanceForm.date,
+        status: employeeAttendanceForm.status,
+        notes: employeeAttendanceForm.notes,
+      });
+      await loadAll();
+      setAddingEmployeeAttendance(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر حفظ سجل حضور الموظف");
     } finally {
       setSaving(false);
     }
@@ -252,6 +324,8 @@ function FleetPage() {
     try {
       if (deleteTarget.kind === "bus") await deleteBus(deleteTarget.id);
       else if (deleteTarget.kind === "driver") await deleteDriver(deleteTarget.id);
+      else if (deleteTarget.kind === "employee") await deleteEmployee(deleteTarget.id);
+      else if (deleteTarget.kind === "employeeAttendance") await deleteEmployeeAttendance(deleteTarget.id);
       else await deleteDailyShift(deleteTarget.id);
       await loadAll();
       setDeleteTarget(null);
@@ -273,7 +347,7 @@ function FleetPage() {
       )}
 
       <Tabs defaultValue="buses">
-        <TabsList className="no-print mb-4 border border-border bg-secondary/50">
+        <TabsList className="no-print mb-4 flex-wrap border border-border bg-secondary/50">
           <TabsTrigger value="buses">الأتوبيسات</TabsTrigger>
           <TabsTrigger value="drivers">السائقون</TabsTrigger>
           <TabsTrigger value="attendance">حضور السائقين</TabsTrigger>
@@ -296,10 +370,10 @@ function FleetPage() {
                 </>
               }
             />
-            <DataTable head={["الكود", "رقم اللوحة", "الموديل", "السعة", "قراءة العداد", "السائق", "الحالة", "الإجراءات"]}>
+            <DataTable head={["الكود", "رقم اللوحة", "الموديل", "نوع السيارة", "السعة", "قراءة العداد", "السائق", "الحالة", "الإجراءات"]}>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+                  <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
                 </tr>
               ) : (
                 filtered.map((b) => (
@@ -307,6 +381,7 @@ function FleetPage() {
                     <td className="px-4 py-3 font-bold text-primary">{b.code}</td>
                     <td className="px-4 py-3">{b.plate}</td>
                     <td className="px-4 py-3">{b.model}</td>
+                    <td className="px-4 py-3 text-xs">{b.busType}</td>
                     <td className="px-4 py-3">{b.capacity} راكب</td>
                     <td className="px-4 py-3">{b.odometer.toLocaleString("ar-EG")} كم</td>
                     <td className="px-4 py-3">{b.driver}</td>
@@ -479,6 +554,103 @@ function FleetPage() {
         </TabsContent>
       </Tabs>
 
+      <Tabs defaultValue="employees" className="mt-6">
+        <TabsList className="no-print mb-4 border border-border bg-secondary/50">
+          <TabsTrigger value="employees">إدارة الموظفين</TabsTrigger>
+          <TabsTrigger value="employeeAttendance">حضور الموظفين</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="employees">
+          <Panel title="الموظفون (ورشة، مخزن، إداريون)">
+            <Toolbar
+              query={query}
+              onQuery={setQuery}
+              placeholder="ابحث باسم الموظف..."
+              onExport={() => exportToExcel("الموظفون", employees as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddEmployee}>
+                  <Plus className="ml-2 h-4 w-4" /> إضافة موظف
+                </Button>
+              }
+            />
+            <DataTable head={["الاسم", "الهاتف", "الوظيفة", "المرتب الأساسي", "الإجراءات"]}>
+              {employees
+                .filter((e) => e.name.includes(query) || query === "")
+                .map((e) => (
+                  <tr key={e.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3 font-bold">{e.name}</td>
+                    <td className="px-4 py-3">{e.phone || "—"}</td>
+                    <td className="px-4 py-3">
+                      <StatusPill label={e.jobTitle || "—"} tone="info" />
+                    </td>
+                    <td className="px-4 py-3">{e.baseSalary.toLocaleString("ar-EG")} ج.م</td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditEmployee(e)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "employee", id: e.id, label: `الموظف ${e.name}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </DataTable>
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="employeeAttendance">
+          <Panel title="سجل حضور الموظفين">
+            <Toolbar
+              query={query}
+              onQuery={setQuery}
+              placeholder="ابحث باسم الموظف..."
+              onExport={() => exportToExcel("حضور الموظفين", employeeAttendanceRows as unknown as Record<string, string | number>[])}
+              extra={
+                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => openEmployeeAttendanceForm()}>
+                  <Plus className="ml-2 h-4 w-4" /> تسجيل حضور
+                </Button>
+              }
+            />
+            <DataTable head={["الموظف", "التاريخ", "الحالة", "ملاحظات", "الإجراءات"]}>
+              {employeeAttendanceRows
+                .filter((a) => a.employee.includes(query) || query === "")
+                .map((a) => (
+                  <tr key={a.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3 font-bold">{a.employee}</td>
+                    <td className="px-4 py-3">{a.date}</td>
+                    <td className="px-4 py-3">
+                      <StatusPill label={a.status} tone={a.status === "حاضر" ? "good" : a.status === "بدل" ? "info" : a.status === "إجازة" ? "warn" : "bad"} />
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{a.notes || "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEmployeeAttendanceForm(a)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "employeeAttendance", id: a.id, label: `حضور ${a.employee} بتاريخ ${a.date}` })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </DataTable>
+          </Panel>
+        </TabsContent>
+      </Tabs>
+
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
@@ -536,6 +708,19 @@ function FleetPage() {
                 />
               </div>
             ))}
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">نوع السيارة</Label>
+              <Select value={form.busType} onValueChange={(v) => setForm({ ...form, busType: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {busTypes.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">الحالة</Label>
               <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
@@ -678,6 +863,98 @@ function FleetPage() {
         onImport={bulkInsertDrivers}
         onDone={loadAll}
       />
+
+      <Dialog open={addingEmployee} onOpenChange={setAddingEmployee}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">{employeeForm.id ? "تعديل بيانات الموظف" : "إضافة موظف جديد"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">بيانات موظف بدون رخصة قيادة (ورشة / مخزن / إداري)</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الاسم</Label>
+              <Input value={employeeForm.name} onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })} className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الهاتف</Label>
+              <Input value={employeeForm.phone} onChange={(e) => setEmployeeForm({ ...employeeForm, phone: e.target.value })} type="tel" className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الوظيفة</Label>
+              <Select value={employeeForm.jobTitle} onValueChange={(v) => setEmployeeForm({ ...employeeForm, jobTitle: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ميكانيكي">ميكانيكي</SelectItem>
+                  <SelectItem value="مسؤول مخزن">مسؤول مخزن</SelectItem>
+                  <SelectItem value="إداري">إداري</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">المرتب الأساسي</Label>
+              <Input value={employeeForm.baseSalary} onChange={(e) => setEmployeeForm({ ...employeeForm, baseSalary: e.target.value })} type="number" className="border-border bg-input/60" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitEmployee} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : employeeForm.id ? "حفظ التعديلات" : "حفظ الموظف"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingEmployeeAttendance} onOpenChange={setAddingEmployeeAttendance}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">{employeeAttendanceForm.id ? "تعديل سجل حضور" : "تسجيل حضور موظف"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">سجل حضور يومي لموظفي الورشة والمخزن والإدارة</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الموظف</Label>
+              <Select value={employeeAttendanceForm.employeeName} onValueChange={(v) => setEmployeeAttendanceForm({ ...employeeAttendanceForm, employeeName: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue placeholder="اختر الموظف" />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map((e) => (
+                    <SelectItem key={e.id} value={e.name}>{e.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">التاريخ</Label>
+              <Input value={employeeAttendanceForm.date} onChange={(e) => setEmployeeAttendanceForm({ ...employeeAttendanceForm, date: e.target.value })} type="date" className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الحالة</Label>
+              <Select value={employeeAttendanceForm.status} onValueChange={(v) => setEmployeeAttendanceForm({ ...employeeAttendanceForm, status: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="حاضر">حاضر</SelectItem>
+                  <SelectItem value="غائب">غائب</SelectItem>
+                  <SelectItem value="إجازة">إجازة</SelectItem>
+                  <SelectItem value="بدل">بدل</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">ملاحظات</Label>
+              <Input value={employeeAttendanceForm.notes} onChange={(e) => setEmployeeAttendanceForm({ ...employeeAttendanceForm, notes: e.target.value })} className="border-border bg-input/60" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitEmployeeAttendance} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ السجل"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent className="glass text-foreground" dir="rtl">

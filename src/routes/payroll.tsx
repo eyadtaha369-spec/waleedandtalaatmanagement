@@ -239,14 +239,14 @@ function PayrollPage() {
             </>
           }
         />
-        <DataTable head={["اسم السائق", "المرتب الأساسي", "إجمالي الإضافي/البدلات", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
+        <DataTable head={["اسم السائق", "المرتب الأساسي", "إجمالي الإضافي/البدلات", "عمولة الرحلات", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
           {loading ? (
             <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
             </tr>
           ) : filteredPayroll.length === 0 ? (
             <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">لا يوجد سائقون بعد.</td>
+              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">لا يوجد سائقون بعد.</td>
             </tr>
           ) : (
             filteredPayroll.map((p) => (
@@ -254,6 +254,7 @@ function PayrollPage() {
                 <td className="px-4 py-3 font-bold">{p.driver}</td>
                 <td className="px-4 py-3">{currency(p.baseSalary)}</td>
                 <td className="px-4 py-3 text-success">{currency(p.totalOvertime)}</td>
+                <td className="px-4 py-3 text-success">{currency(p.tripFees)}</td>
                 <td className="px-4 py-3 text-warning">{currency(p.totalAdvances)}</td>
                 <td className="px-4 py-3 text-destructive">{currency(p.totalPenalties)}</td>
                 <td className="px-4 py-3 font-bold text-primary">{currency(p.netSalary)}</td>

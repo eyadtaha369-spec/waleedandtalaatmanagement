@@ -24,6 +24,7 @@ import { Route as ReportRouteImport } from './routes/report'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
 import { Route as TeamRouteImport } from './routes/team'
+import { Route as TripsRouteImport } from './routes/trips'
 import { Route as WorkshopRouteImport } from './routes/workshop'
 
 const IndexRoute = IndexRouteImport.update({
@@ -101,6 +102,11 @@ const TeamRoute = TeamRouteImport.update({
   path: '/team',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TripsRoute = TripsRouteImport.update({
+  id: '/trips',
+  path: '/trips',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkshopRoute = WorkshopRouteImport.update({
   id: '/workshop',
   path: '/workshop',
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/suppliers': typeof SuppliersRoute
   '/team': typeof TeamRoute
+  '/trips': typeof TripsRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRoutesByTo {
@@ -141,6 +148,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/suppliers': typeof SuppliersRoute
   '/team': typeof TeamRoute
+  '/trips': typeof TripsRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRoutesById {
@@ -160,6 +168,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/suppliers': typeof SuppliersRoute
   '/team': typeof TeamRoute
+  '/trips': typeof TripsRoute
   '/workshop': typeof WorkshopRoute
 }
 export interface FileRouteTypes {
@@ -180,6 +189,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/suppliers'
     | '/team'
+    | '/trips'
     | '/workshop'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -198,6 +208,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/suppliers'
     | '/team'
+    | '/trips'
     | '/workshop'
   id:
     | '__root__'
@@ -216,6 +227,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/suppliers'
     | '/team'
+    | '/trips'
     | '/workshop'
   fileRoutesById: FileRoutesById
 }
@@ -235,6 +247,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SuppliersRoute: typeof SuppliersRoute
   TeamRoute: typeof TeamRoute
+  TripsRoute: typeof TripsRoute
   WorkshopRoute: typeof WorkshopRoute
 }
 
@@ -345,6 +358,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TeamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/trips': {
+      id: '/trips'
+      path: '/trips'
+      fullPath: '/trips'
+      preLoaderRoute: typeof TripsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/workshop': {
       id: '/workshop'
       path: '/workshop'
@@ -371,6 +391,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SuppliersRoute: SuppliersRoute,
   TeamRoute: TeamRoute,
+  TripsRoute: TripsRoute,
   WorkshopRoute: WorkshopRoute,
 }
 export const routeTree = rootRouteImport

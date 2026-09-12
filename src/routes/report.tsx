@@ -124,9 +124,6 @@ function ReportPage() {
                 <span>إجمالي الإيرادات</span>
                 <span className="text-success">{currency(report.totalRevenue)}</span>
               </div>
-              {report.tripRevenue === 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">* إيرادات الرحلات الخارجية ستظهر هنا بعد تفعيل وحدة إدارة الرحلات.</p>
-              )}
             </Panel>
 
             <Panel title="🔴 المصروفات والتشغيل">

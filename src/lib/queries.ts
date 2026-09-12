@@ -866,18 +866,21 @@ export interface DriverPayrollRow {
   totalOvertime: number;
   totalAdvances: number;
   totalPenalties: number;
+  tripFees: number;
   netSalary: number;
 }
 
 export function computeDriverPayroll(
   drivers: { name: string; base_salary: number }[],
   shifts: { driver: string; overtimeAllowance: number; dailyAdvance: number; penalty: number }[],
+  tripFees: { driver: string; fee: number }[] = [],
 ): DriverPayrollRow[] {
   return drivers.map((d) => {
     const rows = shifts.filter((s) => s.driver === d.name);
     const totalOvertime = rows.reduce((sum, r) => sum + r.overtimeAllowance, 0);
     const totalAdvances = rows.reduce((sum, r) => sum + r.dailyAdvance, 0);
     const totalPenalties = rows.reduce((sum, r) => sum + r.penalty, 0);
+    const driverTripFees = tripFees.filter((t) => t.driver === d.name).reduce((sum, t) => sum + t.fee, 0);
     const baseSalary = Number(d.base_salary ?? 0);
     return {
       driver: d.name,
@@ -885,20 +888,24 @@ export function computeDriverPayroll(
       totalOvertime,
       totalAdvances,
       totalPenalties,
-      netSalary: baseSalary + totalOvertime - (totalAdvances + totalPenalties),
+      tripFees: driverTripFees,
+      netSalary: baseSalary + totalOvertime + driverTripFees - (totalAdvances + totalPenalties),
     };
   });
 }
 
 export async function fetchDriverPayroll(monthPrefix: string): Promise<DriverPayrollRow[]> {
-  const [{ data: drivers, error: dErr }, shifts] = await Promise.all([
+  const nextMonth = nextMonthPrefix(monthPrefix);
+  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }] = await Promise.all([
     supabase.from("drivers").select("name, base_salary"),
     fetchDailyShifts(monthPrefix),
+    supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", `${monthPrefix}-01`).lt("trip_date", `${nextMonth}-01`),
   ]);
   if (dErr) throw dErr;
   return computeDriverPayroll(
     (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) })),
     shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty })),
+    (tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
   );
 }
 
@@ -1741,7 +1748,13 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
 
   const subscriptionRevenue = (subPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
   const companyRevenue = ops.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
-  const tripRevenue = 0; // populated once the trips module (Spec #3) exists
+  const { data: tripsThisMonth } = await supabase
+    .from("trips")
+    .select("total_price")
+    .neq("status", "ملغاة")
+    .gte("trip_date", `${monthPrefix}-01`)
+    .lt("trip_date", `${nextMonth}-01`);
+  const tripRevenue = (tripsThisMonth ?? []).reduce((sum: number, t: any) => sum + Number(t.total_price ?? 0), 0);
 
   const driverPayrollTotal = driverPayroll.reduce((sum, p) => sum + p.netSalary, 0);
   const staffPayrollTotal = (staffPayslips ?? []).reduce((sum: number, p: any) => {
@@ -1794,4 +1807,94 @@ export async function fetchSupplierMonthlyBreakdown(monthPrefix: string): Promis
     purchasedThisMonth: purchasedBySupplier.get(s.id) ?? 0,
     balanceDue: Number(s.balance_due ?? 0),
   }));
+}
+
+// ---- Private trips & excursions (Spec #3) ----
+
+export interface Trip {
+  id: string;
+  clientName: string;
+  clientPhone: string;
+  busId: string | null;
+  bus: string;
+  driverId: string | null;
+  driver: string;
+  tripDate: string;
+  destination: string;
+  totalPrice: number;
+  amountPaid: number;
+  balanceDue: number;
+  driverFee: number;
+  status: "مجدولة" | "جاري التنفيذ" | "مكتملة" | "ملغاة";
+}
+
+export async function fetchTrips(): Promise<Trip[]> {
+  const { data, error } = await supabase
+    .from("trips")
+    .select("*, buses(bus_code), drivers(name)")
+    .order("trip_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    clientName: t.client_name,
+    clientPhone: t.client_phone ?? "",
+    busId: t.bus_id,
+    bus: t.buses?.bus_code ?? "—",
+    driverId: t.driver_id,
+    driver: t.drivers?.name ?? "—",
+    tripDate: t.trip_date,
+    destination: t.destination ?? "",
+    totalPrice: Number(t.total_price ?? 0),
+    amountPaid: Number(t.amount_paid ?? 0),
+    balanceDue: Number(t.balance_due ?? 0),
+    driverFee: Number(t.driver_fee ?? 0),
+    status: t.status ?? "مجدولة",
+  }));
+}
+
+interface TripInput {
+  clientName: string;
+  clientPhone: string;
+  busCode: string;
+  driverName: string;
+  tripDate: string;
+  destination: string;
+  totalPrice: number;
+  amountPaid: number;
+  driverFee: number;
+  status: string;
+}
+
+async function resolveTripPayload(input: TripInput) {
+  const [{ data: bus }, { data: driver }] = await Promise.all([
+    input.busCode.trim() ? supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle() : Promise.resolve({ data: null }),
+    input.driverName.trim() ? supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  return {
+    client_name: input.clientName,
+    client_phone: input.clientPhone,
+    bus_id: bus?.id ?? null,
+    driver_id: driver?.id ?? null,
+    trip_date: input.tripDate,
+    destination: input.destination,
+    total_price: input.totalPrice,
+    amount_paid: input.amountPaid,
+    driver_fee: input.driverFee,
+    status: input.status,
+  };
+}
+
+export async function addTrip(input: TripInput) {
+  const payload = await resolveTripPayload(input);
+  const { error } = await supabase.from("trips").insert(payload);
+  if (error) throw error;
+}
+export async function updateTrip(id: string, input: TripInput) {
+  const payload = await resolveTripPayload(input);
+  const { error } = await supabase.from("trips").update(payload).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteTrip(id: string) {
+  const { error } = await supabase.from("trips").delete().eq("id", id);
+  if (error) throw error;
 }

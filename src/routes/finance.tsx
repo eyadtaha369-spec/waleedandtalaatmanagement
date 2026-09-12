@@ -501,10 +501,12 @@ function FinancePage() {
                   <SelectValue placeholder="اختر البند" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="زيوت ومحروقات">زيوت ومحروقات</SelectItem>
+                  <SelectItem value="غاز">غاز</SelectItem>
                   <SelectItem value="قطع غيار">قطع غيار</SelectItem>
-                  <SelectItem value="إداريات">إداريات</SelectItem>
+                  <SelectItem value="موردين">موردين</SelectItem>
                   <SelectItem value="مرتبات">مرتبات</SelectItem>
+                  <SelectItem value="إداريات">إداريات</SelectItem>
+                  <SelectItem value="مصاريف خارجية">مصاريف خارجية</SelectItem>
                 </SelectContent>
               </Select>
             </div>

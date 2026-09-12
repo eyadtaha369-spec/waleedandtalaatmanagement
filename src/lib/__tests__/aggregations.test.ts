@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -127,5 +127,56 @@ describe("nextMonthPrefix", () => {
   it("pads single-digit months with a leading zero", () => {
     expect(nextMonthPrefix("2026-01")).toBe("2026-02");
     expect(nextMonthPrefix("2026-09")).toBe("2026-10");
+  });
+});
+
+describe("computeClientInvoiceSummary", () => {
+  it("sums amounts and counts shifts across all rows", () => {
+    const result = computeClientInvoiceSummary([
+      { date: "2026-01-01", busCode: "WV-001", driver: "أحمد", route: "خط 1", amount: 500 },
+      { date: "2026-01-02", busCode: "WV-002", driver: "محمد", route: "خط 2", amount: 700 },
+    ]);
+    expect(result).toEqual({ totalShifts: 2, totalBusesDeployed: 2, totalDue: 1200 });
+  });
+
+  it("counts each bus only once even if it ran multiple shifts", () => {
+    const result = computeClientInvoiceSummary([
+      { date: "2026-01-01", busCode: "WV-001", driver: "أحمد", route: "خط 1", amount: 500 },
+      { date: "2026-01-02", busCode: "WV-001", driver: "أحمد", route: "خط 2", amount: 300 },
+    ]);
+    expect(result.totalBusesDeployed).toBe(1);
+    expect(result.totalShifts).toBe(2);
+    expect(result.totalDue).toBe(800);
+  });
+
+  it("returns zeros for a client with no shifts this month", () => {
+    expect(computeClientInvoiceSummary([])).toEqual({ totalShifts: 0, totalBusesDeployed: 0, totalDue: 0 });
+  });
+});
+
+describe("computeMonthlyPL", () => {
+  it("computes net profit as revenue minus gas, general expenses, and payroll", () => {
+    const result = computeMonthlyPL(
+      [{ gasCost: 200, fare1: 1000, fare2: 500 }],
+      300, // general expenses
+      2000, // net driver payroll
+    );
+    expect(result).toEqual({ totalRevenue: 1500, totalExpenses: 2500, netProfit: -1000 });
+  });
+
+  it("sums fare1 and fare2 from every operation, and gas across all of them", () => {
+    const result = computeMonthlyPL(
+      [
+        { gasCost: 100, fare1: 500, fare2: 0 },
+        { gasCost: 150, fare1: 400, fare2: 200 },
+      ],
+      0,
+      0,
+    );
+    expect(result).toEqual({ totalRevenue: 1100, totalExpenses: 250, netProfit: 850 });
+  });
+
+  it("handles a month with zero operations", () => {
+    expect(computeMonthlyPL([], 100, 50)).toEqual({ totalRevenue: 0, totalExpenses: 150, netProfit: -150 });
   });
 });

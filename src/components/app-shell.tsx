@@ -1,6 +1,7 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Bus,
+  Building2,
   ClipboardList,
   Coins,
   Database,
@@ -10,6 +11,7 @@ import {
   Receipt,
   Route as RouteIcon,
   Search,
+  Truck,
   Users,
   Wallet,
   Wrench,
@@ -33,7 +35,9 @@ import brandLogo from "@/assets/brand-logo.jpeg.asset.json";
 const nav = [
   { to: "/", label: "لوحة التحكّم", icon: LayoutDashboard, roles: null },
   { to: "/fleet", label: "الأسطول والسائقون", icon: Bus, roles: null },
+  { to: "/dispatch", label: "الحركة والورديات اليومية", icon: Truck, roles: ["admin", "accountant", "dispatcher"] },
   { to: "/operations", label: "الخطوط والاشتراكات", icon: RouteIcon, roles: null },
+  { to: "/clients", label: "كشف حساب الشركات", icon: Building2, roles: ["admin", "accountant"] },
   { to: "/workshop", label: "الورشة والمخزون والسولار", icon: Wrench, roles: null },
   { to: "/finance", label: "المالية والخزينة", icon: Coins, roles: ["admin", "accountant"] },
   { to: "/payroll", label: "التشغيل اليومي والمرتبات", icon: Wallet, roles: ["admin", "accountant"] },

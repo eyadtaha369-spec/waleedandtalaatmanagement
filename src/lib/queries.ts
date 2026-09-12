@@ -1170,3 +1170,178 @@ export async function deleteLedgerTransaction(id: string) {
   const { error } = await supabase.from("payments").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ---- Corporate clients & daily bus operations (dispatch) ----
+
+export interface Client {
+  id: string;
+  name: string;
+  contactPerson: string;
+  phone: string;
+}
+
+export async function fetchClients(): Promise<Client[]> {
+  const { data, error } = await supabase.from("clients").select("*").order("client_name");
+  if (error) throw error;
+  return (data ?? []).map((c: any) => ({ id: c.id, name: c.client_name, contactPerson: c.contact_person ?? "", phone: c.phone ?? "" }));
+}
+
+export async function addClient(input: { name: string; contactPerson: string; phone: string }) {
+  const { error } = await supabase.from("clients").insert({ client_name: input.name, contact_person: input.contactPerson, phone: input.phone });
+  if (error) throw error;
+}
+export async function updateClient(id: string, input: { name: string; contactPerson: string; phone: string }) {
+  const { error } = await supabase.from("clients").update({ client_name: input.name, contact_person: input.contactPerson, phone: input.phone }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteClient(id: string) {
+  const { error } = await supabase.from("clients").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export interface DailyOperation {
+  id: string;
+  date: string;
+  busId: string | null;
+  bus: string;
+  driverId: string | null;
+  driver: string;
+  gasCost: number;
+  gasLiters: number;
+  odometerReading: number;
+  client1Id: string | null;
+  client1: string;
+  route1: string;
+  fare1: number;
+  client2Id: string | null;
+  client2: string;
+  route2: string;
+  fare2: number;
+  notes: string;
+}
+
+export async function fetchDailyOperations(monthPrefix: string): Promise<DailyOperation[]> {
+  const { data, error } = await supabase
+    .from("daily_bus_operations")
+    .select("*, buses(bus_code), drivers(name), client1:client_id_1(client_name), client2:client_id_2(client_name)")
+    .gte("op_date", `${monthPrefix}-01`)
+    .lt("op_date", `${nextMonthPrefix(monthPrefix)}-01`)
+    .order("op_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((o: any) => ({
+    id: o.id,
+    date: o.op_date,
+    busId: o.bus_id,
+    bus: o.buses?.bus_code ?? "—",
+    driverId: o.driver_id,
+    driver: o.drivers?.name ?? "—",
+    gasCost: Number(o.gas_cost ?? 0),
+    gasLiters: Number(o.gas_liters ?? 0),
+    odometerReading: Number(o.odometer_reading ?? 0),
+    client1Id: o.client_id_1,
+    client1: o.client1?.client_name ?? "—",
+    route1: o.route_1 ?? "",
+    fare1: Number(o.fare_1 ?? 0),
+    client2Id: o.client_id_2,
+    client2: o.client2?.client_name ?? "—",
+    route2: o.route_2 ?? "",
+    fare2: Number(o.fare_2 ?? 0),
+    notes: o.notes ?? "",
+  }));
+}
+
+interface DailyOperationInput {
+  date: string;
+  busCode: string;
+  driverName: string;
+  gasCost: number;
+  gasLiters: number;
+  odometerReading: number;
+  client1Name: string;
+  route1: string;
+  fare1: number;
+  client2Name: string;
+  route2: string;
+  fare2: number;
+  notes: string;
+}
+
+async function resolveDailyOperationPayload(input: DailyOperationInput) {
+  const [{ data: bus }, { data: driver }, { data: client1 }, { data: client2 }] = await Promise.all([
+    input.busCode.trim() ? supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle() : Promise.resolve({ data: null }),
+    input.driverName.trim() ? supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle() : Promise.resolve({ data: null }),
+    input.client1Name.trim() ? supabase.from("clients").select("id").eq("client_name", input.client1Name).maybeSingle() : Promise.resolve({ data: null }),
+    input.client2Name.trim() ? supabase.from("clients").select("id").eq("client_name", input.client2Name).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  return {
+    op_date: input.date,
+    bus_id: bus?.id ?? null,
+    driver_id: driver?.id ?? null,
+    gas_cost: input.gasCost,
+    gas_liters: input.gasLiters,
+    odometer_reading: input.odometerReading,
+    client_id_1: client1?.id ?? null,
+    route_1: input.route1 || null,
+    fare_1: input.fare1,
+    client_id_2: client2?.id ?? null,
+    route_2: input.route2 || null,
+    fare_2: input.fare2,
+    notes: input.notes,
+  };
+}
+
+export async function addDailyOperation(input: DailyOperationInput) {
+  const payload = await resolveDailyOperationPayload(input);
+  const { error } = await supabase.from("daily_bus_operations").insert(payload);
+  if (error) throw error;
+}
+export async function updateDailyOperation(id: string, input: DailyOperationInput) {
+  const payload = await resolveDailyOperationPayload(input);
+  const { error } = await supabase.from("daily_bus_operations").update(payload).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteDailyOperation(id: string) {
+  const { error } = await supabase.from("daily_bus_operations").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---- Client invoicing (accounts receivable per corporate client) ----
+
+export interface ClientInvoiceRow {
+  date: string;
+  busCode: string;
+  driver: string;
+  route: string;
+  amount: number;
+}
+
+export async function fetchClientInvoiceRows(clientName: string, monthPrefix: string): Promise<ClientInvoiceRow[]> {
+  const ops = await fetchDailyOperations(monthPrefix);
+  const rows: ClientInvoiceRow[] = [];
+  for (const o of ops) {
+    if (o.client1 === clientName) rows.push({ date: o.date, busCode: o.bus, driver: o.driver, route: o.route1, amount: o.fare1 });
+    if (o.client2 === clientName) rows.push({ date: o.date, busCode: o.bus, driver: o.driver, route: o.route2, amount: o.fare2 });
+  }
+  return rows;
+}
+
+export function computeClientInvoiceSummary(rows: ClientInvoiceRow[]) {
+  return {
+    totalShifts: rows.length,
+    totalBusesDeployed: new Set(rows.map((r) => r.busCode)).size,
+    totalDue: rows.reduce((sum, r) => sum + r.amount, 0),
+  };
+}
+
+// ---- Executive P&L ----
+
+export function computeMonthlyPL(
+  operations: { gasCost: number; fare1: number; fare2: number }[],
+  generalExpenseTotal: number,
+  netDriverPayrollTotal: number,
+) {
+  const totalRevenue = operations.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
+  const totalGas = operations.reduce((sum, o) => sum + o.gasCost, 0);
+  const totalExpenses = totalGas + generalExpenseTotal + netDriverPayrollTotal;
+  return { totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
+}

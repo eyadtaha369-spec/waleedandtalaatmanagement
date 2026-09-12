@@ -1571,3 +1571,227 @@ export async function receiveInventoryStock(input: {
   // keep unit_price on the item itself current for display purposes
   await supabase.from("inventory").update({ unit_price: input.unitPrice }).eq("id", item!.id);
 }
+
+// ---- Executive Monthly Financial Report (Spec #2) ----
+
+export interface MonthlyFinancialReport {
+  revenueSubscriptionsAndClients: number;
+  revenueExternalTripsAndCash: number;
+  totalRevenue: number;
+  expenseSalaries: number;
+  expenseSparePartsFromStock: number;
+  expenseExternalMaintenance: number;
+  expenseFuel: number;
+  expenseAdminAndMisc: number;
+  totalExpenses: number;
+  netProfit: number;
+}
+
+export function computeFinancialReport(inputs: {
+  clientRevenue: number;
+  studentCollections: number;
+  externalTripsRevenue: number;
+  driverAndEmployeeSalaries: number;
+  sparePartsCost: number;
+  externalMaintenanceCost: number;
+  fuelCost: number;
+  adminAndMiscExpenses: number;
+}): MonthlyFinancialReport {
+  const revenueSubscriptionsAndClients = inputs.clientRevenue + inputs.studentCollections;
+  const revenueExternalTripsAndCash = inputs.externalTripsRevenue;
+  const totalRevenue = revenueSubscriptionsAndClients + revenueExternalTripsAndCash;
+  const totalExpenses =
+    inputs.driverAndEmployeeSalaries + inputs.sparePartsCost + inputs.externalMaintenanceCost + inputs.fuelCost + inputs.adminAndMiscExpenses;
+  return {
+    revenueSubscriptionsAndClients,
+    revenueExternalTripsAndCash,
+    totalRevenue,
+    expenseSalaries: inputs.driverAndEmployeeSalaries,
+    expenseSparePartsFromStock: inputs.sparePartsCost,
+    expenseExternalMaintenance: inputs.externalMaintenanceCost,
+    expenseFuel: inputs.fuelCost,
+    expenseAdminAndMisc: inputs.adminAndMiscExpenses,
+    totalExpenses,
+    netProfit: totalRevenue - totalExpenses,
+  };
+}
+
+export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<MonthlyFinancialReport> {
+  const nextMonth = `${nextMonthPrefix(monthPrefix)}-01`;
+  const monthStart = `${monthPrefix}-01`;
+
+  const [
+    ops,
+    { data: studentPayments },
+    driverPayroll,
+    { data: employees },
+    { data: outTransactions },
+    { data: maintenanceOrders },
+    { data: fuelLogs },
+    { data: generalExpenses },
+  ] = await Promise.all([
+    fetchDailyOperations(monthPrefix),
+    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", monthStart).lt("date", nextMonth),
+    fetchDriverPayroll(monthPrefix),
+    supabase.from("employees").select("base_salary"),
+    supabase.from("inventory_transactions").select("quantity, inventory(unit_price)").eq("type", "OUT").gte("created_at", monthStart).lt("created_at", nextMonth),
+    supabase.from("maintenance_orders").select("total_cost").gte("created_at", monthStart).lt("created_at", nextMonth),
+    supabase.from("fuel_logs").select("cost").gte("date", monthStart).lt("date", nextMonth),
+    supabase.from("expenses").select("category, amount").gte("date", monthStart).lt("date", nextMonth),
+  ]);
+
+  const clientRevenue = ops.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
+  const studentCollections = (studentPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
+  const driverSalaries = driverPayroll.reduce((sum, p) => sum + p.netSalary, 0);
+  const employeeSalaries = (employees ?? []).reduce((sum, e: any) => sum + Number(e.base_salary ?? 0), 0);
+  const sparePartsCost = (outTransactions ?? []).reduce((sum, t: any) => sum + Number(t.quantity ?? 0) * Number(t.inventory?.unit_price ?? 0), 0);
+  const externalMaintenanceCost = (maintenanceOrders ?? []).reduce((sum, m: any) => sum + Number(m.total_cost ?? 0), 0);
+  const gasFromDispatch = ops.reduce((sum, o) => sum + o.gasCost, 0);
+  const gasFromFuelLogs = (fuelLogs ?? []).reduce((sum, f: any) => sum + Number(f.cost ?? 0), 0);
+  const adminAndMisc = (generalExpenses ?? [])
+    .filter((e: any) => ["إداريات", "مصاريف خارجية", "موردين"].includes(e.category))
+    .reduce((sum, e: any) => sum + Number(e.amount ?? 0), 0);
+
+  return computeFinancialReport({
+    clientRevenue,
+    studentCollections,
+    externalTripsRevenue: 0, // wired once the Trips module exists
+    driverAndEmployeeSalaries: driverSalaries + employeeSalaries,
+    sparePartsCost,
+    externalMaintenanceCost,
+    fuelCost: gasFromDispatch + gasFromFuelLogs,
+    adminAndMiscExpenses: adminAndMisc,
+  });
+}
+
+export interface SupplierMonthlySummary {
+  id: string;
+  name: string;
+  purchasesThisMonth: number;
+  balanceDue: number;
+}
+
+export async function fetchSupplierMonthlySummary(monthPrefix: string): Promise<SupplierMonthlySummary[]> {
+  const nextMonth = `${nextMonthPrefix(monthPrefix)}-01`;
+  const monthStart = `${monthPrefix}-01`;
+  const [suppliers, { data: purchases }] = await Promise.all([
+    fetchSuppliers(),
+    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN").gte("created_at", monthStart).lt("created_at", nextMonth),
+  ]);
+  const bySupplier = new Map<string, number>();
+  for (const p of purchases ?? []) {
+    if (!p.supplier_id) continue;
+    bySupplier.set(p.supplier_id, (bySupplier.get(p.supplier_id) ?? 0) + Number(p.total_cost ?? 0));
+  }
+  return suppliers.map((s) => ({ id: s.id, name: s.name, purchasesThisMonth: bySupplier.get(s.id) ?? 0, balanceDue: s.balanceDue }));
+}
+
+// ---- Executive monthly financial report (Spec #2) ----
+
+export interface MonthlyReportBreakdown {
+  subscriptionRevenue: number;
+  companyRevenue: number;
+  tripRevenue: number;
+  totalRevenue: number;
+  payrollExpense: number;
+  maintenanceExpense: number;
+  partsExpense: number;
+  fuelExpense: number;
+  adminMiscExpense: number;
+  totalExpenses: number;
+  netProfit: number;
+}
+
+export function computeMonthlyReport(input: {
+  subscriptionRevenue: number;
+  companyRevenue: number;
+  tripRevenue: number;
+  payrollExpense: number;
+  maintenanceExpense: number;
+  partsExpense: number;
+  fuelExpense: number;
+  adminMiscExpense: number;
+}): MonthlyReportBreakdown {
+  const totalRevenue = input.subscriptionRevenue + input.companyRevenue + input.tripRevenue;
+  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.fuelExpense + input.adminMiscExpense;
+  return { ...input, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
+}
+
+export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyReportBreakdown> {
+  const nextMonth = nextMonthPrefix(monthPrefix);
+  const [
+    { data: subPayments },
+    ops,
+    driverPayroll,
+    { data: staffPayslips },
+    { data: allEmployees },
+    { data: maintOrders },
+    { data: outTx },
+    { data: allExpenses },
+  ] = await Promise.all([
+    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", `${monthPrefix}-01`).lt("date", `${nextMonth}-01`),
+    fetchDailyOperations(monthPrefix),
+    fetchDriverPayroll(monthPrefix),
+    supabase.from("payslips").select("overtime, advances, penalties, staff(base_salary)").gte("month", `${monthPrefix}-01`).lt("month", `${nextMonth}-01`),
+    supabase.from("employees").select("base_salary"),
+    supabase.from("maintenance_orders").select("total_cost, created_at").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
+    supabase.from("inventory_transactions").select("total_cost, created_at").eq("type", "OUT").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
+    supabase.from("expenses").select("category, amount, date").gte("date", `${monthPrefix}-01`).lt("date", `${nextMonth}-01`),
+  ]);
+
+  const subscriptionRevenue = (subPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
+  const companyRevenue = ops.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
+  const tripRevenue = 0; // populated once the trips module (Spec #3) exists
+
+  const driverPayrollTotal = driverPayroll.reduce((sum, p) => sum + p.netSalary, 0);
+  const staffPayrollTotal = (staffPayslips ?? []).reduce((sum: number, p: any) => {
+    const base = Number(p.staff?.base_salary ?? 0);
+    return sum + base + Number(p.overtime ?? 0) - Number(p.advances ?? 0) - Number(p.penalties ?? 0);
+  }, 0);
+  const employeeBaseTotal = (allEmployees ?? []).reduce((sum: number, e: any) => sum + Number(e.base_salary ?? 0), 0);
+
+  const expenseByCategory = (cats: string[]) =>
+    (allExpenses ?? []).filter((e: any) => cats.includes(e.category)).reduce((sum: number, e: any) => sum + Number(e.amount ?? 0), 0);
+
+  const maintenanceExpense = (maintOrders ?? []).reduce((sum: number, o: any) => sum + Number(o.total_cost ?? 0), 0);
+  const partsExpense = (outTx ?? []).reduce((sum: number, t: any) => sum + Number(t.total_cost ?? 0), 0) + expenseByCategory(["قطع غيار"]);
+  const fuelExpense = ops.reduce((sum, o) => sum + o.gasCost, 0) + expenseByCategory(["غاز"]);
+  const adminMiscExpense = expenseByCategory(["إداريات", "مصاريف خارجية", "موردين"]);
+
+  return computeMonthlyReport({
+    subscriptionRevenue,
+    companyRevenue,
+    tripRevenue,
+    payrollExpense: driverPayrollTotal + staffPayrollTotal + employeeBaseTotal + expenseByCategory(["مرتبات"]),
+    maintenanceExpense,
+    partsExpense,
+    fuelExpense,
+    adminMiscExpense,
+  });
+}
+
+export interface SupplierMonthlyRow {
+  id: string;
+  name: string;
+  purchasedThisMonth: number;
+  balanceDue: number;
+}
+
+export async function fetchSupplierMonthlyBreakdown(monthPrefix: string): Promise<SupplierMonthlyRow[]> {
+  const nextMonth = nextMonthPrefix(monthPrefix);
+  const [{ data: suppliers }, { data: transactions }] = await Promise.all([
+    supabase.from("suppliers").select("*"),
+    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
+  ]);
+  const purchasedBySupplier = new Map<string, number>();
+  for (const t of transactions ?? []) {
+    if (!t.supplier_id) continue;
+    purchasedBySupplier.set(t.supplier_id, (purchasedBySupplier.get(t.supplier_id) ?? 0) + Number(t.total_cost ?? 0));
+  }
+  return (suppliers ?? []).map((s: any) => ({
+    id: s.id,
+    name: s.supplier_name,
+    purchasedThisMonth: purchasedBySupplier.get(s.id) ?? 0,
+    balanceDue: Number(s.balance_due ?? 0),
+  }));
+}

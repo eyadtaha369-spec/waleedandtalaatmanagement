@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -178,5 +178,52 @@ describe("computeMonthlyPL", () => {
 
   it("handles a month with zero operations", () => {
     expect(computeMonthlyPL([], 100, 50)).toEqual({ totalRevenue: 0, totalExpenses: 150, netProfit: -150 });
+  });
+});
+
+describe("computeMonthlyReport", () => {
+  it("sums revenue and expense line items and derives net profit", () => {
+    const result = computeMonthlyReport({
+      subscriptionRevenue: 1000,
+      companyRevenue: 2000,
+      tripRevenue: 0,
+      payrollExpense: 1500,
+      maintenanceExpense: 300,
+      partsExpense: 200,
+      fuelExpense: 400,
+      adminMiscExpense: 100,
+    });
+    expect(result.totalRevenue).toBe(3000);
+    expect(result.totalExpenses).toBe(2500);
+    expect(result.netProfit).toBe(500);
+  });
+
+  it("can report a net loss when expenses exceed revenue", () => {
+    const result = computeMonthlyReport({
+      subscriptionRevenue: 500,
+      companyRevenue: 0,
+      tripRevenue: 0,
+      payrollExpense: 1000,
+      maintenanceExpense: 0,
+      partsExpense: 0,
+      fuelExpense: 0,
+      adminMiscExpense: 0,
+    });
+    expect(result.netProfit).toBe(-500);
+  });
+
+  it("includes trip revenue in the total once it is non-zero", () => {
+    const result = computeMonthlyReport({
+      subscriptionRevenue: 0,
+      companyRevenue: 0,
+      tripRevenue: 750,
+      payrollExpense: 0,
+      maintenanceExpense: 0,
+      partsExpense: 0,
+      fuelExpense: 0,
+      adminMiscExpense: 0,
+    });
+    expect(result.totalRevenue).toBe(750);
+    expect(result.netProfit).toBe(750);
   });
 });

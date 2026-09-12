@@ -486,7 +486,7 @@ function FleetPage() {
             <DialogDescription className="text-muted-foreground">بيانات التشغيل والتراخيص والصيانة</DialogDescription>
           </DialogHeader>
           {selected && (
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               {[
                 ["رقم اللوحة", selected.plate],
                 ["الموديل", selected.model],
@@ -611,7 +611,7 @@ function FleetPage() {
                 className="border-border bg-input/60"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">وقت الحضور (HH:MM)</Label>
                 <Input

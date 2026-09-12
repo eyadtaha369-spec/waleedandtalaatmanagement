@@ -270,7 +270,7 @@ function PayrollPage() {
             <DialogDescription className="text-muted-foreground">حضور السائق، الوردية، وأي إضافي أو سُلفة أو جزاء لهذا اليوم</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">السائق</Label>
                 <Select value={form.driverName} onValueChange={(v) => setForm({ ...form, driverName: v })}>
@@ -290,7 +290,7 @@ function PayrollPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">الأتوبيس (اختياري)</Label>
                 <Select value={form.busCode} onValueChange={(v) => setForm({ ...form, busCode: v })}>
@@ -319,7 +319,7 @@ function PayrollPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">من (نقطة الانطلاق)</Label>
                 <Input value={form.shiftFrom} onChange={(e) => setForm({ ...form, shiftFrom: e.target.value })} className="border-border bg-input/60" />
@@ -345,7 +345,7 @@ function PayrollPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">إضافي</Label>
                 <Input value={form.overtimeAllowance} onChange={(e) => setForm({ ...form, overtimeAllowance: e.target.value })} type="number" className="border-border bg-input/60" />

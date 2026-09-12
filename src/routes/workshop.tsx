@@ -278,13 +278,13 @@ function WorkshopPage() {
                                     نقل للمرحلة التالية
                                   </Button>
                                 )}
-                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-primary hover:bg-primary/10" onClick={() => openEditOrder(o)}>
+                                <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={() => openEditOrder(o)}>
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                                  className="h-11 w-11 p-0 text-destructive sm:h-7 sm:w-7 hover:bg-destructive/10"
                                   onClick={() => setDeleteTarget({ kind: "order", id: o.id, label: `أمر الصيانة ${o.code}` })}
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />

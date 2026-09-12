@@ -250,7 +250,7 @@ function DispatchPage() {
             <DialogDescription className="text-muted-foreground">بيانات الوقود والوردية (أو الورديتين) لهذا الأتوبيس اليوم</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">التاريخ</Label>
                 <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="border-border bg-input/60" />
@@ -283,7 +283,7 @@ function DispatchPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-secondary/20 p-3">
+            <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-secondary/20 p-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">تكلفة الوقود</Label>
                 <Input value={form.gasCost} onChange={(e) => setForm({ ...form, gasCost: e.target.value })} type="number" className="border-border bg-input/60" />
@@ -300,7 +300,7 @@ function DispatchPage() {
 
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
               <p className="mb-2 text-xs font-bold text-primary">الوردية 1</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <div className="grid gap-1.5">
                   <Label className="text-xs text-muted-foreground">الشركة</Label>
                   <Select value={form.client1Name} onValueChange={(v) => setForm({ ...form, client1Name: v })}>
@@ -341,7 +341,7 @@ function DispatchPage() {
                     إزالة
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الشركة</Label>
                     <Select value={form.client2Name} onValueChange={(v) => setForm({ ...form, client2Name: v })}>

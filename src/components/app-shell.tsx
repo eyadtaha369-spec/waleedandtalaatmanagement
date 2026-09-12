@@ -20,6 +20,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,8 +56,45 @@ const roleLabels: Record<string, string> = {
   pending: "بانتظار الموافقة",
 };
 
+function NavList({
+  items,
+  pathname,
+  showLabels,
+  onNavigate,
+}: {
+  items: readonly (typeof nav)[number][];
+  pathname: string;
+  showLabels: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <nav className="flex-1 space-y-1 p-3">
+      {items.map((item) => {
+        const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
+        return (
+          <Link
+            key={item.to}
+            to={item.to}
+            onClick={onNavigate}
+            className={cn(
+              "flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
+              active
+                ? "border border-primary/40 bg-primary/12 text-primary"
+                : "text-sidebar-foreground hover:bg-sidebar-accent",
+            )}
+          >
+            <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "text-primary/70")} />
+            {showLabels && <span>{item.label}</span>}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { session, loading, signOut } = useAuth();
   const navigate = useNavigate();
@@ -146,26 +184,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
-          {visibleNav.map((item) => {
-            const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
-                  active
-                    ? "border border-primary/40 bg-primary/12 text-primary"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent",
-                )}
-              >
-                <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "text-primary/70")} />
-                {open && <span>{item.label}</span>}
-              </Link>
-            );
-          })}
-        </nav>
+        <NavList items={visibleNav} pathname={pathname} showLabels={open} />
 
         {open && (
           <div className="m-3 rounded-xl border border-primary/30 bg-primary/8 p-3 text-xs text-muted-foreground">
@@ -174,11 +193,31 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       </aside>
 
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="right" className="flex w-72 flex-col border-sidebar-border bg-sidebar p-0">
+          <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
+            <img src={brandLogo.url} alt="شعار وليد وطلعت" className="h-11 w-11 rounded-xl object-cover ring-1 ring-primary/50" />
+            <div className="leading-tight">
+              <p className="text-sm font-extrabold text-gold-gradient">وليد وطلعت</p>
+              <p className="text-[11px] text-muted-foreground">إدارة التشغيل والأسطول</p>
+            </div>
+          </div>
+          <NavList items={visibleNav} pathname={pathname} showLabels onNavigate={() => setMobileNavOpen(false)} />
+        </SheetContent>
+      </Sheet>
+
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-background/85 px-4 py-3 backdrop-blur">
           <button
+            onClick={() => setMobileNavOpen(true)}
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-border text-primary hover:bg-accent md:hidden"
+            aria-label="فتح القائمة"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <button
             onClick={() => setOpen((v) => !v)}
-            className="rounded-lg border border-border p-2 text-primary hover:bg-accent"
+            className="hidden h-9 w-9 items-center justify-center rounded-lg border border-border text-primary hover:bg-accent md:flex"
             aria-label="طي القائمة"
           >
             <Menu className="h-5 w-5" />

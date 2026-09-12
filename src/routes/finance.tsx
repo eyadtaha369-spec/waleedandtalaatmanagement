@@ -374,13 +374,13 @@ function FinancePage() {
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="font-bold">{l.lender}</h3>
                         <div className="flex items-center gap-1">
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-primary hover:bg-primary/10" onClick={() => openEditLoan(l)}>
+                          <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={() => openEditLoan(l)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                            className="h-11 w-11 p-0 text-destructive sm:h-7 sm:w-7 hover:bg-destructive/10"
                             onClick={() => setDeleteTarget({ kind: "loan", id: l.id, label: `قرض ${l.lender}` })}
                           >
                             <Trash2 className="h-3.5 w-3.5" />

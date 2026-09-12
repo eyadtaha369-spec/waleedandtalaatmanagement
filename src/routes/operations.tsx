@@ -253,13 +253,13 @@ function OperationsPage() {
                           <h3 className="font-bold text-foreground">{r.name}</h3>
                           <div className="flex items-center gap-1">
                             <StatusPill label={`الأتوبيس ${r.bus}`} tone="info" />
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-primary hover:bg-primary/10" onClick={() => openEditRoute(r)}>
+                            <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={() => openEditRoute(r)}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                              className="h-11 w-11 p-0 text-destructive sm:h-7 sm:w-7 hover:bg-destructive/10"
                               onClick={() => setDeleteTarget({ kind: "route", id: r.id, label: `الخط ${r.name}` })}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -373,7 +373,7 @@ function OperationsPage() {
               ))
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">المبلغ</Label>
               <Input value={payAmount} onChange={(e) => setPayAmount(e.target.value)} type="number" className="border-border bg-input/60" />

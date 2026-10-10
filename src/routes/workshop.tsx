@@ -48,6 +48,13 @@ import {
   deleteFuelLog,
   bulkInsertInventory,
   receiveInventoryStock,
+  updateInventoryPurchase,
+  deleteInventoryPurchase,
+  fetchInventoryPurchases,
+  getInvoiceAttachmentUrl,
+  purchaseTotal,
+  type InventoryPurchase,
+  type InventoryPurchaseInput,
   fetchSuppliers,
   type Supplier,
 } from "@/lib/queries";
@@ -72,7 +79,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtQty = (n: number) => n.toLocaleString("ar-EG", { maximumFractionDigits: 3 });
 const unitShort: Record<string, string> = { بالقطعة: "قطعة", بالكيلو: "كجم", باللتر: "لتر" };
 
-type DeleteTarget = { kind: "order" | "item" | "fuel"; id: string; label: string } | null;
+type DeleteTarget = { kind: "order" | "item" | "fuel" | "purchase"; id: string; label: string; path?: string | null } | null;
 
 interface PartRow {
   key: number;
@@ -159,7 +166,23 @@ function WorkshopPage() {
   const [importingInventory, setImportingInventory] = useState(false);
   const [itemForm, setItemForm] = useState(emptyItemForm);
   const [receiving, setReceiving] = useState(false);
-  const [receiveForm, setReceiveForm] = useState({ itemName: "", itemCode: "", supplierName: "", quantity: "", unitPrice: "" });
+  const emptyReceive = () => ({
+    id: "",
+    previousPath: null as string | null,
+    supplierId: "",
+    newSupplierName: "",
+    itemId: "",
+    newItemName: "",
+    newItemCode: "",
+    unitType: "بالقطعة" as UnitType,
+    date: todayStr(),
+    quantity: "",
+    unitPrice: "",
+    invoiceRef: "",
+    file: null as File | null,
+  });
+  const [receiveForm, setReceiveForm] = useState(emptyReceive);
+  const [purchases, setPurchases] = useState<InventoryPurchase[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   // fuel
@@ -179,14 +202,16 @@ function WorkshopPage() {
     setLoading(true);
     setError(null);
     try {
-      const [o, i, f, s, buses, drivers] = await Promise.all([
+      const [o, i, f, s, buses, drivers, pu] = await Promise.all([
         fetchMaintenanceOrders(),
         fetchInventory(),
         fetchFuelLogs(),
         fetchSuppliers(),
         fetchBuses(),
         fetchDrivers(),
+        fetchInventoryPurchases(),
       ]);
+      setPurchases(pu);
       setOrders(o);
       setInventory(i);
       setFuelLogs(f);
@@ -328,26 +353,62 @@ function WorkshopPage() {
   };
 
   const openReceiveStock = () => {
-    setReceiveForm({ itemName: "", itemCode: "", supplierName: "", quantity: "", unitPrice: "" });
+    setReceiveForm(emptyReceive());
+    setReceiving(true);
+  };
+  const openEditPurchase = (p: InventoryPurchase) => {
+    setReceiveForm({
+      ...emptyReceive(),
+      id: p.id,
+      previousPath: p.attachmentPath,
+      supplierId: p.supplierId,
+      itemId: p.itemId,
+      unitType: p.unitType,
+      date: p.date,
+      quantity: String(p.quantity),
+      unitPrice: String(p.unitPrice),
+      invoiceRef: p.invoiceRef,
+    });
     setReceiving(true);
   };
   const submitReceiveStock = async () => {
-    if (!receiveForm.itemName.trim() || !receiveForm.quantity.trim()) return;
+    const f = receiveForm;
+    const supplierNew = f.supplierId === "__new" || !f.supplierId;
+    const itemNew = f.itemId === "__new" || !f.itemId;
+    if (supplierNew && !f.newSupplierName.trim()) return setError("اختر المورد أو أدخل مورد جديد");
+    if (itemNew && !f.newItemName.trim()) return setError("اختر الصنف أو أدخل صنف جديد");
+    if (!(Number(f.quantity) > 0)) return setError("أدخل الكمية المشتراة");
     setSaving(true);
+    setError(null);
     try {
-      await receiveInventoryStock({
-        itemName: receiveForm.itemName,
-        itemCode: receiveForm.itemCode,
-        supplierName: receiveForm.supplierName,
-        quantity: Number(receiveForm.quantity) || 0,
-        unitPrice: Number(receiveForm.unitPrice) || 0,
-      });
+      const input: InventoryPurchaseInput = {
+        itemId: itemNew ? "" : f.itemId,
+        newItemName: f.newItemName,
+        newItemCode: f.newItemCode,
+        unitType: f.unitType,
+        supplierId: supplierNew ? "" : f.supplierId,
+        newSupplierName: f.newSupplierName,
+        date: f.date || todayStr(),
+        quantity: Number(f.quantity),
+        unitPrice: Number(f.unitPrice) || 0,
+        invoiceRef: f.invoiceRef,
+        file: f.file,
+      };
+      if (f.id) await updateInventoryPurchase(f.id, input, f.previousPath);
+      else await receiveInventoryStock(input);
       await loadAll();
       setReceiving(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر تسجيل التوريد");
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر تسجيل التوريد");
     } finally {
       setSaving(false);
+    }
+  };
+  const openAttachment = async (path: string) => {
+    try {
+      window.open(await getInvoiceAttachmentUrl(path), "_blank", "noopener");
+    } catch {
+      setError("تعذر فتح المرفق");
     }
   };
 
@@ -406,6 +467,7 @@ function WorkshopPage() {
     try {
       if (deleteTarget.kind === "order") await deleteMaintenanceOrder(deleteTarget.id);
       else if (deleteTarget.kind === "item") await deleteInventoryItem(deleteTarget.id);
+      else if (deleteTarget.kind === "purchase") await deleteInventoryPurchase(deleteTarget.id, deleteTarget.path ?? null);
       else await deleteFuelLog(deleteTarget.id);
       await loadAll();
       setDeleteTarget(null);
@@ -554,7 +616,7 @@ function WorkshopPage() {
                     <Plus className="ml-2 h-4 w-4" /> إضافة صنف يدوي
                   </Button>
                   <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openReceiveStock}>
-                    <Plus className="ml-2 h-4 w-4" /> استلام مخزون / توريد جديد
+                    <Plus className="ml-2 h-4 w-4" /> إضافة صنف / توريد جديد
                   </Button>
                 </>
               }
@@ -591,6 +653,40 @@ function WorkshopPage() {
                     </td>
                   </tr>
                 ))}
+            </DataTable>
+          </Panel>
+          <Panel title="سجل التوريدات (إذون التوريد)" className="mt-4">
+            <DataTable head={["التاريخ", "المورد", "الصنف", "الكمية", "سعر الوحدة", "الإجمالي", "رقم الفاتورة", "المرفق", "الإجراءات"]}>
+              {purchases.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-4 text-center text-muted-foreground">لا توجد توريدات بعد.</td></tr>
+              ) : (
+                purchases.map((p) => (
+                  <tr key={p.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3">{p.date}</td>
+                    <td className="px-4 py-3">{p.supplierName}</td>
+                    <td className="px-4 py-3 font-bold">{p.itemName}</td>
+                    <td className="px-4 py-3">{fmtQty(p.quantity)} {unitShort[p.unitType]}</td>
+                    <td className="px-4 py-3">{currency(p.unitPrice)}</td>
+                    <td className="px-4 py-3 text-warning">{currency(p.total)}</td>
+                    <td className="px-4 py-3">{p.invoiceRef || "—"}</td>
+                    <td className="px-4 py-3">
+                      {p.attachmentPath ? (
+                        <button type="button" className="text-primary hover:underline" onClick={() => openAttachment(p.attachmentPath!)}>عرض</button>
+                      ) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditPurchase(p)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget({ kind: "purchase", id: p.id, path: p.attachmentPath, label: `توريد ${p.itemName} من ${p.supplierName}` })}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </DataTable>
           </Panel>
         </TabsContent>
@@ -904,55 +1000,91 @@ function WorkshopPage() {
       </Dialog>
 
       <Dialog open={receiving} onOpenChange={setReceiving}>
-        <DialogContent className="glass text-foreground" dir="rtl">
+        <DialogContent className="glass max-h-[90vh] overflow-y-auto text-foreground sm:max-w-2xl" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">استلام مخزون / توريد جديد</DialogTitle>
+            <DialogTitle className="text-primary">{receiveForm.id ? "تعديل إذن التوريد" : "إذن توريد المخزن"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              يزيد الرصيد فورًا، ويُضاف الإجمالي إلى رصيد المورد تلقائيًا في "حسابات الموردين"
+              عند الحفظ يزيد رصيد الصنف تلقائيًا، ويُضاف إجمالي الفاتورة إلى مستحقات المورد. التعديل أو الحذف يعكس الأثر السابق أولًا.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">اسم الصنف</Label>
-              <Input value={receiveForm.itemName} onChange={(e) => setReceiveForm({ ...receiveForm, itemName: e.target.value })} className="border-border bg-input/60" list="inventory-item-names" />
-              <datalist id="inventory-item-names">
-                {inventory.map((i) => (
-                  <option key={i.id} value={i.name} />
-                ))}
-              </datalist>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">اختيار المورد</Label>
+                <Select value={receiveForm.supplierId} onValueChange={(v) => setReceiveForm({ ...receiveForm, supplierId: v })}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر المورد" /></SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                    <SelectItem value="__new">+ مورد جديد</SelectItem>
+                  </SelectContent>
+                </Select>
+                {receiveForm.supplierId === "__new" && (
+                  <Input placeholder="اسم المورد الجديد" value={receiveForm.newSupplierName} onChange={(e) => setReceiveForm({ ...receiveForm, newSupplierName: e.target.value })} className="border-border bg-input/60" />
+                )}
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">اسم الصنف</Label>
+                <Select
+                  value={receiveForm.itemId}
+                  onValueChange={(v) => {
+                    const it = inventory.find((x) => x.id === v);
+                    setReceiveForm({ ...receiveForm, itemId: v, unitType: it?.unitType ?? receiveForm.unitType, unitPrice: it && !receiveForm.unitPrice ? String(it.unitPrice) : receiveForm.unitPrice });
+                  }}
+                >
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر الصنف" /></SelectTrigger>
+                  <SelectContent>
+                    {inventory.map((i) => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}
+                    <SelectItem value="__new">+ صنف جديد</SelectItem>
+                  </SelectContent>
+                </Select>
+                {receiveForm.itemId === "__new" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input placeholder="اسم الصنف الجديد" value={receiveForm.newItemName} onChange={(e) => setReceiveForm({ ...receiveForm, newItemName: e.target.value })} className="border-border bg-input/60" />
+                    <Input placeholder="الكود (اختياري)" value={receiveForm.newItemCode} onChange={(e) => setReceiveForm({ ...receiveForm, newItemCode: e.target.value })} className="border-border bg-input/60" />
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">كود الصنف (إن كان جديدًا)</Label>
-              <Input value={receiveForm.itemCode} onChange={(e) => setReceiveForm({ ...receiveForm, itemCode: e.target.value })} className="border-border bg-input/60" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">المورد</Label>
-              <Input value={receiveForm.supplierName} onChange={(e) => setReceiveForm({ ...receiveForm, supplierName: e.target.value })} className="border-border bg-input/60" list="supplier-names" />
-              <datalist id="supplier-names">
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.name} />
-                ))}
-              </datalist>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">تاريخ التوريد / الفاتورة</Label>
+                <Input value={receiveForm.date} onChange={(e) => setReceiveForm({ ...receiveForm, date: e.target.value })} type="date" className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">الوحدة</Label>
+                <Select value={receiveForm.unitType} onValueChange={(v) => setReceiveForm({ ...receiveForm, unitType: v as UnitType })} disabled={!!receiveForm.itemId && receiveForm.itemId !== "__new"}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                  <SelectContent>{UNIT_TYPES.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">رقم الفاتورة (اختياري)</Label>
+                <Input value={receiveForm.invoiceRef} onChange={(e) => setReceiveForm({ ...receiveForm, invoiceRef: e.target.value })} className="border-border bg-input/60" />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">الكمية</Label>
-                <Input value={receiveForm.quantity} onChange={(e) => setReceiveForm({ ...receiveForm, quantity: e.target.value })} type="number" step="any" className="border-border bg-input/60" />
+                <Label className="text-xs text-muted-foreground">الكمية المشتراة</Label>
+                <Input value={receiveForm.quantity} onChange={(e) => setReceiveForm({ ...receiveForm, quantity: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">سعر الوحدة</Label>
-                <Input value={receiveForm.unitPrice} onChange={(e) => setReceiveForm({ ...receiveForm, unitPrice: e.target.value })} type="number" step="any" className="border-border bg-input/60" />
+                <Label className="text-xs text-muted-foreground">سعر تكلفة الوحدة</Label>
+                <Input value={receiveForm.unitPrice} onChange={(e) => setReceiveForm({ ...receiveForm, unitPrice: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
               </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">صورة الفاتورة (اختياري){receiveForm.previousPath ? " — يوجد مرفق حالي، اختر ملفًا لاستبداله" : ""}</Label>
+              <Input type="file" accept="image/*,application/pdf" onChange={(e) => setReceiveForm({ ...receiveForm, file: e.target.files?.[0] ?? null })} className="border-border bg-input/60" />
             </div>
             {receiveForm.quantity && receiveForm.unitPrice && (
               <p className="rounded-lg border border-border bg-secondary/30 p-3 text-sm">
-                الإجمالي: <b className="text-primary">{(Number(receiveForm.quantity) * Number(receiveForm.unitPrice)).toLocaleString("ar-EG")} ج.م</b>
+                إجمالي الفاتورة: <b className="text-primary">{currency(purchaseTotal(Number(receiveForm.quantity), Number(receiveForm.unitPrice)))}</b>
               </p>
             )}
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitReceiveStock} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : "تسجيل التوريد"}
+              {saving ? "جارِ الحفظ..." : receiveForm.id ? "حفظ التعديلات" : "تسجيل التوريد"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1047,7 +1179,7 @@ function WorkshopPage() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              سيتم حذف {deleteTarget?.label} نهائيًا{deleteTarget?.kind === "order" ? " وإرجاع قطع الغيار المخصومة إلى المخزن" : ""}. لا يمكن التراجع عن هذا الإجراء.
+              سيتم حذف {deleteTarget?.label} نهائيًا{deleteTarget?.kind === "order" ? " وإرجاع قطع الغيار المخصومة إلى المخزن" : deleteTarget?.kind === "purchase" ? " وخصم الكمية من المخزن والقيمة من حساب المورد" : ""}. لا يمكن التراجع عن هذا الإجراء.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

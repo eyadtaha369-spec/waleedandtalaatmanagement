@@ -1959,13 +1959,13 @@ export async function fetchSupplierLedger(supplierId: string): Promise<SupplierL
     entries.push({
       id: p.id,
       source: "inventory",
-      date: (p.created_at as string).slice(0, 10),
+      date: (p.tx_date as string | null) ?? (p.created_at as string).slice(0, 10),
       kind: "شراء",
-      reference: "توريد مخزون",
+      reference: p.invoice_ref || "توريد مخزون",
       description: `${p.inventory?.name ?? "صنف"} × ${p.quantity}`,
       withdrawals: Number(p.total_cost ?? 0),
       payments: 0,
-      attachmentPath: null,
+      attachmentPath: p.attachment_path ?? null,
     });
   }
   for (const i of invoices ?? []) {
@@ -2015,46 +2015,151 @@ export function computeSupplierStatement<T extends { date: string; withdrawals: 
   };
 }
 
-export async function receiveInventoryStock(input: {
+export interface InventoryPurchaseInput {
+  itemId: string; // existing item id, or "" to create a new one
+  newItemName: string;
+  newItemCode: string;
+  unitType: UnitType;
+  supplierId: string; // existing supplier id, or "" when newSupplierName is given
+  newSupplierName: string;
+  date: string;
+  quantity: number;
+  unitPrice: number;
+  invoiceRef: string;
+  file?: File | null;
+}
+
+export interface InventoryPurchase {
+  id: string;
+  date: string;
+  itemId: string;
   itemName: string;
-  itemCode: string;
+  unitType: UnitType;
+  supplierId: string;
   supplierName: string;
   quantity: number;
   unitPrice: number;
-}) {
-  let { data: item } = await supabase.from("inventory").select("id").eq("name", input.itemName).maybeSingle();
-  if (!item) {
-    const { data: newItem, error: itemErr } = await supabase
-      .from("inventory")
-      .insert({ name: input.itemName, code: input.itemCode || `SKU-${Date.now().toString().slice(-6)}`, stock: 0, min_stock: 0, unit_price: input.unitPrice })
-      .select("id")
-      .single();
-    if (itemErr) throw itemErr;
-    item = newItem;
-  }
-  let supplierId: string | null = null;
-  if (input.supplierName.trim()) {
-    const { data: supplier } = await supabase.from("suppliers").select("id").eq("supplier_name", input.supplierName).maybeSingle();
-    if (supplier) {
-      supplierId = supplier.id;
-    } else {
-      const { data: newSupplier, error: supErr } = await supabase.from("suppliers").insert({ supplier_name: input.supplierName }).select("id").single();
-      if (supErr) throw supErr;
-      supplierId = newSupplier.id;
+  total: number;
+  invoiceRef: string;
+  attachmentPath: string | null;
+}
+
+export const purchaseTotal = (quantity: number, unitPrice: number) => Math.round(quantity * unitPrice * 100) / 100;
+
+async function resolvePurchaseRefs(input: InventoryPurchaseInput): Promise<{ itemId: string; supplierId: string }> {
+  let supplierId = input.supplierId;
+  if (!supplierId) {
+    const name = input.newSupplierName.trim();
+    if (!name) throw new Error("اختر المورد أو أدخل اسم مورد جديد");
+    const { data: existing } = await supabase.from("suppliers").select("id").eq("supplier_name", name).maybeSingle();
+    if (existing) supplierId = existing.id;
+    else {
+      const { data, error } = await supabase.from("suppliers").insert({ supplier_name: name }).select("id").single();
+      if (error) throw error;
+      supplierId = data.id;
     }
   }
-  const totalCost = input.quantity * input.unitPrice;
+  let itemId = input.itemId;
+  if (!itemId) {
+    const name = input.newItemName.trim();
+    if (!name) throw new Error("اختر الصنف أو أدخل اسم صنف جديد");
+    const { data: existing } = await supabase.from("inventory").select("id").eq("name", name).maybeSingle();
+    if (existing) itemId = existing.id;
+    else {
+      const { data, error } = await supabase
+        .from("inventory")
+        .insert({ name, code: input.newItemCode.trim() || `SKU-${Date.now().toString().slice(-6)}`, stock: 0, min_stock: 0, unit_price: input.unitPrice, unit_type: input.unitType })
+        .select("id")
+        .single();
+      if (error) throw error;
+      itemId = data.id;
+    }
+  }
+  return { itemId, supplierId };
+}
+
+/** Stock inward from a supplier. The database trigger raises stock and the supplier's balance_due. */
+export async function receiveInventoryStock(input: InventoryPurchaseInput) {
+  if (!(input.quantity > 0)) throw new Error("أدخل كمية صحيحة");
+  const { itemId, supplierId } = await resolvePurchaseRefs(input);
+  const attachment = input.file ? await uploadInvoiceFile(supplierId, input.file) : null;
   const { error } = await supabase.from("inventory_transactions").insert({
-    inventory_id: item!.id,
+    inventory_id: itemId,
     type: "IN",
     quantity: input.quantity,
     unit_price: input.unitPrice,
-    total_cost: totalCost,
+    total_cost: purchaseTotal(input.quantity, input.unitPrice),
     supplier_id: supplierId,
+    tx_date: input.date,
+    invoice_ref: input.invoiceRef.trim() || null,
+    attachment_path: attachment,
   });
+  if (error) {
+    if (attachment) await supabase.storage.from(INVOICE_BUCKET).remove([attachment]);
+    throw error;
+  }
+  await supabase.from("inventory").update({ unit_price: input.unitPrice }).eq("id", itemId);
+}
+
+/** Would reverting this purchase push the item's stock below zero? */
+async function assertPurchaseRevertible(id: string, newItemId: string | null, newQty: number) {
+  const { data: tx } = await supabase.from("inventory_transactions").select("inventory_id, quantity").eq("id", id).single();
+  if (!tx) throw new Error("التوريد غير موجود");
+  const { data: inv } = await supabase.from("inventory").select("stock, name").eq("id", tx.inventory_id).single();
+  const stockAfter = Number(inv?.stock ?? 0) - Number(tx.quantity) + (newItemId === tx.inventory_id ? newQty : 0);
+  if (stockAfter < 0) throw new Error(`لا يمكن التعديل: الكمية الموردة استُهلكت جزئيًا وسيصبح رصيد ${inv?.name ?? "الصنف"} سالبًا`);
+}
+
+export async function updateInventoryPurchase(id: string, input: InventoryPurchaseInput, previousPath: string | null) {
+  if (!(input.quantity > 0)) throw new Error("أدخل كمية صحيحة");
+  const { itemId, supplierId } = await resolvePurchaseRefs(input);
+  await assertPurchaseRevertible(id, itemId, input.quantity);
+  const attachment = input.file ? await uploadInvoiceFile(supplierId, input.file) : previousPath;
+  const { error } = await supabase
+    .from("inventory_transactions")
+    .update({
+      inventory_id: itemId,
+      quantity: input.quantity,
+      unit_price: input.unitPrice,
+      total_cost: purchaseTotal(input.quantity, input.unitPrice),
+      supplier_id: supplierId,
+      tx_date: input.date,
+      invoice_ref: input.invoiceRef.trim() || null,
+      attachment_path: attachment,
+    })
+    .eq("id", id);
   if (error) throw error;
-  // keep unit_price on the item itself current for display purposes
-  await supabase.from("inventory").update({ unit_price: input.unitPrice }).eq("id", item!.id);
+  if (input.file && previousPath) await supabase.storage.from(INVOICE_BUCKET).remove([previousPath]);
+}
+
+export async function deleteInventoryPurchase(id: string, attachmentPath: string | null) {
+  await assertPurchaseRevertible(id, null, 0);
+  const { error } = await supabase.from("inventory_transactions").delete().eq("id", id);
+  if (error) throw error;
+  if (attachmentPath) await supabase.storage.from(INVOICE_BUCKET).remove([attachmentPath]);
+}
+
+export async function fetchInventoryPurchases(): Promise<InventoryPurchase[]> {
+  const { data, error } = await supabase
+    .from("inventory_transactions")
+    .select("*, inventory(name, unit_type), suppliers(supplier_name)")
+    .eq("type", "IN")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    date: t.tx_date ?? String(t.created_at).slice(0, 10),
+    itemId: t.inventory_id,
+    itemName: t.inventory?.name ?? "صنف",
+    unitType: (t.inventory?.unit_type ?? "بالقطعة") as UnitType,
+    supplierId: t.supplier_id ?? "",
+    supplierName: t.suppliers?.supplier_name ?? "—",
+    quantity: Number(t.quantity),
+    unitPrice: Number(t.unit_price ?? 0),
+    total: Number(t.total_cost ?? 0),
+    invoiceRef: t.invoice_ref ?? "",
+    attachmentPath: t.attachment_path ?? null,
+  }));
 }
 
 // ---- Executive Monthly Financial Report (Spec #2) ----

@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { currency } from "@/lib/fleet-data";
 import { fetchBuses, fetchDrivers } from "@/lib/queries";
-import { fetchTrips, addTrip, updateTrip, deleteTrip, type Trip } from "@/lib/queries";
+import { fetchTrips, addTrip, updateTrip, deleteTrip, TRIP_NOTIFICATION_OPTIONS, type Trip } from "@/lib/queries";
 
 export const Route = createFileRoute("/trips")({
   head: () => ({
@@ -48,6 +48,7 @@ const emptyForm = {
   totalPrice: "",
   amountPaid: "",
   driverFee: "",
+  notificationPreference: "بدون تنبيه" as string,
   status: "مجدولة",
 };
 
@@ -104,6 +105,7 @@ function TripsPage() {
       totalPrice: String(t.totalPrice),
       amountPaid: String(t.amountPaid),
       driverFee: String(t.driverFee),
+      notificationPreference: t.notificationPreference,
       status: t.status,
     });
     setAdding(true);
@@ -123,6 +125,7 @@ function TripsPage() {
         totalPrice: Number(form.totalPrice) || 0,
         amountPaid: Number(form.amountPaid) || 0,
         driverFee: Number(form.driverFee) || 0,
+        notificationPreference: form.notificationPreference,
         status: form.status,
       };
       if (form.id) await updateTrip(form.id, payload);
@@ -160,14 +163,14 @@ function TripsPage() {
   const withBalance = filtered.filter((t) => t.balanceDue > 0);
 
   const renderTable = (rows: Trip[]) => (
-    <DataTable head={["العميل", "الهاتف", "التاريخ والوقت", "الجهة", "الأتوبيس", "السائق", "الإجمالي", "المحصل", "المتبقي", "أجر السائق", "الحالة", "الإجراءات"]}>
+    <DataTable head={["العميل", "الهاتف", "التاريخ والوقت", "الجهة", "الأتوبيس", "السائق", "الإجمالي", "المحصل", "المتبقي", "أجر السائق", "التنبيه", "الحالة", "الإجراءات"]}>
       {loading ? (
         <tr>
-          <td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+          <td colSpan={13} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
         </tr>
       ) : rows.length === 0 ? (
         <tr>
-          <td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">لا توجد رحلات في هذا القسم.</td>
+          <td colSpan={13} className="px-4 py-6 text-center text-muted-foreground">لا توجد رحلات في هذا القسم.</td>
         </tr>
       ) : (
         rows.map((t) => (
@@ -182,6 +185,7 @@ function TripsPage() {
             <td className="px-4 py-3 text-success">{currency(t.amountPaid)}</td>
             <td className={t.balanceDue > 0 ? "px-4 py-3 font-bold text-destructive" : "px-4 py-3 text-success"}>{currency(t.balanceDue)}</td>
             <td className="px-4 py-3 text-warning">{currency(t.driverFee)}</td>
+            <td className="px-4 py-3 text-xs">{t.notificationPreference}</td>
             <td className="px-4 py-3">
               <StatusPill label={t.status} tone={statusTone(t.status)} />
             </td>
@@ -308,6 +312,19 @@ function TripsPage() {
                 <Label className="text-xs text-muted-foreground">أجر السائق</Label>
                 <Input value={form.driverFee} onChange={(e) => setForm({ ...form, driverFee: e.target.value })} type="number" className="border-border bg-input/60" />
               </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">خيار التنبيه</Label>
+              <Select value={form.notificationPreference} onValueChange={(v) => setForm({ ...form, notificationPreference: v })}>
+                <SelectTrigger className="border-border bg-input/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TRIP_NOTIFICATION_OPTIONS.map((o) => (
+                    <SelectItem key={o} value={o}>{o}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">الحالة</Label>

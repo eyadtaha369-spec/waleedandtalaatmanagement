@@ -1926,6 +1926,13 @@ export async function fetchSupplierMonthlyBreakdown(monthPrefix: string): Promis
 
 // ---- Private trips & excursions (Spec #3) ----
 
+export const TRIP_NOTIFICATION_OPTIONS = [
+  "تنبيه قبل الرحلة بيومين (48 ساعة)",
+  "تنبيه قبل الرحلة بيوم (24 ساعة)",
+  "التنبيهين معاً (قبلها بيومين وقبلها بيوم)",
+  "بدون تنبيه",
+] as const;
+
 export interface Trip {
   id: string;
   clientName: string;
@@ -1940,6 +1947,7 @@ export interface Trip {
   amountPaid: number;
   balanceDue: number;
   driverFee: number;
+  notificationPreference: string;
   status: "مجدولة" | "جاري التنفيذ" | "مكتملة" | "ملغاة";
 }
 
@@ -1963,6 +1971,7 @@ export async function fetchTrips(): Promise<Trip[]> {
     amountPaid: Number(t.amount_paid ?? 0),
     balanceDue: Number(t.balance_due ?? 0),
     driverFee: Number(t.driver_fee ?? 0),
+    notificationPreference: t.notification_preference ?? "بدون تنبيه",
     status: t.status ?? "مجدولة",
   }));
 }
@@ -1977,6 +1986,7 @@ interface TripInput {
   totalPrice: number;
   amountPaid: number;
   driverFee: number;
+  notificationPreference: string;
   status: string;
 }
 
@@ -1995,6 +2005,7 @@ async function resolveTripPayload(input: TripInput) {
     total_price: input.totalPrice,
     amount_paid: input.amountPaid,
     driver_fee: input.driverFee,
+    notification_preference: input.notificationPreference,
     status: input.status,
   };
 }

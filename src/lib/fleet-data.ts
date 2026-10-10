@@ -22,6 +22,7 @@ export interface Driver {
   phone: string;
   license: string;
   licenseExpiry: string;
+  baseSalary: number;
   primaryBus: string;
   backupBus: string;
   shift: "الوردية الصباحية" | "الوردية المسائية" | "راحة";

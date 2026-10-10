@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { type Bus, type Driver, type Attendance } from "@/lib/fleet-data";
+import { type Bus, type Driver, type Attendance, currency } from "@/lib/fleet-data";
 import {
   fetchBuses,
   fetchDrivers,
@@ -49,6 +49,7 @@ import {
   fetchEmployeeAttendance,
   upsertEmployeeAttendance,
   deleteEmployeeAttendance,
+  EMPLOYEE_JOB_TITLES,
   type Employee,
   type EmployeeAttendanceRow,
 } from "@/lib/queries";
@@ -89,8 +90,8 @@ function FleetPage() {
   const [importingDrivers, setImportingDrivers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
-  const [driverForm, setDriverForm] = useState({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
-  const [employeeForm, setEmployeeForm] = useState({ id: "", name: "", phone: "", jobTitle: "ميكانيكي", baseSalary: "" });
+  const [driverForm, setDriverForm] = useState({ id: "", name: "", phone: "", license: "", licenseExpiry: "", baseSalary: "" });
+  const [employeeForm, setEmployeeForm] = useState({ id: "", name: "", phone: "", jobTitle: EMPLOYEE_JOB_TITLES[0] as string, baseSalary: "", isActive: true });
   const [attendanceBusy, setAttendanceBusy] = useState<string | null>(null);
   const [addingAttendance, setAddingAttendance] = useState(false);
   const [addingEmployeeAttendance, setAddingEmployeeAttendance] = useState(false);
@@ -103,7 +104,7 @@ function FleetPage() {
     checkOut: "",
     status: "حاضر",
   });
-  const [employeeAttendanceForm, setEmployeeAttendanceForm] = useState({ id: "", employeeName: "", date: todayStr, status: "حاضر", notes: "" });
+  const [employeeAttendanceForm, setEmployeeAttendanceForm] = useState({ id: "", employeeName: "", date: todayStr, status: "حاضر", notes: "", allowance: "", advance: "", penalty: "" });
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -175,22 +176,22 @@ function FleetPage() {
   };
 
   const openAddEmployee = () => {
-    setEmployeeForm({ id: "", name: "", phone: "", jobTitle: "ميكانيكي", baseSalary: "" });
+    setEmployeeForm({ id: "", name: "", phone: "", jobTitle: EMPLOYEE_JOB_TITLES[0] as string, baseSalary: "", isActive: true });
     setAddingEmployee(true);
   };
   const openEditEmployee = (e: Employee) => {
-    setEmployeeForm({ id: e.id, name: e.name, phone: e.phone, jobTitle: e.jobTitle || "ميكانيكي", baseSalary: String(e.baseSalary) });
+    setEmployeeForm({ id: e.id, name: e.name, phone: e.phone, jobTitle: e.jobTitle || EMPLOYEE_JOB_TITLES[0], baseSalary: String(e.baseSalary), isActive: e.isActive });
     setAddingEmployee(true);
   };
   const submitEmployee = async () => {
     if (!employeeForm.name.trim()) return;
     setSaving(true);
     try {
-      const payload = { name: employeeForm.name, phone: employeeForm.phone, jobTitle: employeeForm.jobTitle, baseSalary: Number(employeeForm.baseSalary) || 0 };
+      const payload = { name: employeeForm.name, phone: employeeForm.phone, jobTitle: employeeForm.jobTitle, baseSalary: Number(employeeForm.baseSalary) || 0, isActive: employeeForm.isActive };
       if (employeeForm.id) await updateEmployee(employeeForm.id, payload);
       else await addEmployee(payload);
       await loadAll();
-      setEmployeeForm({ id: "", name: "", phone: "", jobTitle: "ميكانيكي", baseSalary: "" });
+      setEmployeeForm({ id: "", name: "", phone: "", jobTitle: EMPLOYEE_JOB_TITLES[0] as string, baseSalary: "", isActive: true });
       setAddingEmployee(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر حفظ بيانات الموظف");
@@ -201,9 +202,9 @@ function FleetPage() {
 
   const openEmployeeAttendanceForm = (row?: EmployeeAttendanceRow) => {
     if (row) {
-      setEmployeeAttendanceForm({ id: row.id, employeeName: row.employee, date: row.date, status: row.status, notes: row.notes });
+      setEmployeeAttendanceForm({ id: row.id, employeeName: row.employee, date: row.date, status: row.status, notes: row.notes, allowance: String(row.allowance || ""), advance: String(row.advance || ""), penalty: String(row.penalty || "") });
     } else {
-      setEmployeeAttendanceForm({ id: "", employeeName: "", date: todayStr, status: "حاضر", notes: "" });
+      setEmployeeAttendanceForm({ id: "", employeeName: "", date: todayStr, status: "حاضر", notes: "", allowance: "", advance: "", penalty: "" });
     }
     setAddingEmployeeAttendance(true);
   };
@@ -217,6 +218,9 @@ function FleetPage() {
         date: employeeAttendanceForm.date,
         status: employeeAttendanceForm.status,
         notes: employeeAttendanceForm.notes,
+        allowance: Number(employeeAttendanceForm.allowance) || 0,
+        advance: Number(employeeAttendanceForm.advance) || 0,
+        penalty: Number(employeeAttendanceForm.penalty) || 0,
       });
       await loadAll();
       setAddingEmployeeAttendance(false);
@@ -228,12 +232,12 @@ function FleetPage() {
   };
 
   const openAddDriver = () => {
-    setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
+    setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "", baseSalary: "" });
     setAddingDriver(true);
   };
 
   const openEditDriver = (d: Driver) => {
-    setDriverForm({ id: d.id, name: d.name, phone: d.phone, license: d.license, licenseExpiry: d.licenseExpiry === "—" ? "" : d.licenseExpiry });
+    setDriverForm({ id: d.id, name: d.name, phone: d.phone, license: d.license, licenseExpiry: d.licenseExpiry === "—" ? "" : d.licenseExpiry, baseSalary: String(d.baseSalary || "") });
     setAddingDriver(true);
   };
 
@@ -241,14 +245,14 @@ function FleetPage() {
     if (!driverForm.name.trim()) return;
     setSaving(true);
     try {
-      const payload = { name: driverForm.name, phone: driverForm.phone, license: driverForm.license, licenseExpiry: driverForm.licenseExpiry };
+      const payload = { name: driverForm.name, phone: driverForm.phone, license: driverForm.license, licenseExpiry: driverForm.licenseExpiry, baseSalary: Number(driverForm.baseSalary) || 0 };
       if (driverForm.id) {
         await updateDriver(driverForm.id, payload);
       } else {
         await addDriverApi(payload);
       }
       await loadAll();
-      setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "" });
+      setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "", baseSalary: "" });
       setAddingDriver(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر حفظ السائق");
@@ -431,7 +435,7 @@ function FleetPage() {
                 </>
               }
             />
-            <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "الأتوبيس الأساسي", "الاحتياطي", "الوردية", "الإجراءات"]}>
+            <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "المرتب الأساسي", "الأتوبيس الأساسي", "الاحتياطي", "الوردية", "الإجراءات"]}>
               {drivers
                 .filter((d) => d.name.includes(query) || query === "")
                 .map((d) => (
@@ -440,6 +444,7 @@ function FleetPage() {
                     <td className="px-4 py-3">{d.phone}</td>
                     <td className="px-4 py-3">{d.license}</td>
                     <td className="px-4 py-3">{d.licenseExpiry}</td>
+                    <td className="px-4 py-3">{currency(d.baseSalary)}</td>
                     <td className="px-4 py-3 text-primary">{d.primaryBus}</td>
                     <td className="px-4 py-3">{d.backupBus}</td>
                     <td className="px-4 py-3">
@@ -573,7 +578,7 @@ function FleetPage() {
                 </Button>
               }
             />
-            <DataTable head={["الاسم", "الهاتف", "الوظيفة", "المرتب الأساسي", "الإجراءات"]}>
+            <DataTable head={["الاسم", "الهاتف", "الوظيفة", "المرتب الأساسي", "الحالة", "الإجراءات"]}>
               {employees
                 .filter((e) => e.name.includes(query) || query === "")
                 .map((e) => (
@@ -584,6 +589,9 @@ function FleetPage() {
                       <StatusPill label={e.jobTitle || "—"} tone="info" />
                     </td>
                     <td className="px-4 py-3">{e.baseSalary.toLocaleString("ar-EG")} ج.م</td>
+                    <td className="px-4 py-3">
+                      <StatusPill label={e.isActive ? "نشط" : "غير نشط"} tone={e.isActive ? "info" : "muted"} />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
                         <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditEmployee(e)}>
@@ -754,6 +762,7 @@ function FleetPage() {
               ["phone", "الهاتف", "tel"],
               ["license", "نوع الرخصة"],
               ["licenseExpiry", "تاريخ انتهاء الرخصة (YYYY-MM-DD)", "date"],
+              ["baseSalary", "المرتب الأساسي", "number"],
             ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
@@ -859,6 +868,7 @@ function FleetPage() {
           { key: "phone", label: "الهاتف" },
           { key: "license_type", label: "نوع الرخصة" },
           { key: "license_expiry", label: "انتهاء الرخصة" },
+          { key: "base_salary", label: "المرتب الأساسي" },
         ]}
         onImport={bulkInsertDrivers}
         onDone={loadAll}
@@ -886,9 +896,9 @@ function FleetPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ميكانيكي">ميكانيكي</SelectItem>
-                  <SelectItem value="مسؤول مخزن">مسؤول مخزن</SelectItem>
-                  <SelectItem value="إداري">إداري</SelectItem>
+                  {EMPLOYEE_JOB_TITLES.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -896,6 +906,10 @@ function FleetPage() {
               <Label className="text-xs text-muted-foreground">المرتب الأساسي</Label>
               <Input value={employeeForm.baseSalary} onChange={(e) => setEmployeeForm({ ...employeeForm, baseSalary: e.target.value })} type="number" className="border-border bg-input/60" />
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={employeeForm.isActive} onChange={(e) => setEmployeeForm({ ...employeeForm, isActive: e.target.checked })} className="h-4 w-4 accent-[#D4AF37]" />
+              موظف نشط (يظهر في كشف المرتبات)
+            </label>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitEmployee} disabled={saving}>
@@ -946,6 +960,14 @@ function FleetPage() {
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">ملاحظات</Label>
               <Input value={employeeAttendanceForm.notes} onChange={(e) => setEmployeeAttendanceForm({ ...employeeAttendanceForm, notes: e.target.value })} className="border-border bg-input/60" />
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {([["allowance", "بدلات / إضافي"], ["advance", "سلفة"], ["penalty", "جزاء"]] as const).map(([k, label]) => (
+                <div key={k} className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">{label}</Label>
+                  <Input value={employeeAttendanceForm[k]} onChange={(e) => setEmployeeAttendanceForm({ ...employeeAttendanceForm, [k]: e.target.value })} type="number" className="border-border bg-input/60" />
+                </div>
+              ))}
             </div>
           </div>
           <DialogFooter>

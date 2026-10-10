@@ -60,6 +60,7 @@ export async function fetchDrivers(): Promise<Driver[]> {
     phone: d.phone ?? "—",
     license: d.license_type ?? "—",
     licenseExpiry: d.license_expiry ?? "—",
+    baseSalary: Number(d.base_salary) || 0,
     primaryBus: "—",
     backupBus: "—",
     shift: "راحة",
@@ -144,13 +145,14 @@ export async function upsertAttendanceRecord(input: {
   }
 }
 
-export async function addDriver(input: { name: string; phone: string; license: string; licenseExpiry: string }) {
+export async function addDriver(input: { name: string; phone: string; license: string; licenseExpiry: string; baseSalary: number }) {
   const { error } = await supabase.from("drivers").insert({
     driver_code: `DRV-${Date.now().toString().slice(-6)}`,
     name: input.name,
     phone: input.phone,
     license_type: input.license,
     license_expiry: input.licenseExpiry || null,
+    base_salary: input.baseSalary || 0,
   });
   if (error) throw error;
 }
@@ -690,6 +692,7 @@ export async function bulkInsertDrivers(rows: Record<string, string>[]) {
     phone: r["phone"] ?? r["الهاتف"],
     license_type: r["license_type"] ?? r["نوع الرخصة"],
     license_expiry: (r["license_expiry"] ?? r["انتهاء الرخصة"]) || null,
+    base_salary: Number(r["base_salary"] ?? r["المرتب الأساسي"]) || 0,
   }));
   const { error } = await supabase.from("drivers").insert(payload);
   if (error) throw error;
@@ -1012,12 +1015,13 @@ export async function deleteBus(id: string) {
   if (error) throw error;
 }
 
-export async function updateDriver(id: string, input: { name: string; phone: string; license: string; licenseExpiry: string }) {
+export async function updateDriver(id: string, input: { name: string; phone: string; license: string; licenseExpiry: string; baseSalary: number }) {
   const { error } = await supabase.from("drivers").update({
     name: input.name,
     phone: input.phone,
     license_type: input.license,
     license_expiry: input.licenseExpiry || null,
+    base_salary: input.baseSalary || 0,
   }).eq("id", id);
   if (error) throw error;
 }
@@ -1381,30 +1385,106 @@ export function computeMonthlyPL(
 
 // ---- Employees (non-driver staff: mechanics, warehouse, admin) ----
 
+export const EMPLOYEE_JOB_TITLES = [
+  "محاسب",
+  "مدير مكتب",
+  "مدير ورشة",
+  "صنيعي ورشة",
+  "عامل",
+  "مدير تشغيل",
+  "رئيس مجلس إدارة",
+  "سكرتير",
+  "مشرفين",
+] as const;
+
 export interface Employee {
   id: string;
   name: string;
   phone: string;
   jobTitle: string;
   baseSalary: number;
+  isActive: boolean;
 }
 
 export async function fetchEmployees(): Promise<Employee[]> {
   const { data, error } = await supabase.from("employees").select("*").order("name");
   if (error) throw error;
-  return (data ?? []).map((e: any) => ({ id: e.id, name: e.name, phone: e.phone ?? "", jobTitle: e.job_title ?? "", baseSalary: Number(e.base_salary ?? 0) }));
+  return (data ?? []).map((e: any) => ({
+    id: e.id,
+    name: e.name,
+    phone: e.phone ?? "",
+    jobTitle: e.job_title ?? "",
+    baseSalary: Number(e.base_salary ?? 0),
+    isActive: e.is_active !== false,
+  }));
 }
-export async function addEmployee(input: { name: string; phone: string; jobTitle: string; baseSalary: number }) {
-  const { error } = await supabase.from("employees").insert({ name: input.name, phone: input.phone, job_title: input.jobTitle, base_salary: input.baseSalary });
+type EmployeeInput = { name: string; phone: string; jobTitle: string; baseSalary: number; isActive: boolean };
+export async function addEmployee(input: EmployeeInput) {
+  const { error } = await supabase.from("employees").insert({ name: input.name, phone: input.phone, job_title: input.jobTitle, base_salary: input.baseSalary, is_active: input.isActive });
   if (error) throw error;
 }
-export async function updateEmployee(id: string, input: { name: string; phone: string; jobTitle: string; baseSalary: number }) {
-  const { error } = await supabase.from("employees").update({ name: input.name, phone: input.phone, job_title: input.jobTitle, base_salary: input.baseSalary }).eq("id", id);
+export async function updateEmployee(id: string, input: EmployeeInput) {
+  const { error } = await supabase.from("employees").update({ name: input.name, phone: input.phone, job_title: input.jobTitle, base_salary: input.baseSalary, is_active: input.isActive }).eq("id", id);
   if (error) throw error;
 }
 export async function deleteEmployee(id: string) {
   const { error } = await supabase.from("employees").delete().eq("id", id);
   if (error) throw error;
+}
+
+export interface EmployeePayrollRow {
+  employee: string;
+  jobTitle: string;
+  baseSalary: number;
+  totalAllowances: number;
+  totalAdvances: number;
+  totalPenalties: number;
+  netSalary: number;
+}
+
+export function computeEmployeePayroll(
+  employees: { name: string; jobTitle: string; baseSalary: number; isActive: boolean }[],
+  rows: { employeeName: string; allowance: number; advance: number; penalty: number }[],
+): EmployeePayrollRow[] {
+  return employees
+    .filter((e) => e.isActive)
+    .map((e) => {
+      const mine = rows.filter((r) => r.employeeName === e.name);
+      const totalAllowances = mine.reduce((sum, r) => sum + r.allowance, 0);
+      const totalAdvances = mine.reduce((sum, r) => sum + r.advance, 0);
+      const totalPenalties = mine.reduce((sum, r) => sum + r.penalty, 0);
+      return {
+        employee: e.name,
+        jobTitle: e.jobTitle,
+        baseSalary: e.baseSalary,
+        totalAllowances,
+        totalAdvances,
+        totalPenalties,
+        netSalary: e.baseSalary + totalAllowances - (totalAdvances + totalPenalties),
+      };
+    });
+}
+
+export async function fetchEmployeePayroll(monthPrefix: string): Promise<EmployeePayrollRow[]> {
+  const nextMonth = nextMonthPrefix(monthPrefix);
+  const [employees, { data, error }] = await Promise.all([
+    fetchEmployees(),
+    supabase
+      .from("employee_attendance")
+      .select("allowance, advance, penalty, employees(name)")
+      .gte("date", `${monthPrefix}-01`)
+      .lt("date", `${nextMonth}-01`),
+  ]);
+  if (error) throw error;
+  return computeEmployeePayroll(
+    employees,
+    (data ?? []).map((r: any) => ({
+      employeeName: r.employees?.name ?? "",
+      allowance: Number(r.allowance ?? 0),
+      advance: Number(r.advance ?? 0),
+      penalty: Number(r.penalty ?? 0),
+    })),
+  );
 }
 
 export interface EmployeeAttendanceRow {
@@ -1414,6 +1494,9 @@ export interface EmployeeAttendanceRow {
   date: string;
   status: string;
   notes: string;
+  allowance: number;
+  advance: number;
+  penalty: number;
 }
 
 export async function fetchEmployeeAttendance(): Promise<EmployeeAttendanceRow[]> {
@@ -1429,13 +1512,16 @@ export async function fetchEmployeeAttendance(): Promise<EmployeeAttendanceRow[]
     date: a.date,
     status: a.status ?? "حاضر",
     notes: a.notes ?? "",
+    allowance: Number(a.allowance ?? 0),
+    advance: Number(a.advance ?? 0),
+    penalty: Number(a.penalty ?? 0),
   }));
 }
 
-export async function upsertEmployeeAttendance(input: { id?: string | undefined; employeeName: string; date: string; status: string; notes: string }) {
+export async function upsertEmployeeAttendance(input: { id?: string | undefined; employeeName: string; date: string; status: string; notes: string; allowance: number; advance: number; penalty: number }) {
   const { data: employee } = await supabase.from("employees").select("id").eq("name", input.employeeName).maybeSingle();
   if (!employee) throw new Error("لم يتم العثور على موظف بهذا الاسم");
-  const payload = { employee_id: employee.id, date: input.date, status: input.status, notes: input.notes };
+  const payload = { employee_id: employee.id, date: input.date, status: input.status, notes: input.notes, allowance: input.allowance, advance: input.advance, penalty: input.penalty };
   if (input.id) {
     const { error } = await supabase.from("employee_attendance").update(payload).eq("id", input.id);
     if (error) throw error;
@@ -1631,7 +1717,7 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
     ops,
     { data: studentPayments },
     driverPayroll,
-    { data: employees },
+    employeePayroll,
     { data: outTransactions },
     { data: maintenanceOrders },
     { data: fuelLogs },
@@ -1640,7 +1726,7 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
     fetchDailyOperations(monthPrefix),
     supabase.from("payments").select("amount").eq("type", "دائن").gte("date", monthStart).lt("date", nextMonth),
     fetchDriverPayroll(monthPrefix),
-    supabase.from("employees").select("base_salary"),
+    fetchEmployeePayroll(monthPrefix),
     supabase.from("inventory_transactions").select("quantity, inventory(unit_price)").eq("type", "OUT").gte("created_at", monthStart).lt("created_at", nextMonth),
     supabase.from("maintenance_orders").select("total_cost").gte("created_at", monthStart).lt("created_at", nextMonth),
     supabase.from("fuel_logs").select("cost").gte("date", monthStart).lt("date", nextMonth),
@@ -1650,7 +1736,7 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
   const clientRevenue = ops.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
   const studentCollections = (studentPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
   const driverSalaries = driverPayroll.reduce((sum, p) => sum + p.netSalary, 0);
-  const employeeSalaries = (employees ?? []).reduce((sum, e: any) => sum + Number(e.base_salary ?? 0), 0);
+  const employeeSalaries = employeePayroll.reduce((sum, p) => sum + p.netSalary, 0);
   const sparePartsCost = (outTransactions ?? []).reduce((sum, t: any) => sum + Number(t.quantity ?? 0) * Number(t.inventory?.unit_price ?? 0), 0);
   const externalMaintenanceCost = (maintenanceOrders ?? []).reduce((sum, m: any) => sum + Number(m.total_cost ?? 0), 0);
   const gasFromDispatch = ops.reduce((sum, o) => sum + o.gasCost, 0);
@@ -1731,7 +1817,7 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
     ops,
     driverPayroll,
     { data: staffPayslips },
-    { data: allEmployees },
+    employeePayroll,
     { data: maintOrders },
     { data: outTx },
     { data: allExpenses },
@@ -1740,7 +1826,7 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
     fetchDailyOperations(monthPrefix),
     fetchDriverPayroll(monthPrefix),
     supabase.from("payslips").select("overtime, advances, penalties, staff(base_salary)").gte("month", `${monthPrefix}-01`).lt("month", `${nextMonth}-01`),
-    supabase.from("employees").select("base_salary"),
+    fetchEmployeePayroll(monthPrefix),
     supabase.from("maintenance_orders").select("total_cost, created_at").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
     supabase.from("inventory_transactions").select("total_cost, created_at").eq("type", "OUT").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
     supabase.from("expenses").select("category, amount, date").gte("date", `${monthPrefix}-01`).lt("date", `${nextMonth}-01`),
@@ -1761,7 +1847,7 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
     const base = Number(p.staff?.base_salary ?? 0);
     return sum + base + Number(p.overtime ?? 0) - Number(p.advances ?? 0) - Number(p.penalties ?? 0);
   }, 0);
-  const employeeBaseTotal = (allEmployees ?? []).reduce((sum: number, e: any) => sum + Number(e.base_salary ?? 0), 0);
+  const employeeBaseTotal = employeePayroll.reduce((sum, p) => sum + p.netSalary, 0);
 
   const expenseByCategory = (cats: string[]) =>
     (allExpenses ?? []).filter((e: any) => cats.includes(e.category)).reduce((sum: number, e: any) => sum + Number(e.amount ?? 0), 0);

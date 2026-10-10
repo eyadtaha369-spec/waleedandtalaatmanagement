@@ -32,6 +32,8 @@ import {
   upsertDailyShift,
   deleteDailyShift,
   fetchDriverPayroll,
+  fetchEmployeePayroll,
+  type EmployeePayrollRow,
   type DailyShift,
   type DriverPayrollRow,
 } from "@/lib/queries";
@@ -62,6 +64,7 @@ function PayrollPage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [shifts, setShifts] = useState<DailyShift[]>([]);
   const [payroll, setPayroll] = useState<DriverPayrollRow[]>([]);
+  const [employeePayroll, setEmployeePayroll] = useState<EmployeePayrollRow[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
   const [busCodes, setBusCodes] = useState<string[]>([]);
   const [routeNames, setRouteNames] = useState<string[]>([]);
@@ -78,15 +81,17 @@ function PayrollPage() {
     setLoading(true);
     setError(null);
     try {
-      const [s, p, drivers, buses, routes] = await Promise.all([
+      const [s, p, ep, drivers, buses, routes] = await Promise.all([
         fetchDailyShifts(month),
         fetchDriverPayroll(month),
+        fetchEmployeePayroll(month),
         fetchDrivers(),
         fetchBuses(),
         fetchRoutes(),
       ]);
       setShifts(s);
       setPayroll(p);
+      setEmployeePayroll(ep);
       setDriverNames(drivers.map((d) => d.name));
       setBusCodes(buses.map((b) => b.code));
       setRouteNames(routes.map((r) => r.name));
@@ -168,6 +173,8 @@ function PayrollPage() {
   };
 
   const filteredPayroll = payroll.filter((p) => p.driver.includes(query) || query === "");
+  const filteredEmployeePayroll = employeePayroll.filter((p) => p.employee.includes(query) || p.jobTitle.includes(query) || query === "");
+  const grandTotal = filteredPayroll.reduce((a, p) => a + p.netSalary, 0) + filteredEmployeePayroll.reduce((a, p) => a + p.netSalary, 0);
 
   return (
     <AppShell>
@@ -228,8 +235,11 @@ function PayrollPage() {
         <Toolbar
           query={query}
           onQuery={setQuery}
-          placeholder="ابحث باسم السائق..."
-          onExport={() => exportToExcel("ملخص المرتبات", filteredPayroll as unknown as Record<string, string | number>[])}
+          placeholder="ابحث باسم السائق أو الموظف..."
+          onExport={() => exportToExcel("ملخص المرتبات", [
+            ...filteredPayroll.map((p) => ({ الفئة: "سائق", الاسم: p.driver, الوظيفة: "سائق", "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalOvertime + p.tripFees, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
+            ...filteredEmployeePayroll.map((p) => ({ الفئة: "موظف", الاسم: p.employee, الوظيفة: p.jobTitle, "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalAllowances, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
+          ] as Record<string, string | number>[])}
           extra={
             <>
               <Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="h-9 w-40 border-border bg-input/60" />
@@ -262,6 +272,33 @@ function PayrollPage() {
             ))
           )}
         </DataTable>
+      </Panel>
+
+      <Panel title="مرتبات الموظفين الشهرية (غير السائقين)" className="mt-4">
+        <DataTable head={["اسم الموظف", "الوظيفة", "المرتب الأساسي", "البدلات / الإضافي", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
+          {loading ? (
+            <tr>
+              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+            </tr>
+          ) : filteredEmployeePayroll.length === 0 ? (
+            <tr>
+              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">لا يوجد موظفون نشطون. أضفهم من صفحة الأسطول ← إدارة الموظفين.</td>
+            </tr>
+          ) : (
+            filteredEmployeePayroll.map((p) => (
+              <tr key={p.employee} className="transition-colors hover:bg-secondary/30">
+                <td className="px-4 py-3 font-bold">{p.employee}</td>
+                <td className="px-4 py-3">{p.jobTitle || "—"}</td>
+                <td className="px-4 py-3">{currency(p.baseSalary)}</td>
+                <td className="px-4 py-3 text-success">{currency(p.totalAllowances)}</td>
+                <td className="px-4 py-3 text-warning">{currency(p.totalAdvances)}</td>
+                <td className="px-4 py-3 text-destructive">{currency(p.totalPenalties)}</td>
+                <td className="px-4 py-3 font-bold text-primary">{currency(p.netSalary)}</td>
+              </tr>
+            ))
+          )}
+        </DataTable>
+        <p className="mt-3 text-sm font-bold text-primary">إجمالي المرتبات الشهرية (سائقين + موظفين): {currency(grandTotal)}</p>
       </Panel>
 
       <Dialog open={adding} onOpenChange={setAdding}>

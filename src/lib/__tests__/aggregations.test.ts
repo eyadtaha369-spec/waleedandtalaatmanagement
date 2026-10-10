@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -236,5 +236,23 @@ describe("computeMonthlyReport", () => {
     });
     expect(result.totalRevenue).toBe(750);
     expect(result.netProfit).toBe(750);
+  });
+});
+
+describe("computeEmployeePayroll", () => {
+  it("includes only active employees and nets allowances, advances and penalties", () => {
+    const result = computeEmployeePayroll(
+      [
+        { name: "أحمد", jobTitle: "محاسب", baseSalary: 5000, isActive: true },
+        { name: "سامي", jobTitle: "عامل", baseSalary: 3000, isActive: false },
+      ],
+      [
+        { employeeName: "أحمد", allowance: 500, advance: 1000, penalty: 100 },
+        { employeeName: "أحمد", allowance: 0, advance: 200, penalty: 0 },
+        { employeeName: "سامي", allowance: 0, advance: 0, penalty: 0 },
+      ],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ employee: "أحمد", jobTitle: "محاسب", totalAllowances: 500, totalAdvances: 1200, totalPenalties: 100, netSalary: 4200 });
   });
 });

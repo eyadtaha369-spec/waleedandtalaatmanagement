@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -70,14 +70,14 @@ describe("computeDriverPayroll", () => {
       ],
     );
     expect(result).toEqual([
-      { driver: "أحمد", baseSalary: 3000, totalOvertime: 300, totalAdvances: 100, totalPenalties: 50, tripFees: 0, netSalary: 3150 },
+      { driver: "أحمد", baseSalary: 3000, totalOvertime: 300, totalAdvances: 100, totalPenalties: 50, tripFees: 0, netSalary: 3150 , shiftEarnings: 0},
     ]);
   });
 
   it("gives a driver with no shifts this month just their base salary", () => {
     const result = computeDriverPayroll([{ name: "سارة", base_salary: 2500 }], []);
     expect(result).toEqual([
-      { driver: "سارة", baseSalary: 2500, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 0, netSalary: 2500 },
+      { driver: "سارة", baseSalary: 2500, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 0, netSalary: 2500 , shiftEarnings: 0},
     ]);
   });
 
@@ -87,7 +87,7 @@ describe("computeDriverPayroll", () => {
       [{ driver: "أحمد", overtimeAllowance: 500, dailyAdvance: 0, penalty: 0 }],
     );
     expect(result.find((r) => r.driver === "محمد")).toEqual({
-      driver: "محمد", baseSalary: 2800, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 0, netSalary: 2800,
+      driver: "محمد", baseSalary: 2800, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 0, netSalary: 2800, shiftEarnings: 0,
     });
   });
 
@@ -98,7 +98,7 @@ describe("computeDriverPayroll", () => {
       [{ driver: "أحمد", fee: 200 }, { driver: "أحمد", fee: 150 }],
     );
     expect(result[0]).toEqual({
-      driver: "أحمد", baseSalary: 3000, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 350, netSalary: 3350,
+      driver: "أحمد", baseSalary: 3000, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 350, netSalary: 3350, shiftEarnings: 0,
     });
   });
 });
@@ -166,29 +166,44 @@ describe("computeClientInvoiceSummary", () => {
 });
 
 describe("computeMonthlyPL", () => {
-  it("computes net profit as revenue minus gas, general expenses, and payroll", () => {
-    const result = computeMonthlyPL(
-      [{ gasCost: 200, fare1: 1000, fare2: 500 }],
-      300, // general expenses
-      2000, // net driver payroll
-    );
-    expect(result).toEqual({ totalRevenue: 1500, totalExpenses: 2500, netProfit: -1000 });
+  it("computes net profit as bus-value revenue minus general expenses and payroll", () => {
+    const result = computeMonthlyPL([{ busValue: 1500 }], 300, 1200);
+    expect(result).toEqual({ totalRevenue: 1500, totalExpenses: 1500, netProfit: 0 });
   });
 
-  it("sums fare1 and fare2 from every operation, and gas across all of them", () => {
-    const result = computeMonthlyPL(
-      [
-        { gasCost: 100, fare1: 500, fare2: 0 },
-        { gasCost: 150, fare1: 400, fare2: 200 },
-      ],
-      0,
-      0,
-    );
-    expect(result).toEqual({ totalRevenue: 1100, totalExpenses: 250, netProfit: 850 });
+  it("sums bus value across every shift (unlimited shifts per day)", () => {
+    const result = computeMonthlyPL([{ busValue: 500 }, { busValue: 400 }, { busValue: 200 }], 0, 0);
+    expect(result).toEqual({ totalRevenue: 1100, totalExpenses: 0, netProfit: 1100 });
   });
 
-  it("handles a month with zero operations", () => {
+  it("handles a month with zero shifts", () => {
     expect(computeMonthlyPL([], 100, 50)).toEqual({ totalRevenue: 0, totalExpenses: 150, netProfit: -150 });
+  });
+});
+
+describe("computeDailyReport", () => {
+  it("groups revenue per company and earnings per driver, with an overall summary", () => {
+    const r = computeDailyReport([
+      { client: "شركة أ", driver: "أحمد", busValue: 1000, driverValue: 200 },
+      { client: "شركة أ", driver: "أحمد", busValue: 800, driverValue: 150 },
+      { client: "شركة ب", driver: "محمود", busValue: 600, driverValue: 100 },
+    ]);
+    expect(r.shiftCount).toBe(3);
+    expect(r.totalCompanyRevenue).toBe(2400);
+    expect(r.totalDriverEarnings).toBe(450);
+    expect(r.netAfterDrivers).toBe(1950);
+    expect(r.byCompany).toEqual([
+      { client: "شركة أ", shifts: 2, total: 1800 },
+      { client: "شركة ب", shifts: 1, total: 600 },
+    ]);
+    expect(r.byDriver).toEqual([
+      { driver: "أحمد", shifts: 2, total: 350 },
+      { driver: "محمود", shifts: 1, total: 100 },
+    ]);
+  });
+
+  it("returns zeros for a day with no shifts", () => {
+    expect(computeDailyReport([])).toEqual({ shiftCount: 0, totalCompanyRevenue: 0, totalDriverEarnings: 0, netAfterDrivers: 0, byCompany: [], byDriver: [] });
   });
 });
 
@@ -254,5 +269,18 @@ describe("computeEmployeePayroll", () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ employee: "أحمد", jobTitle: "محاسب", totalAllowances: 500, totalAdvances: 1200, totalPenalties: 100, netSalary: 4200 });
+  });
+});
+
+describe("computeDriverPayroll with dispatch shift earnings", () => {
+  it("adds driver value (قيمة السواقة) from shifts to the net salary", () => {
+    const [row] = computeDriverPayroll(
+      [{ name: "أحمد", base_salary: 3000 }],
+      [{ driver: "أحمد", overtimeAllowance: 100, dailyAdvance: 500, penalty: 50 }],
+      [{ driver: "أحمد", fee: 200 }],
+      [{ driver: "أحمد", value: 400 }, { driver: "أحمد", value: 300 }, { driver: "غيره", value: 999 }],
+    );
+    expect(row?.shiftEarnings).toBe(700);
+    expect(row?.netSalary).toBe(3000 + 100 + 200 + 700 - 550);
   });
 });

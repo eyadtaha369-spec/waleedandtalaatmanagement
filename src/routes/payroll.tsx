@@ -237,7 +237,7 @@ function PayrollPage() {
           onQuery={setQuery}
           placeholder="ابحث باسم السائق أو الموظف..."
           onExport={() => exportToExcel("ملخص المرتبات", [
-            ...filteredPayroll.map((p) => ({ الفئة: "سائق", الاسم: p.driver, الوظيفة: "سائق", "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalOvertime + p.tripFees, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
+            ...filteredPayroll.map((p) => ({ الفئة: "سائق", الاسم: p.driver, الوظيفة: "سائق", "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalOvertime + p.tripFees + p.shiftEarnings, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
             ...filteredEmployeePayroll.map((p) => ({ الفئة: "موظف", الاسم: p.employee, الوظيفة: p.jobTitle, "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalAllowances, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
           ] as Record<string, string | number>[])}
           extra={
@@ -249,14 +249,14 @@ function PayrollPage() {
             </>
           }
         />
-        <DataTable head={["اسم السائق", "المرتب الأساسي", "إجمالي الإضافي/البدلات", "عمولة الرحلات", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
+        <DataTable head={["اسم السائق", "المرتب الأساسي", "إجمالي الإضافي/البدلات", "عمولة الرحلات", "قيمة الورديات", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
           {loading ? (
             <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+              <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
             </tr>
           ) : filteredPayroll.length === 0 ? (
             <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">لا يوجد سائقون بعد.</td>
+              <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">لا يوجد سائقون بعد.</td>
             </tr>
           ) : (
             filteredPayroll.map((p) => (
@@ -265,6 +265,7 @@ function PayrollPage() {
                 <td className="px-4 py-3">{currency(p.baseSalary)}</td>
                 <td className="px-4 py-3 text-success">{currency(p.totalOvertime)}</td>
                 <td className="px-4 py-3 text-success">{currency(p.tripFees)}</td>
+                <td className="px-4 py-3 text-success">{currency(p.shiftEarnings)}</td>
                 <td className="px-4 py-3 text-warning">{currency(p.totalAdvances)}</td>
                 <td className="px-4 py-3 text-destructive">{currency(p.totalPenalties)}</td>
                 <td className="px-4 py-3 font-bold text-primary">{currency(p.netSalary)}</td>

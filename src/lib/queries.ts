@@ -870,6 +870,7 @@ export interface DriverPayrollRow {
   totalAdvances: number;
   totalPenalties: number;
   tripFees: number;
+  shiftEarnings: number;
   netSalary: number;
 }
 
@@ -877,6 +878,7 @@ export function computeDriverPayroll(
   drivers: { name: string; base_salary: number }[],
   shifts: { driver: string; overtimeAllowance: number; dailyAdvance: number; penalty: number }[],
   tripFees: { driver: string; fee: number }[] = [],
+  shiftEarnings: { driver: string; value: number }[] = [],
 ): DriverPayrollRow[] {
   return drivers.map((d) => {
     const rows = shifts.filter((s) => s.driver === d.name);
@@ -884,6 +886,7 @@ export function computeDriverPayroll(
     const totalAdvances = rows.reduce((sum, r) => sum + r.dailyAdvance, 0);
     const totalPenalties = rows.reduce((sum, r) => sum + r.penalty, 0);
     const driverTripFees = tripFees.filter((t) => t.driver === d.name).reduce((sum, t) => sum + t.fee, 0);
+    const driverShiftEarnings = shiftEarnings.filter((t) => t.driver === d.name).reduce((sum, t) => sum + t.value, 0);
     const baseSalary = Number(d.base_salary ?? 0);
     return {
       driver: d.name,
@@ -892,23 +895,26 @@ export function computeDriverPayroll(
       totalAdvances,
       totalPenalties,
       tripFees: driverTripFees,
-      netSalary: baseSalary + totalOvertime + driverTripFees - (totalAdvances + totalPenalties),
+      shiftEarnings: driverShiftEarnings,
+      netSalary: baseSalary + totalOvertime + driverTripFees + driverShiftEarnings - (totalAdvances + totalPenalties),
     };
   });
 }
 
 export async function fetchDriverPayroll(monthPrefix: string): Promise<DriverPayrollRow[]> {
   const nextMonth = nextMonthPrefix(monthPrefix);
-  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }] = await Promise.all([
+  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts] = await Promise.all([
     supabase.from("drivers").select("name, base_salary"),
     fetchDailyShifts(monthPrefix),
     supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", `${monthPrefix}-01`).lt("trip_date", `${nextMonth}-01`),
+    fetchDispatchShifts(monthPrefix),
   ]);
   if (dErr) throw dErr;
   return computeDriverPayroll(
     (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) })),
     shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty })),
     (tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
+    dispatchShifts.map((o) => ({ driver: o.driver, value: o.driverValue })),
   );
 }
 
@@ -1231,7 +1237,7 @@ export async function deleteClient(id: string) {
   if (error) throw error;
 }
 
-export interface DailyOperation {
+export interface DispatchShift {
   id: string;
   date: string;
   busId: string | null;
@@ -1239,106 +1245,134 @@ export interface DailyOperation {
   busType: string;
   driverId: string | null;
   driver: string;
-  gasCost: number;
-  gasLiters: number;
-  odometerReading: number;
-  client1Id: string | null;
-  client1: string;
-  route1: string;
-  fare1: number;
-  client2Id: string | null;
-  client2: string;
-  route2: string;
-  fare2: number;
+  clientId: string | null;
+  client: string;
+  route: string;
+  busValue: number; // قيمة الأتوبيس — credited to the company account
+  driverValue: number; // قيمة السواقة — credited to the driver's salary
   notes: string;
 }
 
-export async function fetchDailyOperations(monthPrefix: string): Promise<DailyOperation[]> {
-  const { data, error } = await supabase
-    .from("daily_bus_operations")
-    .select("*, buses(bus_code, bus_type), drivers(name), client1:client_id_1(client_name), client2:client_id_2(client_name)")
-    .gte("op_date", `${monthPrefix}-01`)
-    .lt("op_date", `${nextMonthPrefix(monthPrefix)}-01`)
-    .order("op_date", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((o: any) => ({
+const SHIFT_SELECT = "*, buses(bus_code, bus_type), drivers(name), clients(client_name)";
+
+function mapShift(o: any): DispatchShift {
+  return {
     id: o.id,
     date: o.op_date,
     busId: o.bus_id,
     bus: o.buses?.bus_code ?? "—",
-    busType: o.bus_type ?? o.buses?.bus_type ?? "—",
+    busType: o.buses?.bus_type ?? "—",
     driverId: o.driver_id,
     driver: o.drivers?.name ?? "—",
-    gasCost: Number(o.gas_cost ?? 0),
-    gasLiters: Number(o.gas_liters ?? 0),
-    odometerReading: Number(o.odometer_reading ?? 0),
-    client1Id: o.client_id_1,
-    client1: o.client1?.client_name ?? "—",
-    route1: o.route_1 ?? "",
-    fare1: Number(o.fare_1 ?? 0),
-    client2Id: o.client_id_2,
-    client2: o.client2?.client_name ?? "—",
-    route2: o.route_2 ?? "",
-    fare2: Number(o.fare_2 ?? 0),
+    clientId: o.client_id,
+    client: o.clients?.client_name ?? "—",
+    route: o.route ?? "",
+    busValue: Number(o.bus_value ?? 0),
+    driverValue: Number(o.driver_value ?? 0),
     notes: o.notes ?? "",
-  }));
-}
-
-interface DailyOperationInput {
-  date: string;
-  busCode: string;
-  busType?: string;
-  driverName: string;
-  gasCost: number;
-  gasLiters: number;
-  odometerReading: number;
-  client1Name: string;
-  route1: string;
-  fare1: number;
-  client2Name: string;
-  route2: string;
-  fare2: number;
-  notes: string;
-}
-
-async function resolveDailyOperationPayload(input: DailyOperationInput) {
-  const [{ data: bus }, { data: driver }, { data: client1 }, { data: client2 }] = await Promise.all([
-    input.busCode.trim() ? supabase.from("buses").select("id, bus_type").eq("bus_code", input.busCode).maybeSingle() : Promise.resolve({ data: null }),
-    input.driverName.trim() ? supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle() : Promise.resolve({ data: null }),
-    input.client1Name.trim() ? supabase.from("clients").select("id").eq("client_name", input.client1Name).maybeSingle() : Promise.resolve({ data: null }),
-    input.client2Name.trim() ? supabase.from("clients").select("id").eq("client_name", input.client2Name).maybeSingle() : Promise.resolve({ data: null }),
-  ]);
-  return {
-    op_date: input.date,
-    bus_id: bus?.id ?? null,
-    bus_type: input.busType || (bus as any)?.bus_type || null,
-    driver_id: driver?.id ?? null,
-    gas_cost: input.gasCost,
-    gas_liters: input.gasLiters,
-    odometer_reading: input.odometerReading,
-    client_id_1: client1?.id ?? null,
-    route_1: input.route1 || null,
-    fare_1: input.fare1,
-    client_id_2: client2?.id ?? null,
-    route_2: input.route2 || null,
-    fare_2: input.fare2,
-    notes: input.notes,
   };
 }
 
-export async function addDailyOperation(input: DailyOperationInput) {
-  const payload = await resolveDailyOperationPayload(input);
-  const { error } = await supabase.from("daily_bus_operations").insert(payload);
+export async function fetchDispatchShifts(monthPrefix: string): Promise<DispatchShift[]> {
+  const { data, error } = await supabase
+    .from("dispatch_shifts")
+    .select(SHIFT_SELECT)
+    .gte("op_date", `${monthPrefix}-01`)
+    .lt("op_date", `${nextMonthPrefix(monthPrefix)}-01`)
+    .order("op_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapShift);
+}
+
+export async function fetchDispatchShiftsByDate(date: string): Promise<DispatchShift[]> {
+  const { data, error } = await supabase
+    .from("dispatch_shifts")
+    .select(SHIFT_SELECT)
+    .eq("op_date", date)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(mapShift);
+}
+
+export interface DispatchShiftInput {
+  date: string;
+  busCode: string;
+  driverName: string;
+  clientName: string;
+  route: string;
+  busValue: number;
+  driverValue: number;
+  notes: string;
+}
+
+async function resolveShiftPayloads(inputs: DispatchShiftInput[]) {
+  const [{ data: buses }, { data: drivers }, { data: clients }] = await Promise.all([
+    supabase.from("buses").select("id, bus_code"),
+    supabase.from("drivers").select("id, name"),
+    supabase.from("clients").select("id, client_name"),
+  ]);
+  const busMap = new Map((buses ?? []).map((b: any) => [b.bus_code, b.id]));
+  const driverMap = new Map((drivers ?? []).map((d: any) => [d.name, d.id]));
+  const clientMap = new Map((clients ?? []).map((c: any) => [c.client_name, c.id]));
+  return inputs.map((i) => ({
+    op_date: i.date,
+    bus_id: busMap.get(i.busCode) ?? null,
+    driver_id: driverMap.get(i.driverName) ?? null,
+    client_id: clientMap.get(i.clientName) ?? null,
+    route: i.route || null,
+    bus_value: i.busValue,
+    driver_value: i.driverValue,
+    notes: i.notes,
+  }));
+}
+
+export async function addDispatchShifts(inputs: DispatchShiftInput[]) {
+  if (inputs.length === 0) return;
+  const payload = await resolveShiftPayloads(inputs);
+  const { error } = await supabase.from("dispatch_shifts").insert(payload);
   if (error) throw error;
 }
-export async function updateDailyOperation(id: string, input: DailyOperationInput) {
-  const payload = await resolveDailyOperationPayload(input);
-  const { error } = await supabase.from("daily_bus_operations").update(payload).eq("id", id);
+export async function updateDispatchShift(id: string, input: DispatchShiftInput) {
+  const payload = (await resolveShiftPayloads([input]))[0];
+  if (!payload) throw new Error("بيانات الوردية غير صالحة");
+  const { error } = await supabase.from("dispatch_shifts").update(payload).eq("id", id);
   if (error) throw error;
 }
-export async function deleteDailyOperation(id: string) {
-  const { error } = await supabase.from("daily_bus_operations").delete().eq("id", id);
+export async function deleteDispatchShift(id: string) {
+  const { error } = await supabase.from("dispatch_shifts").delete().eq("id", id);
   if (error) throw error;
+}
+
+export interface DailyReport {
+  shiftCount: number;
+  totalCompanyRevenue: number;
+  totalDriverEarnings: number;
+  netAfterDrivers: number;
+  byCompany: { client: string; shifts: number; total: number }[];
+  byDriver: { driver: string; shifts: number; total: number }[];
+}
+
+export function computeDailyReport(shifts: { client: string; driver: string; busValue: number; driverValue: number }[]): DailyReport {
+  const group = (key: "client" | "driver", value: "busValue" | "driverValue") => {
+    const m = new Map<string, { shifts: number; total: number }>();
+    for (const s of shifts) {
+      const cur = m.get(s[key]) ?? { shifts: 0, total: 0 };
+      cur.shifts += 1;
+      cur.total += s[value];
+      m.set(s[key], cur);
+    }
+    return [...m.entries()].map(([name, v]) => ({ name, ...v }));
+  };
+  const totalCompanyRevenue = shifts.reduce((a, s) => a + s.busValue, 0);
+  const totalDriverEarnings = shifts.reduce((a, s) => a + s.driverValue, 0);
+  return {
+    shiftCount: shifts.length,
+    totalCompanyRevenue,
+    totalDriverEarnings,
+    netAfterDrivers: totalCompanyRevenue - totalDriverEarnings,
+    byCompany: group("client", "busValue").map((g) => ({ client: g.name, shifts: g.shifts, total: g.total })),
+    byDriver: group("driver", "driverValue").map((g) => ({ driver: g.name, shifts: g.shifts, total: g.total })),
+  };
 }
 
 // ---- Client invoicing (accounts receivable per corporate client) ----
@@ -1353,13 +1387,10 @@ export interface ClientInvoiceRow {
 }
 
 export async function fetchClientInvoiceRows(clientName: string, monthPrefix: string): Promise<ClientInvoiceRow[]> {
-  const ops = await fetchDailyOperations(monthPrefix);
-  const rows: ClientInvoiceRow[] = [];
-  for (const o of ops) {
-    if (o.client1 === clientName) rows.push({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route1, amount: o.fare1 });
-    if (o.client2 === clientName) rows.push({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route2, amount: o.fare2 });
-  }
-  return rows;
+  const shifts = await fetchDispatchShifts(monthPrefix);
+  return shifts
+    .filter((o) => o.client === clientName)
+    .map((o) => ({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route, amount: o.busValue }));
 }
 
 export function computeClientInvoiceSummary(rows: ClientInvoiceRow[]) {
@@ -1373,13 +1404,12 @@ export function computeClientInvoiceSummary(rows: ClientInvoiceRow[]) {
 // ---- Executive P&L ----
 
 export function computeMonthlyPL(
-  operations: { gasCost: number; fare1: number; fare2: number }[],
+  operations: { busValue: number }[],
   generalExpenseTotal: number,
   netDriverPayrollTotal: number,
 ) {
-  const totalRevenue = operations.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
-  const totalGas = operations.reduce((sum, o) => sum + o.gasCost, 0);
-  const totalExpenses = totalGas + generalExpenseTotal + netDriverPayrollTotal;
+  const totalRevenue = operations.reduce((sum, o) => sum + o.busValue, 0);
+  const totalExpenses = generalExpenseTotal + netDriverPayrollTotal;
   return { totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
 }
 
@@ -1723,7 +1753,7 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
     { data: fuelLogs },
     { data: generalExpenses },
   ] = await Promise.all([
-    fetchDailyOperations(monthPrefix),
+    fetchDispatchShifts(monthPrefix),
     supabase.from("payments").select("amount").eq("type", "دائن").gte("date", monthStart).lt("date", nextMonth),
     fetchDriverPayroll(monthPrefix),
     fetchEmployeePayroll(monthPrefix),
@@ -1733,13 +1763,12 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
     supabase.from("expenses").select("category, amount").gte("date", monthStart).lt("date", nextMonth),
   ]);
 
-  const clientRevenue = ops.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
+  const clientRevenue = ops.reduce((sum, o) => sum + o.busValue, 0);
   const studentCollections = (studentPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
   const driverSalaries = driverPayroll.reduce((sum, p) => sum + p.netSalary, 0);
   const employeeSalaries = employeePayroll.reduce((sum, p) => sum + p.netSalary, 0);
   const sparePartsCost = (outTransactions ?? []).reduce((sum, t: any) => sum + Number(t.quantity ?? 0) * Number(t.inventory?.unit_price ?? 0), 0);
   const externalMaintenanceCost = (maintenanceOrders ?? []).reduce((sum, m: any) => sum + Number(m.total_cost ?? 0), 0);
-  const gasFromDispatch = ops.reduce((sum, o) => sum + o.gasCost, 0);
   const gasFromFuelLogs = (fuelLogs ?? []).reduce((sum, f: any) => sum + Number(f.cost ?? 0), 0);
   const adminAndMisc = (generalExpenses ?? [])
     .filter((e: any) => ["إداريات", "مصاريف خارجية", "موردين"].includes(e.category))
@@ -1752,7 +1781,7 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
     driverAndEmployeeSalaries: driverSalaries + employeeSalaries,
     sparePartsCost,
     externalMaintenanceCost,
-    fuelCost: gasFromDispatch + gasFromFuelLogs,
+    fuelCost: gasFromFuelLogs,
     adminAndMiscExpenses: adminAndMisc,
   });
 }
@@ -1823,7 +1852,7 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
     { data: allExpenses },
   ] = await Promise.all([
     supabase.from("payments").select("amount").eq("type", "دائن").gte("date", `${monthPrefix}-01`).lt("date", `${nextMonth}-01`),
-    fetchDailyOperations(monthPrefix),
+    fetchDispatchShifts(monthPrefix),
     fetchDriverPayroll(monthPrefix),
     supabase.from("payslips").select("overtime, advances, penalties, staff(base_salary)").gte("month", `${monthPrefix}-01`).lt("month", `${nextMonth}-01`),
     fetchEmployeePayroll(monthPrefix),
@@ -1833,7 +1862,7 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
   ]);
 
   const subscriptionRevenue = (subPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
-  const companyRevenue = ops.reduce((sum, o) => sum + o.fare1 + o.fare2, 0);
+  const companyRevenue = ops.reduce((sum, o) => sum + o.busValue, 0);
   const { data: tripsThisMonth } = await supabase
     .from("trips")
     .select("total_price")
@@ -1854,7 +1883,7 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
 
   const maintenanceExpense = (maintOrders ?? []).reduce((sum: number, o: any) => sum + Number(o.total_cost ?? 0), 0);
   const partsExpense = (outTx ?? []).reduce((sum: number, t: any) => sum + Number(t.total_cost ?? 0), 0) + expenseByCategory(["قطع غيار"]);
-  const fuelExpense = ops.reduce((sum, o) => sum + o.gasCost, 0) + expenseByCategory(["غاز"]);
+  const fuelExpense = expenseByCategory(["غاز"]);
   const adminMiscExpense = expenseByCategory(["إداريات", "مصاريف خارجية", "موردين"]);
 
   return computeMonthlyReport({

@@ -24,7 +24,7 @@ import {
   fetchFuelChart,
   fetchMonthlyFinance,
   fetchTreasury,
-  fetchDailyOperations,
+  fetchDispatchShifts,
   fetchExpenses,
   fetchDriverPayroll,
   computeMonthlyPL,
@@ -97,7 +97,7 @@ function Dashboard() {
     (async () => {
       try {
         const [ops, allExpenses, payroll] = await Promise.all([
-          fetchDailyOperations(plMonth),
+          fetchDispatchShifts(plMonth),
           fetchExpenses(),
           fetchDriverPayroll(plMonth),
         ]);
@@ -108,8 +108,7 @@ function Dashboard() {
 
         const byCategory = new Map<string, number>();
         for (const e of monthExpenses) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amount);
-        const gasTotal = ops.reduce((sum, o) => sum + o.gasCost, 0);
-        if (gasTotal > 0) byCategory.set("غاز (الحركة اليومية)", (byCategory.get("غاز (الحركة اليومية)") ?? 0) + gasTotal);
+        if (netPayrollTotal > 0) byCategory.set("صافي مرتبات السائقين", netPayrollTotal);
         setExpenseBreakdown(Array.from(byCategory.entries()).map(([category, المبلغ]) => ({ category, المبلغ })));
       } catch (e) {
         setError(e instanceof Error ? e.message : "تعذر تحميل بيانات الأرباح والخسائر");

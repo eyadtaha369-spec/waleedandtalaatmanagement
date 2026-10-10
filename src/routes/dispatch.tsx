@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Banknote, Bus, Pencil, Plus, Printer, Trash2, Users } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { DataTable, PageHeader, Panel, Toolbar, exportToExcel } from "@/components/ui-kit";
+import { DataTable, PageHeader, Panel, StatCard, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,13 +26,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { currency } from "@/lib/fleet-data";
-import { fetchBuses, fetchDrivers, fetchClients } from "@/lib/queries";
 import {
-  fetchDailyOperations,
-  addDailyOperation,
-  updateDailyOperation,
-  deleteDailyOperation,
-  type DailyOperation,
+  fetchBuses,
+  fetchDrivers,
+  fetchClients,
+  fetchDispatchShiftsByDate,
+  addDispatchShifts,
+  updateDispatchShift,
+  deleteDispatchShift,
+  computeDailyReport,
+  type DispatchShift,
+  type DispatchShiftInput,
 } from "@/lib/queries";
 
 export const Route = createFileRoute("/dispatch")({
@@ -42,37 +46,36 @@ export const Route = createFileRoute("/dispatch")({
   component: DispatchPage,
 });
 
-const emptyForm = {
-  id: "",
-  date: new Date().toISOString().slice(0, 10),
-  busCode: "",
-  driverName: "",
-  gasCost: "",
-  gasLiters: "",
-  odometerReading: "",
-  client1Name: "",
-  route1: "",
-  fare1: "",
-  client2Name: "",
-  route2: "",
-  fare2: "",
-  notes: "",
-};
+const today = () => new Date().toISOString().slice(0, 10);
+
+interface ShiftRow {
+  key: number;
+  busCode: string;
+  driverName: string;
+  clientName: string;
+  route: string;
+  busValue: string;
+  driverValue: string;
+}
+
+let rowKey = 0;
+const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", clientName: "", route: "", busValue: "", driverValue: "" });
 
 function DispatchPage() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [ops, setOps] = useState<DailyOperation[]>([]);
+  const [date, setDate] = useState(today());
+  const [shifts, setShifts] = useState<DispatchShift[]>([]);
   const [busCodes, setBusCodes] = useState<string[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
   const [clientNames, setClientNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showShift2, setShowShift2] = useState(false);
-  const [form, setForm] = useState(emptyForm);
-  const [deleteTarget, setDeleteTarget] = useState<DailyOperation | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formDate, setFormDate] = useState(today());
+  const [notes, setNotes] = useState("");
+  const [rows, setRows] = useState<ShiftRow[]>([newRow()]);
+  const [deleteTarget, setDeleteTarget] = useState<DispatchShift | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const loadAll = async () => {
@@ -80,12 +83,12 @@ function DispatchPage() {
     setError(null);
     try {
       const [o, buses, drivers, clients] = await Promise.all([
-        fetchDailyOperations(month),
+        fetchDispatchShiftsByDate(date),
         fetchBuses(),
         fetchDrivers(),
         fetchClients(),
       ]);
-      setOps(o);
+      setShifts(o);
       setBusCodes(buses.map((b) => b.code));
       setDriverNames(drivers.map((d) => d.name));
       setClientNames(clients.map((c) => c.name));
@@ -99,58 +102,63 @@ function DispatchPage() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, [date]);
+
+  const report = computeDailyReport(shifts);
 
   const openAdd = () => {
-    setForm(emptyForm);
-    setShowShift2(false);
+    setEditingId(null);
+    setFormDate(date);
+    setNotes("");
+    setRows([newRow()]);
     setAdding(true);
   };
 
-  const openEdit = (o: DailyOperation) => {
-    setForm({
-      id: o.id,
-      date: o.date,
-      busCode: o.bus === "—" ? "" : o.bus,
-      driverName: o.driver === "—" ? "" : o.driver,
-      gasCost: String(o.gasCost),
-      gasLiters: String(o.gasLiters),
-      odometerReading: String(o.odometerReading),
-      client1Name: o.client1 === "—" ? "" : o.client1,
-      route1: o.route1,
-      fare1: String(o.fare1),
-      client2Name: o.client2 === "—" ? "" : o.client2,
-      route2: o.route2,
-      fare2: String(o.fare2),
-      notes: o.notes,
-    });
-    setShowShift2(!!o.route2 || o.fare2 > 0 || (o.client2 !== "—" && o.client2 !== ""));
+  const openEdit = (o: DispatchShift) => {
+    setEditingId(o.id);
+    setFormDate(o.date);
+    setNotes(o.notes);
+    setRows([
+      {
+        key: ++rowKey,
+        busCode: o.bus === "—" ? "" : o.bus,
+        driverName: o.driver === "—" ? "" : o.driver,
+        clientName: o.client === "—" ? "" : o.client,
+        route: o.route,
+        busValue: String(o.busValue),
+        driverValue: String(o.driverValue),
+      },
+    ]);
     setAdding(true);
   };
+
+  const updateRow = (key: number, patch: Partial<ShiftRow>) =>
+    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   const submit = async () => {
-    if (!form.busCode.trim() || !form.driverName.trim()) return;
+    const invalid = rows.some((r) => !r.busCode || !r.driverName || !r.clientName);
+    if (invalid) {
+      setError("اختر الأتوبيس والسائق والشركة لكل وردية");
+      return;
+    }
     setSaving(true);
+    setError(null);
     try {
-      const payload = {
-        date: form.date,
-        busCode: form.busCode,
-        driverName: form.driverName,
-        gasCost: Number(form.gasCost) || 0,
-        gasLiters: Number(form.gasLiters) || 0,
-        odometerReading: Number(form.odometerReading) || 0,
-        client1Name: form.client1Name,
-        route1: form.route1,
-        fare1: Number(form.fare1) || 0,
-        client2Name: showShift2 ? form.client2Name : "",
-        route2: showShift2 ? form.route2 : "",
-        fare2: showShift2 ? Number(form.fare2) || 0 : 0,
-        notes: form.notes,
-      };
-      if (form.id) await updateDailyOperation(form.id, payload);
-      else await addDailyOperation(payload);
+      const inputs: DispatchShiftInput[] = rows.map((r) => ({
+        date: formDate,
+        busCode: r.busCode,
+        driverName: r.driverName,
+        clientName: r.clientName,
+        route: r.route,
+        busValue: Number(r.busValue) || 0,
+        driverValue: Number(r.driverValue) || 0,
+        notes,
+      }));
+      const first = inputs[0];
+      if (editingId && first) await updateDispatchShift(editingId, first);
+      else await addDispatchShifts(inputs);
+      setDate(formDate);
       await loadAll();
-      setForm(emptyForm);
       setAdding(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر حفظ الحركة اليومية");
@@ -163,23 +171,21 @@ function DispatchPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDailyOperation(deleteTarget.id);
+      await deleteDispatchShift(deleteTarget.id);
       await loadAll();
       setDeleteTarget(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حذف الحركة");
+      setError(e instanceof Error ? e.message : "تعذر حذف الوردية");
     } finally {
       setDeleting(false);
     }
   };
 
-  const filtered = ops.filter(
-    (o) => (o.bus + o.driver + o.client1 + o.client2).includes(query) || query === "",
-  );
+  const dayName = new Date(date).toLocaleDateString("ar-EG", { weekday: "long" });
 
   return (
     <AppShell>
-      <PageHeader title="الحركة والورديات اليومية" subtitle="تسجيل تشغيل الأتوبيسات اليومي: الوقود والورديات لكل شركة" />
+      <PageHeader title="الحركة والورديات اليومية" subtitle="تسجيل ورديات الأتوبيسات: قيمة الأتوبيس تُحتسب للشركة، وقيمة السواقة تُحتسب لمرتب السائق" />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -187,53 +193,97 @@ function DispatchPage() {
         </p>
       )}
 
-      <Panel title="سجل الحركة اليومية">
-        <Toolbar
-          query={query}
-          onQuery={setQuery}
-          placeholder="ابحث بالأتوبيس، السائق، أو الشركة..."
-          onExport={() => exportToExcel("الحركة اليومية", filtered as unknown as Record<string, string | number>[])}
-          extra={
-            <>
-              <Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="h-9 w-40 border-border bg-input/60" />
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAdd}>
-                <Plus className="ml-2 h-4 w-4" /> تسجيل حركة
-              </Button>
-            </>
-          }
-        />
-        <DataTable head={["اليوم والتاريخ", "الأتوبيس", "نوع السيارة", "السائق", "الوقود", "الشركة 1 / الخط", "قيمة 1", "الشركة 2 / الخط", "قيمة 2", "الإجراءات"]}>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Label className="text-sm text-muted-foreground">تاريخ اليوم</Label>
+        <Input value={date} onChange={(e) => e.target.value && setDate(e.target.value)} type="date" className="h-10 w-44 border-border bg-input/60" />
+        <span className="text-sm text-primary">{dayName}</span>
+        <div className="mr-auto flex gap-2">
+          <Button variant="outline" className="border-border" onClick={() => window.print()}>
+            <Printer className="ml-2 h-4 w-4" /> طباعة التقرير اليومي
+          </Button>
+          <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAdd}>
+            <Plus className="ml-2 h-4 w-4" /> تسجيل ورديات
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="عدد الورديات" value={String(report.shiftCount)} icon={Bus} />
+        <StatCard label="إجمالي إيرادات الشركات" value={currency(report.totalCompanyRevenue)} icon={Banknote} />
+        <StatCard label="إجمالي مستحقات السائقين" value={currency(report.totalDriverEarnings)} icon={Users} />
+        <StatCard label="الصافي بعد السائقين" value={currency(report.netAfterDrivers)} icon={Banknote} />
+      </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="إيرادات الشركات لهذا اليوم">
+          <DataTable head={["الشركة", "عدد الورديات", "الإيراد (دائن)"]}>
+            {report.byCompany.length === 0 ? (
+              <tr><td colSpan={3} className="px-4 py-4 text-center text-muted-foreground">لا توجد ورديات</td></tr>
+            ) : (
+              report.byCompany.map((c) => (
+                <tr key={c.client}>
+                  <td className="px-4 py-3 font-bold">{c.client}</td>
+                  <td className="px-4 py-3">{c.shifts}</td>
+                  <td className="px-4 py-3 text-success">{currency(c.total)}</td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
+        <Panel title="مستحقات السائقين لهذا اليوم">
+          <DataTable head={["السائق", "عدد الورديات", "المستحق"]}>
+            {report.byDriver.length === 0 ? (
+              <tr><td colSpan={3} className="px-4 py-4 text-center text-muted-foreground">لا توجد ورديات</td></tr>
+            ) : (
+              report.byDriver.map((d) => (
+                <tr key={d.driver}>
+                  <td className="px-4 py-3 font-bold">{d.driver}</td>
+                  <td className="px-4 py-3">{d.shifts}</td>
+                  <td className="px-4 py-3 text-primary">{currency(d.total)}</td>
+                </tr>
+              ))
+            )}
+          </DataTable>
+        </Panel>
+      </div>
+
+      <Panel title={`ورديات ${dayName} ${date}`}>
+        <div className="mb-3 flex justify-end">
+          <Button
+            variant="outline"
+            className="border-border"
+            onClick={() =>
+              exportToExcel(
+                `تقرير-${date}`,
+                shifts.map((o) => ({ التاريخ: o.date, الأتوبيس: o.bus, السائق: o.driver, الشركة: o.client, الخط: o.route, "قيمة الأتوبيس": o.busValue, "قيمة السواقة": o.driverValue })),
+              )
+            }
+          >
+            تصدير إلى Excel
+          </Button>
+        </div>
+        <DataTable head={["#", "الأتوبيس", "نوع السيارة", "السائق", "الشركة", "الخط", "قيمة الأتوبيس", "قيمة السواقة", "الإجراءات"]}>
           {loading ? (
-            <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
-            </tr>
-          ) : filtered.length === 0 ? (
-            <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات مسجلة لهذا الشهر بعد.</td>
-            </tr>
+            <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
+          ) : shifts.length === 0 ? (
+            <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">لا توجد ورديات مسجلة في هذا اليوم.</td></tr>
           ) : (
-            filtered.map((o) => (
+            shifts.map((o, i) => (
               <tr key={o.id} className="transition-colors hover:bg-secondary/30">
-                <td className="px-4 py-3">{new Date(o.date).toLocaleDateString("ar-EG", { weekday: "long" })} — {o.date}</td>
+                <td className="px-4 py-3">{i + 1}</td>
                 <td className="px-4 py-3 font-bold text-primary">{o.bus}</td>
                 <td className="px-4 py-3 text-xs">{o.busType}</td>
                 <td className="px-4 py-3">{o.driver}</td>
-                <td className="px-4 py-3 text-warning">{currency(o.gasCost)}</td>
-                <td className="px-4 py-3 text-xs">{o.client1 !== "—" ? `${o.client1} / ${o.route1 || "—"}` : "—"}</td>
-                <td className="px-4 py-3 text-success">{currency(o.fare1)}</td>
-                <td className="px-4 py-3 text-xs">{o.client2 !== "—" ? `${o.client2} / ${o.route2 || "—"}` : "—"}</td>
-                <td className="px-4 py-3 text-success">{o.fare2 > 0 ? currency(o.fare2) : "—"}</td>
+                <td className="px-4 py-3">{o.client}</td>
+                <td className="px-4 py-3 text-xs">{o.route || "—"}</td>
+                <td className="px-4 py-3 text-success">{currency(o.busValue)}</td>
+                <td className="px-4 py-3 text-primary">{currency(o.driverValue)}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
                     <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEdit(o)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:bg-destructive/10"
-                      onClick={() => setDeleteTarget(o)}
-                    >
+                    <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(o)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -245,137 +295,81 @@ function DispatchPage() {
       </Panel>
 
       <Dialog open={adding} onOpenChange={setAdding}>
-        <DialogContent className="glass max-h-[85vh] overflow-y-auto text-foreground" dir="rtl">
+        <DialogContent className="glass max-h-[90vh] overflow-y-auto text-foreground sm:max-w-3xl" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">{form.id ? "تعديل حركة يومية" : "تسجيل حركة يومية جديدة"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">بيانات الوقود والوردية (أو الورديتين) لهذا الأتوبيس اليوم</DialogDescription>
+            <DialogTitle className="text-primary">{editingId ? "تعديل وردية" : "تسجيل حركة يومية"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              أضف أي عدد من الورديات. قيمة الأتوبيس تُسجَّل في حساب الشركة، وقيمة السواقة في حساب السائق.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">التاريخ</Label>
-                <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="border-border bg-input/60" />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">الأتوبيس</Label>
-                <Select value={form.busCode} onValueChange={(v) => setForm({ ...form, busCode: v })}>
-                  <SelectTrigger className="border-border bg-input/60">
-                    <SelectValue placeholder="اختر" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {busCodes.map((c) => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">السائق</Label>
-                <Select value={form.driverName} onValueChange={(v) => setForm({ ...form, driverName: v })}>
-                  <SelectTrigger className="border-border bg-input/60">
-                    <SelectValue placeholder="اختر" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {driverNames.map((n) => (
-                      <SelectItem key={n} value={n}>{n}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid gap-1.5 sm:w-48">
+              <Label className="text-xs text-muted-foreground">التاريخ</Label>
+              <Input value={formDate} onChange={(e) => setFormDate(e.target.value)} type="date" className="border-border bg-input/60" />
             </div>
 
-            <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-secondary/20 p-3 sm:grid-cols-3">
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">تكلفة الوقود</Label>
-                <Input value={form.gasCost} onChange={(e) => setForm({ ...form, gasCost: e.target.value })} type="number" className="border-border bg-input/60" />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">كمية الوقود (لتر)</Label>
-                <Input value={form.gasLiters} onChange={(e) => setForm({ ...form, gasLiters: e.target.value })} type="number" className="border-border bg-input/60" />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">قراءة العداد</Label>
-                <Input value={form.odometerReading} onChange={(e) => setForm({ ...form, odometerReading: e.target.value })} type="number" className="border-border bg-input/60" />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-              <p className="mb-2 text-xs font-bold text-primary">الوردية 1</p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <div className="grid gap-1.5">
-                  <Label className="text-xs text-muted-foreground">الشركة</Label>
-                  <Select value={form.client1Name} onValueChange={(v) => setForm({ ...form, client1Name: v })}>
-                    <SelectTrigger className="border-border bg-input/60">
-                      <SelectValue placeholder="اختر" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clientNames.map((n) => (
-                        <SelectItem key={n} value={n}>{n}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label className="text-xs text-muted-foreground">الخط</Label>
-                  <Input value={form.route1} onChange={(e) => setForm({ ...form, route1: e.target.value })} className="border-border bg-input/60" />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label className="text-xs text-muted-foreground">القيمة</Label>
-                  <Input value={form.fare1} onChange={(e) => setForm({ ...form, fare1: e.target.value })} type="number" className="border-border bg-input/60" />
-                </div>
-              </div>
-            </div>
-
-            {!showShift2 ? (
-              <button
-                type="button"
-                className="text-right text-xs text-primary hover:underline"
-                onClick={() => setShowShift2(true)}
-              >
-                + إضافة وردية ثانية (اختياري)
-              </button>
-            ) : (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+            {rows.map((r, idx) => (
+              <div key={r.key} className="rounded-lg border border-primary/30 bg-primary/5 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-bold text-primary">الوردية 2</p>
-                  <button type="button" className="text-xs text-destructive hover:underline" onClick={() => setShowShift2(false)}>
-                    إزالة
-                  </button>
+                  <p className="text-xs font-bold text-primary">الوردية {idx + 1}</p>
+                  {!editingId && rows.length > 1 && (
+                    <button type="button" className="text-xs text-destructive hover:underline" onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}>
+                      إزالة
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="grid gap-1.5">
-                    <Label className="text-xs text-muted-foreground">الشركة</Label>
-                    <Select value={form.client2Name} onValueChange={(v) => setForm({ ...form, client2Name: v })}>
-                      <SelectTrigger className="border-border bg-input/60">
-                        <SelectValue placeholder="اختر" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clientNames.map((n) => (
-                          <SelectItem key={n} value={n}>{n}</SelectItem>
-                        ))}
-                      </SelectContent>
+                    <Label className="text-xs text-muted-foreground">الأتوبيس</Label>
+                    <Select value={r.busCode} onValueChange={(v) => updateRow(r.key, { busCode: v })}>
+                      <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
+                      <SelectContent>{busCodes.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div className="grid gap-1.5">
-                    <Label className="text-xs text-muted-foreground">الخط</Label>
-                    <Input value={form.route2} onChange={(e) => setForm({ ...form, route2: e.target.value })} className="border-border bg-input/60" />
+                    <Label className="text-xs text-muted-foreground">السائق</Label>
+                    <Select value={r.driverName} onValueChange={(v) => updateRow(r.key, { driverName: v })}>
+                      <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
+                      <SelectContent>{driverNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
+                    </Select>
                   </div>
                   <div className="grid gap-1.5">
-                    <Label className="text-xs text-muted-foreground">القيمة</Label>
-                    <Input value={form.fare2} onChange={(e) => setForm({ ...form, fare2: e.target.value })} type="number" className="border-border bg-input/60" />
+                    <Label className="text-xs text-muted-foreground">الشركة</Label>
+                    <Select value={r.clientName} onValueChange={(v) => updateRow(r.key, { clientName: v })}>
+                      <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
+                      <SelectContent>{clientNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">الخط (اختياري)</Label>
+                    <Input value={r.route} onChange={(e) => updateRow(r.key, { route: e.target.value })} className="border-border bg-input/60" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">قيمة الأتوبيس (للشركة)</Label>
+                    <Input value={r.busValue} onChange={(e) => updateRow(r.key, { busValue: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">قيمة السواقة (للسائق)</Label>
+                    <Input value={r.driverValue} onChange={(e) => updateRow(r.key, { driverValue: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
                   </div>
                 </div>
               </div>
+            ))}
+
+            {!editingId && (
+              <button type="button" className="text-right text-sm text-primary hover:underline" onClick={() => setRows((rs) => [...rs, newRow()])}>
+                + إضافة وردية أخرى
+              </button>
             )}
 
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">ملاحظات</Label>
-              <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="border-border bg-input/60" />
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} className="border-border bg-input/60" />
             </div>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submit} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : form.id ? "حفظ التعديلات" : "حفظ الحركة"}
+              {saving ? "جارِ الحفظ..." : editingId ? "حفظ التعديلات" : `حفظ ${rows.length} وردية`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -386,7 +380,7 @@ function DispatchPage() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              سيتم حذف حركة {deleteTarget?.bus} بتاريخ {deleteTarget?.date} نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+              سيتم حذف وردية {deleteTarget?.bus} ({deleteTarget?.client}) بتاريخ {deleteTarget?.date} نهائيًا، وسيتم خصم قيمتها من حساب الشركة ومرتب السائق.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

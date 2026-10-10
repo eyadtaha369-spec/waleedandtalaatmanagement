@@ -54,23 +54,24 @@
 
 :root {
   --radius: 0.9rem;
-  --navy-deep: oklch(0.19 0.055 265);
-  --navy: oklch(0.26 0.062 268);
+  --navy-deep: oklch(0.17 0.045 265); /* #0A1128 */
+  --navy: oklch(0.27 0.085 266); /* #101F42 */
   --steel: oklch(0.42 0.045 258);
-  --gold: oklch(0.79 0.135 88);
-  --gold-soft: oklch(0.88 0.09 90);
+  --gold: oklch(0.77 0.125 88); /* #D4AF37 */
+  --gold-soft: oklch(0.88 0.15 95); /* #FFD700 */
+  --gold-deep: oklch(0.6 0.12 80); /* #B8860B */
 
-  --background: oklch(0.17 0.05 265);
+  --background: oklch(0.17 0.045 265);
   --foreground: oklch(0.985 0.005 250);
-  --card: oklch(0.245 0.058 267);
+  --card: oklch(0.24 0.075 266);
   --card-foreground: oklch(0.985 0.005 250);
   --popover: oklch(0.22 0.055 266);
   --popover-foreground: oklch(0.985 0.005 250);
   --primary: oklch(0.79 0.135 88);
   --primary-foreground: oklch(0.19 0.055 265);
-  --secondary: oklch(0.32 0.05 262);
+  --secondary: oklch(0.31 0.07 264);
   --secondary-foreground: oklch(0.96 0.01 250);
-  --muted: oklch(0.3 0.045 262);
+  --muted: oklch(0.29 0.06 264);
   --muted-foreground: oklch(0.76 0.025 255);
   --accent: oklch(0.42 0.045 258);
   --accent-foreground: oklch(0.98 0.005 250);
@@ -78,15 +79,15 @@
   --destructive-foreground: oklch(0.98 0.005 250);
   --success: oklch(0.72 0.15 155);
   --warning: oklch(0.78 0.16 65);
-  --border: oklch(0.4 0.04 260 / 45%);
-  --input: oklch(0.34 0.045 262);
+  --border: oklch(0.72 0.1 85 / 22%);
+  --input: oklch(0.3 0.065 264);
   --ring: oklch(0.79 0.135 88);
   --chart-1: oklch(0.79 0.135 88);
   --chart-2: oklch(0.68 0.11 235);
   --chart-3: oklch(0.72 0.15 155);
   --chart-4: oklch(0.65 0.19 30);
   --chart-5: oklch(0.6 0.09 300);
-  --sidebar: oklch(0.2 0.055 266);
+  --sidebar: oklch(0.2 0.06 266);
   --sidebar-foreground: oklch(0.95 0.008 250);
   --sidebar-primary: oklch(0.79 0.135 88);
   --sidebar-primary-foreground: oklch(0.19 0.055 265);
@@ -95,13 +96,15 @@
   --sidebar-border: oklch(0.4 0.04 260 / 40%);
   --sidebar-ring: oklch(0.79 0.135 88);
 
-  --gradient-gold: linear-gradient(135deg, var(--gold), var(--gold-soft));
+  --gradient-gold: linear-gradient(135deg, #D4AF37 0%, #FFD700 50%, #B8860B 100%);
+  --glow-gold: 0 0 20px rgba(212, 175, 55, 0.25);
   --gradient-panel: linear-gradient(
     160deg,
-    color-mix(in oklab, var(--navy) 92%, transparent),
-    color-mix(in oklab, var(--navy-deep) 96%, transparent)
+    color-mix(in oklab, var(--navy) 78%, transparent),
+    color-mix(in oklab, var(--navy-deep) 88%, transparent)
   );
   --shadow-luxe: 0 18px 40px -22px oklch(0 0 0 / 80%);
+  --gradient-royal: linear-gradient(160deg, #101F42 0%, #0F172A 55%, #0A1128 100%);
 }
 
 @layer base {
@@ -115,29 +118,99 @@
 
   body {
     background:
-      radial-gradient(1200px 600px at 90% -10%, color-mix(in oklab, var(--gold) 8%, transparent), transparent),
-      var(--color-background);
+      radial-gradient(1000px 520px at 92% -8%, color-mix(in oklab, var(--gold) 11%, transparent), transparent),
+      radial-gradient(900px 600px at 5% 105%, rgba(34, 211, 238, 0.07), transparent),
+      var(--gradient-royal);
+    background-attachment: fixed;
     color: var(--color-foreground);
   }
 }
 
 @utility panel {
   background-image: var(--gradient-panel);
-  border: 1px solid var(--color-border);
+  border: 1px solid rgb(245 158 11 / 0.2);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-luxe);
+  backdrop-filter: blur(12px);
+  transition:
+    box-shadow 0.3s ease,
+    border-color 0.3s ease,
+    transform 0.3s ease;
+  &:hover {
+    border-color: rgb(245 158 11 / 0.42);
+    box-shadow:
+      var(--shadow-luxe),
+      0 0 24px rgba(212, 175, 55, 0.14),
+      0 0 40px rgba(34, 211, 238, 0.05);
+  }
 }
 
 @utility glass {
-  background: color-mix(in oklab, var(--navy) 80%, transparent);
-  backdrop-filter: blur(14px);
-  border: 1px solid color-mix(in oklab, var(--gold) 25%, transparent);
+  background: color-mix(in oklab, var(--navy) 72%, transparent);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgb(245 158 11 / 0.25);
+  box-shadow: var(--glow-gold);
+}
+
+@utility logo-crest {
+  border-radius: 9999px;
+  padding: 3px;
+  background: var(--gradient-gold);
+  box-shadow: var(--glow-gold);
+}
+
+@utility pulse-badge {
+  animation: pulse-glow 1.8s ease-in-out infinite;
 }
 
 @utility text-gold-gradient {
   background-image: var(--gradient-gold);
   background-clip: text;
+  -webkit-background-clip: text;
   color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.55);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(212, 175, 55, 0);
+    transform: scale(1.08);
+  }
+}
+
+@keyframes fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer base {
+  /* glowing border on active inputs */
+  input:focus-visible,
+  textarea:focus-visible,
+  [role="combobox"]:focus-visible,
+  [data-slot="select-trigger"]:focus-visible {
+    outline: none;
+    border-color: #d4af37;
+    box-shadow:
+      0 0 0 1px rgba(212, 175, 55, 0.6),
+      0 0 14px rgba(212, 175, 55, 0.35);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-badge {
+      animation: none;
+    }
+  }
 }
 
 @media print {

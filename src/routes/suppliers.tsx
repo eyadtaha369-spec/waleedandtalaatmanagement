@@ -358,7 +358,7 @@ function SuppliersPage() {
                     </p>
                   </div>
                   {s.dueDate && s.balanceDue > 0 && (
-                    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${due ? "border-destructive/40 bg-destructive/15 text-destructive" : "border-border bg-muted/40 text-muted-foreground"}`}>
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${due ? "pulse-badge border-destructive/40 bg-destructive/15 text-destructive" : "border-border bg-muted/40 text-muted-foreground"}`}>
                       <BellRing className="h-3 w-3" /> الاستحقاق: {s.dueDate}
                     </span>
                   )}

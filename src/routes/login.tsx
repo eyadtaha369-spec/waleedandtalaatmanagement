@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
+import { motion } from "framer-motion";
+import { LogoCrest } from "@/components/logo-crest";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -54,9 +56,17 @@ function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4" dir="rtl">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6">
-        <h1 className="text-center text-xl font-extrabold text-primary">وليد وطلعت</h1>
+    <div className="flex min-h-screen items-center justify-center px-4" dir="rtl">
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="glass w-full max-w-sm rounded-2xl p-6"
+      >
+        <div className="mb-3 flex justify-center">
+          <LogoCrest size={92} />
+        </div>
+        <h1 className="text-center text-2xl font-extrabold text-gold-gradient">وليد وطلعت</h1>
         <p className="mt-1 text-center text-sm text-muted-foreground">
           {mode === "signin" ? "تسجيل الدخول إلى لوحة الإدارة" : "استعادة كلمة المرور"}
         </p>
@@ -99,7 +109,7 @@ function LoginPage() {
         <p className="mt-4 text-center text-[11px] text-muted-foreground">
           الحسابات تُنشأ بواسطة المدير فقط — تواصل مع مديرك للحصول على حساب.
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 }

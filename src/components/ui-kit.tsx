@@ -56,7 +56,7 @@ export function StatCard({
   icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="panel relative overflow-hidden p-5">
+    <div className="panel group relative overflow-hidden p-5 hover:-translate-y-0.5">
       <div className="absolute -left-8 -top-8 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -64,7 +64,7 @@ export function StatCard({
           <p className="mt-2 text-2xl font-extrabold text-gold-gradient">{value}</p>
           {hint ? <p className="mt-2 text-xs text-muted-foreground">{hint}</p> : null}
         </div>
-        <span className="rounded-xl border border-primary/40 bg-primary/10 p-2.5">
+        <span className="rounded-xl border border-primary/40 bg-primary/10 p-2.5 shadow-[0_0_16px_rgba(212,175,55,0.2)] transition-shadow group-hover:shadow-[0_0_24px_rgba(212,175,55,0.45)]">
           <Icon className="h-5 w-5 text-primary" />
         </span>
       </div>
@@ -82,7 +82,7 @@ const pillTones: Record<string, string> = {
 
 export function StatusPill({ label, tone = "info" }: { label: string; tone?: keyof typeof pillTones }) {
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold", pillTones[tone])}>
+    <span className={cn("inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold", tone === "bad" && "pulse-badge", pillTones[tone])}>
       {label}
     </span>
   );

@@ -33,7 +33,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth";
 import { fetchMyProfile, fetchAlerts, globalSearch, type Profile, type AlertRow, type SearchResult } from "@/lib/queries";
-import brandLogo from "@/assets/brand-logo.jpeg.asset.json";
+import { LogoCrest } from "@/components/logo-crest";
+import { motion } from "framer-motion";
 
 const nav = [
   { to: "/", label: "لوحة التحكّم", icon: LayoutDashboard, roles: null },
@@ -179,7 +180,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
-          <img src={brandLogo.url} alt="شعار وليد وطلعت" className="h-11 w-11 rounded-xl object-cover ring-1 ring-primary/50" />
+          <LogoCrest size={46} />
           {open && (
             <div className="leading-tight">
               <p className="text-sm font-extrabold text-gold-gradient">وليد وطلعت</p>
@@ -200,7 +201,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <SheetContent side="right" className="flex w-72 flex-col border-sidebar-border bg-sidebar p-0">
           <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
-            <img src={brandLogo.url} alt="شعار وليد وطلعت" className="h-11 w-11 rounded-xl object-cover ring-1 ring-primary/50" />
+            <LogoCrest size={46} />
             <div className="leading-tight">
               <p className="text-sm font-extrabold text-gold-gradient">وليد وطلعت</p>
               <p className="text-[11px] text-muted-foreground">إدارة التشغيل والأسطول</p>
@@ -211,7 +212,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </Sheet>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-background/85 px-4 py-3 backdrop-blur">
+        <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-amber-500/20 bg-background/70 px-4 py-3 backdrop-blur-md">
           <button
             onClick={() => setMobileNavOpen(true)}
             className="flex h-11 w-11 items-center justify-center rounded-lg border border-border text-primary hover:bg-accent md:hidden"
@@ -255,10 +256,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mr-auto flex items-center gap-3">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="relative rounded-lg border border-border p-2">
+                <button className="relative rounded-lg border border-amber-500/30 bg-card/60 p-2 transition-shadow hover:shadow-[0_0_14px_rgba(212,175,55,0.3)]">
                   <Bell className="h-5 w-5 text-primary" />
                   {alerts.length > 0 && (
-                    <span className="absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                    <span className="pulse-badge absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
                       {alerts.length}
                     </span>
                   )}
@@ -300,7 +301,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6">{children}</main>
+        <motion.main
+          key={pathname}
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: "easeOut" }}
+          className="flex-1 p-4 sm:p-6"
+        >
+          {children}
+        </motion.main>
       </div>
     </div>
   );

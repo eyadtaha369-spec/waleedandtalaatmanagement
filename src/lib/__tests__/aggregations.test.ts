@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -307,5 +307,44 @@ describe("defaultAlertDate", () => {
     expect(defaultAlertDate("2026-10-10")).toBe("2026-10-08");
     expect(defaultAlertDate("2026-11-01")).toBe("2026-10-30");
     expect(defaultAlertDate("")).toBe("");
+  });
+});
+
+describe("workshop (Spec E)", () => {
+  const item = (q: number, p: number) => ({ id: "i" + q, inventoryId: "inv", name: "فلتر", unitType: "بالقطعة", quantity: q, unitPrice: p });
+
+  it("computeOrderTotals sums parts and labor", () => {
+    expect(computeOrderTotals([{ quantity: 2, unitPrice: 50 }, { quantity: 1.5, unitPrice: 100 }], 30)).toEqual({ partsTotal: 250, total: 280 });
+    expect(computeOrderTotals([], 0)).toEqual({ partsTotal: 0, total: 0 });
+  });
+
+  it("findStockShortage flags shortages and counts already-allocated stock", () => {
+    const stock = new Map([["a", 3]]);
+    expect(findStockShortage([{ inventoryId: "a", name: "زيت", quantity: 4 }], stock, new Map())).toContain("زيت");
+    expect(findStockShortage([{ inventoryId: "a", name: "زيت", quantity: 4 }], stock, new Map([["a", 1]]))).toBeNull();
+    expect(
+      findStockShortage([{ inventoryId: "a", name: "زيت", quantity: 2 }, { inventoryId: "a", name: "زيت", quantity: 2 }], stock, new Map()),
+    ).not.toBeNull();
+  });
+
+  it("computeFuelByBus aggregates per bus", () => {
+    const r = computeFuelByBus([
+      { bus: "B1", liters: 10, cost: 100, odoStart: 0, odoEnd: 100 },
+      { bus: "B1", liters: 10, cost: 100, odoStart: 100, odoEnd: 200 },
+      { bus: "B2", liters: 5, cost: 50, odoStart: 0, odoEnd: 0 },
+    ]);
+    const b1 = r.find((x) => x.bus === "B1")!;
+    expect(b1).toMatchObject({ fills: 2, liters: 20, cost: 200, km: 200, kmPerLiter: 10 });
+    expect(r.find((x) => x.bus === "B2")!.kmPerLiter).toBe(0);
+  });
+
+  it("computeBusLedger filters by bus/date and excludes cancelled", () => {
+    const mk = (id: string, date: string, status: string) => ({ id, code: id, date, issue: "x", status, items: [item(2, 50)], laborCost: 20 });
+    const orders = [mk("o1", "2026-01-05", "مكتمل"), mk("o2", "2026-01-20", "ملغي"), mk("o3", "2026-03-01", "مكتمل"), mk("o4", "2026-01-10", "مكتمل")];
+    const buses = new Map([["o1", "B1"], ["o2", "B1"], ["o3", "B1"], ["o4", "B2"]]);
+    const l = computeBusLedger(orders, "B1", "2026-01-01", "2026-01-31", buses);
+    expect(l.rows.map((r) => r.id)).toEqual(["o1"]);
+    expect(l.totalParts).toBe(100);
+    expect(l.grandTotal).toBe(120);
   });
 });

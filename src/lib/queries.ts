@@ -8,6 +8,8 @@ import type {
   MaintenanceOrder,
   InventoryItem,
   FuelLog,
+  MaintenanceItem,
+  UnitType,
   TreasuryEntry,
   Expense,
   Loan,
@@ -252,44 +254,151 @@ export async function addPayment(studentId: string, amount: number, method: stri
 export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
   const { data, error } = await supabase
     .from("maintenance_orders")
-    .select("*, buses(bus_code), inventory(name)")
+    .select("*, buses(bus_code), maintenance_order_items(id, inventory_id, quantity, unit_price, inventory(name, unit_type))")
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((o: any) => ({
     id: o.id,
     code: o.order_number,
     bus: o.buses?.bus_code ?? "—",
+    date: o.order_date ?? (o.created_at as string).slice(0, 10),
     issue: o.issue_description ?? "—",
     parts: o.parts ?? "—",
     cost: Number(o.total_cost ?? 0),
+    laborCost: Number(o.labor_cost ?? 0),
     status: o.status ?? "بانتظار القطع",
-    inventoryItem: o.inventory?.name ?? "",
-    quantityUsed: Number(o.quantity_used ?? 0),
+    items: (o.maintenance_order_items ?? []).map(
+      (i: any): MaintenanceItem => ({
+        id: i.id,
+        inventoryId: i.inventory_id,
+        name: i.inventory?.name ?? "صنف",
+        unitType: i.inventory?.unit_type ?? "بالقطعة",
+        quantity: Number(i.quantity ?? 0),
+        unitPrice: Number(i.unit_price ?? 0),
+      }),
+    ),
   }));
 }
 
-export async function addMaintenanceOrder(input: { busCode: string; issue: string; parts: string; cost: number; inventoryItemName?: string; quantityUsed?: number }) {
-  const [{ data: bus }, inventoryId] = await Promise.all([
-    supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle(),
-    resolveInventoryIdByName(input.inventoryItemName),
-  ]);
-  const { error } = await supabase.from("maintenance_orders").insert({
-    order_number: `MO-${Date.now().toString().slice(-6)}`,
-    bus_id: bus?.id ?? null,
-    issue_description: input.issue,
-    parts: input.parts,
-    total_cost: input.cost,
-    status: "بانتظار القطع",
-    inventory_id: inventoryId,
-    quantity_used: input.quantityUsed ?? 0,
-  });
-  if (error) throw error;
+export interface MaintenanceOrderInput {
+  busCode: string;
+  issue: string;
+  status: string;
+  laborCost: number;
+  orderDate: string;
+  items: { inventoryId: string; quantity: number; unitPrice: number }[];
 }
 
-async function resolveInventoryIdByName(name?: string): Promise<string | null> {
-  if (!name || !name.trim()) return null;
-  const { data } = await supabase.from("inventory").select("id").eq("name", name).maybeSingle();
-  return data?.id ?? null;
+/** Parts total + overall total (labour + parts) of an order. */
+export function computeOrderTotals(items: { quantity: number; unitPrice: number }[], laborCost: number) {
+  const partsTotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+  return { partsTotal, total: partsTotal + laborCost };
+}
+
+/**
+ * Checks every requested quantity against the stock that will be available when the order is saved.
+ * When editing, what this order already holds is returned to stock first, so it counts as available.
+ * Returns an Arabic message for the first shortage, or null.
+ */
+export function findStockShortage(
+  requested: { inventoryId: string; name: string; quantity: number }[],
+  stockById: Map<string, number>,
+  alreadyAllocated: Map<string, number>,
+): string | null {
+  const wanted = new Map<string, { name: string; quantity: number }>();
+  for (const r of requested) {
+    const cur = wanted.get(r.inventoryId) ?? { name: r.name, quantity: 0 };
+    cur.quantity += r.quantity;
+    wanted.set(r.inventoryId, cur);
+  }
+  for (const [id, w] of wanted) {
+    const available = (stockById.get(id) ?? 0) + (alreadyAllocated.get(id) ?? 0);
+    if (w.quantity > available) return `المخزون غير كافٍ للصنف ${w.name}: المطلوب ${w.quantity} والمتاح ${available}`;
+  }
+  return null;
+}
+
+export async function saveMaintenanceOrder(id: string | null, input: MaintenanceOrderInput) {
+  const items = input.items.filter((i) => i.inventoryId && i.quantity > 0);
+
+  // 1) validate stock up-front so a shortage never leaves a half-saved order
+  const ids = [...new Set(items.map((i) => i.inventoryId))];
+  const { data: stockRows, error: stockErr } = ids.length
+    ? await supabase.from("inventory").select("id, name, stock").in("id", ids)
+    : { data: [], error: null };
+  if (stockErr) throw stockErr;
+  const stockById = new Map((stockRows ?? []).map((r: any) => [r.id as string, Number(r.stock)]));
+  const names = new Map((stockRows ?? []).map((r: any) => [r.id as string, r.name as string]));
+
+  let previous: { inventory_id: string; quantity: number; unit_price: number }[] = [];
+  let previousStatus = "";
+  if (id) {
+    const [{ data: prev }, { data: ord }] = await Promise.all([
+      supabase.from("maintenance_order_items").select("inventory_id, quantity, unit_price").eq("order_id", id),
+      supabase.from("maintenance_orders").select("status").eq("id", id).maybeSingle(),
+    ]);
+    previous = (prev ?? []).map((p: any) => ({ inventory_id: p.inventory_id, quantity: Number(p.quantity), unit_price: Number(p.unit_price) }));
+    previousStatus = ord?.status ?? "";
+  }
+  // parts held by an active order are returned to stock before the new ones are deducted
+  const allocated = new Map<string, number>();
+  if (id && previousStatus !== "ملغي") for (const p of previous) allocated.set(p.inventory_id, (allocated.get(p.inventory_id) ?? 0) + p.quantity);
+  if (input.status !== "ملغي") {
+    const shortage = findStockShortage(
+      items.map((i) => ({ inventoryId: i.inventoryId, name: names.get(i.inventoryId) ?? "الصنف", quantity: i.quantity })),
+      stockById,
+      allocated,
+    );
+    if (shortage) throw new Error(shortage);
+  }
+
+  // 2) the order row
+  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
+  const fields = {
+    bus_id: bus?.id ?? null,
+    issue_description: input.issue,
+    status: input.status,
+    labor_cost: input.laborCost,
+    order_date: input.orderDate,
+  };
+  let orderId = id;
+  if (orderId) {
+    const { error } = await supabase.from("maintenance_orders").update(fields).eq("id", orderId);
+    if (error) throw error;
+    // 3a) give the old parts back (database trigger returns them to stock)
+    const { error: delErr } = await supabase.from("maintenance_order_items").delete().eq("order_id", orderId);
+    if (delErr) throw delErr;
+  } else {
+    const { data: created, error } = await supabase
+      .from("maintenance_orders")
+      .insert({ ...fields, order_number: `MO-${Date.now().toString().slice(-6)}`, total_cost: 0 })
+      .select("id")
+      .single();
+    if (error) throw error;
+    orderId = created.id as string;
+  }
+
+  // 3b) deduct the new parts (database trigger deducts from stock)
+  if (items.length) {
+    const { error: insErr } = await supabase
+      .from("maintenance_order_items")
+      .insert(items.map((i) => ({ order_id: orderId, inventory_id: i.inventoryId, quantity: i.quantity, unit_price: i.unitPrice })));
+    if (insErr) {
+      if (id) {
+        // put the previous parts back so the order is not left without them
+        await supabase.from("maintenance_order_items").insert(previous.map((p) => ({ order_id: id, ...p })));
+      } else {
+        await supabase.from("maintenance_orders").delete().eq("id", orderId);
+      }
+      throw insErr;
+    }
+  }
+
+  // 4) totals
+  const { total } = computeOrderTotals(items, input.laborCost);
+  const summary = items.map((i) => `${names.get(i.inventoryId) ?? "صنف"} × ${i.quantity}`).join("، ");
+  const { error: totErr } = await supabase.from("maintenance_orders").update({ total_cost: total, parts: summary || null }).eq("id", orderId);
+  if (totErr) throw totErr;
 }
 
 export async function updateMaintenanceStatus(id: string, status: string) {
@@ -304,19 +413,21 @@ export async function fetchInventory(): Promise<InventoryItem[]> {
     id: i.id,
     name: i.name,
     code: i.code,
-    stock: i.stock ?? 0,
-    minStock: i.min_stock ?? 0,
+    stock: Number(i.stock ?? 0),
+    minStock: Number(i.min_stock ?? 0),
     unitPrice: Number(i.unit_price ?? 0),
+    unitType: (i.unit_type ?? "بالقطعة") as UnitType,
   }));
 }
 
-export async function addInventoryItem(input: { name: string; code: string; stock: number; minStock: number; unitPrice: number }) {
+export async function addInventoryItem(input: { name: string; code: string; stock: number; minStock: number; unitPrice: number; unitType: UnitType }) {
   const { error } = await supabase.from("inventory").insert({
     name: input.name,
-    code: input.code,
+    code: input.code || `SKU-${Date.now().toString().slice(-6)}`,
     stock: input.stock,
     min_stock: input.minStock,
     unit_price: input.unitPrice,
+    unit_type: input.unitType,
   });
   if (error) throw error;
 }
@@ -324,13 +435,14 @@ export async function addInventoryItem(input: { name: string; code: string; stoc
 export async function fetchFuelLogs(): Promise<FuelLog[]> {
   const { data, error } = await supabase
     .from("fuel_logs")
-    .select("*, buses(bus_code)")
+    .select("*, buses(bus_code), drivers(name)")
     .order("date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((f: any) => ({
     id: f.id,
     date: f.date,
     bus: f.buses?.bus_code ?? "—",
+    driver: f.drivers?.name ?? "—",
     odoStart: f.odo_start ?? 0,
     odoEnd: f.odo_end ?? 0,
     liters: Number(f.liters ?? 0),
@@ -339,17 +451,102 @@ export async function fetchFuelLogs(): Promise<FuelLog[]> {
   }));
 }
 
-export async function addFuelLog(input: { busCode: string; odoStart: number; odoEnd: number; liters: number; cost: number; station: string }) {
-  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
-  const { error } = await supabase.from("fuel_logs").insert({
+export interface FuelLogInput {
+  busCode: string;
+  driverName: string;
+  odoStart: number;
+  odoEnd: number;
+  liters: number;
+  cost: number;
+  station: string;
+}
+
+async function resolveFuelPayload(input: FuelLogInput) {
+  const [{ data: bus }, { data: driver }] = await Promise.all([
+    supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle(),
+    input.driverName.trim() ? supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  return {
     bus_id: bus?.id ?? null,
+    driver_id: driver?.id ?? null,
     odo_start: input.odoStart,
     odo_end: input.odoEnd,
     liters: input.liters,
     cost: input.cost,
     station: input.station,
-  });
+  };
+}
+
+export async function addFuelLog(input: FuelLogInput) {
+  const { error } = await supabase.from("fuel_logs").insert(await resolveFuelPayload(input));
   if (error) throw error;
+}
+
+export interface BusFuelSummary {
+  bus: string;
+  fills: number;
+  liters: number;
+  cost: number;
+  km: number;
+  kmPerLiter: number;
+  costPerKm: number;
+}
+
+/** Fuel consumption per vehicle: litres, cost, distance and efficiency. */
+export function computeFuelByBus(logs: { bus: string; liters: number; cost: number; odoStart: number; odoEnd: number }[]): BusFuelSummary[] {
+  const m = new Map<string, { fills: number; liters: number; cost: number; km: number }>();
+  for (const l of logs) {
+    const cur = m.get(l.bus) ?? { fills: 0, liters: 0, cost: 0, km: 0 };
+    cur.fills += 1;
+    cur.liters += l.liters;
+    cur.cost += l.cost;
+    cur.km += Math.max(l.odoEnd - l.odoStart, 0);
+    m.set(l.bus, cur);
+  }
+  return [...m.entries()]
+    .map(([bus, t]) => ({
+      bus,
+      ...t,
+      kmPerLiter: t.liters > 0 && t.km > 0 ? Math.round((t.km / t.liters) * 100) / 100 : 0,
+      costPerKm: t.km > 0 ? Math.round((t.cost / t.km) * 100) / 100 : 0,
+    }))
+    .sort((a, b) => b.cost - a.cost);
+}
+
+// ---- Bus maintenance ledger (كشف صيانة السيارة) ----
+
+export interface BusLedgerOrder {
+  id: string;
+  code: string;
+  date: string;
+  issue: string;
+  status: string;
+  items: MaintenanceItem[];
+  partsTotal: number;
+  laborCost: number;
+  total: number;
+}
+
+export function computeBusLedger(
+  orders: { id: string; code: string; date: string; issue: string; status: string; items: MaintenanceItem[]; laborCost: number }[],
+  busCode: string,
+  from: string,
+  to: string,
+  buses: Map<string, string>,
+) {
+  const rows: BusLedgerOrder[] = orders
+    .filter((o) => buses.get(o.id) === busCode && o.status !== "ملغي" && (!from || o.date >= from) && (!to || o.date <= to))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .map((o) => {
+      const { partsTotal, total } = computeOrderTotals(o.items, o.laborCost);
+      return { id: o.id, code: o.code, date: o.date, issue: o.issue, status: o.status, items: o.items, partsTotal, laborCost: o.laborCost, total };
+    });
+  return {
+    rows,
+    totalParts: rows.reduce((s, r) => s + r.partsTotal, 0),
+    totalLabor: rows.reduce((s, r) => s + r.laborCost, 0),
+    grandTotal: rows.reduce((s, r) => s + r.total, 0),
+  };
 }
 
 // ---- Finance ----
@@ -742,6 +939,7 @@ export async function bulkInsertInventory(rows: Record<string, string>[]) {
     stock: Number(r["stock"] ?? r["الرصيد"]) || 0,
     min_stock: Number(r["min_stock"] ?? r["الحد الأدنى"]) || 0,
     unit_price: Number(r["unit_price"] ?? r["سعر الوحدة"]) || 0,
+    unit_type: ["بالقطعة", "بالكيلو", "باللتر"].includes(r["unit_type"] ?? r["الوحدة"] ?? "") ? (r["unit_type"] ?? r["الوحدة"]) : "بالقطعة",
   }));
   const { error } = await supabase.from("inventory").insert(payload);
   if (error) throw error;
@@ -1070,34 +1268,19 @@ export async function deleteStudent(id: string) {
   if (error) throw error;
 }
 
-export async function updateMaintenanceOrder(id: string, input: { busCode: string; issue: string; parts: string; cost: number; status: string; inventoryItemName?: string; quantityUsed?: number }) {
-  const [{ data: bus }, inventoryId] = await Promise.all([
-    supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle(),
-    resolveInventoryIdByName(input.inventoryItemName),
-  ]);
-  const { error } = await supabase.from("maintenance_orders").update({
-    bus_id: bus?.id ?? null,
-    issue_description: input.issue,
-    parts: input.parts,
-    total_cost: input.cost,
-    status: input.status,
-    inventory_id: inventoryId,
-    quantity_used: input.quantityUsed ?? 0,
-  }).eq("id", id);
-  if (error) throw error;
-}
 export async function deleteMaintenanceOrder(id: string) {
   const { error } = await supabase.from("maintenance_orders").delete().eq("id", id);
   if (error) throw error;
 }
 
-export async function updateInventoryItem(id: string, input: { name: string; code: string; stock: number; minStock: number; unitPrice: number }) {
+export async function updateInventoryItem(id: string, input: { name: string; code: string; stock: number; minStock: number; unitPrice: number; unitType: UnitType }) {
   const { error } = await supabase.from("inventory").update({
     name: input.name,
     code: input.code,
     stock: input.stock,
     min_stock: input.minStock,
     unit_price: input.unitPrice,
+    unit_type: input.unitType,
   }).eq("id", id);
   if (error) throw error;
 }
@@ -1106,16 +1289,8 @@ export async function deleteInventoryItem(id: string) {
   if (error) throw error;
 }
 
-export async function updateFuelLog(id: string, input: { busCode: string; odoStart: number; odoEnd: number; liters: number; cost: number; station: string }) {
-  const { data: bus } = await supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle();
-  const { error } = await supabase.from("fuel_logs").update({
-    bus_id: bus?.id ?? null,
-    odo_start: input.odoStart,
-    odo_end: input.odoEnd,
-    liters: input.liters,
-    cost: input.cost,
-    station: input.station,
-  }).eq("id", id);
+export async function updateFuelLog(id: string, input: FuelLogInput) {
+  const { error } = await supabase.from("fuel_logs").update(await resolveFuelPayload(input)).eq("id", id);
   if (error) throw error;
 }
 export async function deleteFuelLog(id: string) {

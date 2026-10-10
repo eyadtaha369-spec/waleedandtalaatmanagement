@@ -63,18 +63,33 @@ export interface Student {
 
 
 
+export type MaintenanceStatus = "بانتظار القطع" | "قيد التنفيذ" | "مكتمل" | "ملغي";
+
+export interface MaintenanceItem {
+  id: string;
+  inventoryId: string;
+  name: string;
+  unitType: string;
+  quantity: number;
+  unitPrice: number;
+}
+
 export interface MaintenanceOrder {
   id: string;
   code: string;
   bus: string;
+  date: string;
   issue: string;
   parts: string;
   cost: number;
-  status: "بانتظار القطع" | "قيد التنفيذ" | "مكتمل";
-  inventoryItem: string;
-  quantityUsed: number;
+  laborCost: number;
+  status: MaintenanceStatus;
+  items: MaintenanceItem[];
 }
 
+
+export type UnitType = "بالقطعة" | "بالكيلو" | "باللتر";
+export const UNIT_TYPES: UnitType[] = ["بالقطعة", "بالكيلو", "باللتر"];
 
 export interface InventoryItem {
   id: string;
@@ -83,6 +98,7 @@ export interface InventoryItem {
   stock: number;
   minStock: number;
   unitPrice: number;
+  unitType: UnitType;
 }
 
 
@@ -90,6 +106,7 @@ export interface FuelLog {
   id: string;
   date: string;
   bus: string;
+  driver: string;
   odoStart: number;
   odoEnd: number;
   liters: number;

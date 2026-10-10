@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -282,5 +282,30 @@ describe("computeDriverPayroll with dispatch shift earnings", () => {
     );
     expect(row?.shiftEarnings).toBe(700);
     expect(row?.netSalary).toBe(3000 + 100 + 200 + 700 - 550);
+  });
+});
+
+describe("supplier statement", () => {
+  it("orders by date and keeps a running remaining balance", () => {
+    const r = computeSupplierStatement([
+      { date: "2026-10-05", withdrawals: 0, payments: 400 },
+      { date: "2026-10-01", withdrawals: 1000, payments: 0 },
+      { date: "2026-10-03", withdrawals: 500, payments: 0 },
+    ]);
+    expect(r.rows.map((x) => x.balance)).toEqual([1000, 1500, 1100]);
+    expect(r.totalWithdrawals).toBe(1500);
+    expect(r.totalPayments).toBe(400);
+    expect(r.remaining).toBe(1100);
+  });
+  it("returns zeros with no entries", () => {
+    expect(computeSupplierStatement([]).remaining).toBe(0);
+  });
+});
+
+describe("defaultAlertDate", () => {
+  it("is two days before the due date, across month boundaries", () => {
+    expect(defaultAlertDate("2026-10-10")).toBe("2026-10-08");
+    expect(defaultAlertDate("2026-11-01")).toBe("2026-10-30");
+    expect(defaultAlertDate("")).toBe("");
   });
 });

@@ -1599,19 +1599,78 @@ export interface Supplier {
   name: string;
   phone: string;
   balanceDue: number;
+  dueDate: string;
+  alertDate: string;
 }
 
 export async function fetchSuppliers(): Promise<Supplier[]> {
   const { data, error } = await supabase.from("suppliers").select("*").order("supplier_name");
   if (error) throw error;
-  return (data ?? []).map((s: any) => ({ id: s.id, name: s.supplier_name, phone: s.phone ?? "", balanceDue: Number(s.balance_due ?? 0) }));
+  return (data ?? []).map((s: any) => ({
+    id: s.id,
+    name: s.supplier_name,
+    phone: s.phone ?? "",
+    balanceDue: Number(s.balance_due ?? 0),
+    dueDate: s.due_date ?? "",
+    alertDate: s.alert_date ?? "",
+  }));
 }
-export async function addSupplier(input: { name: string; phone: string }) {
-  const { error } = await supabase.from("suppliers").insert({ supplier_name: input.name, phone: input.phone });
+
+export interface SupplierSummary extends Supplier {
+  totalPurchases: number; // إجمالي المسحوبات
+  totalPayments: number; // إجمالي الدفعات
+}
+
+export async function fetchSupplierSummaries(): Promise<SupplierSummary[]> {
+  const [suppliers, { data: purchases, error: e1 }, { data: invoices, error: e2 }, { data: payments, error: e3 }] = await Promise.all([
+    fetchSuppliers(),
+    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN"),
+    supabase.from("supplier_invoices").select("supplier_id, total_amount"),
+    supabase.from("supplier_payments").select("supplier_id, amount"),
+  ]);
+  if (e1 || e2 || e3) throw e1 ?? e2 ?? e3;
+  const sum = (rows: any[] | null, key: string, field: string) => {
+    const m = new Map<string, number>();
+    for (const r of rows ?? []) if (r[key]) m.set(r[key], (m.get(r[key]) ?? 0) + Number(r[field] ?? 0));
+    return m;
+  };
+  const pur = sum(purchases, "supplier_id", "total_cost");
+  const inv = sum(invoices, "supplier_id", "total_amount");
+  const pay = sum(payments, "supplier_id", "amount");
+  return suppliers.map((s) => ({
+    ...s,
+    totalPurchases: (pur.get(s.id) ?? 0) + (inv.get(s.id) ?? 0),
+    totalPayments: pay.get(s.id) ?? 0,
+  }));
+}
+
+interface SupplierInput {
+  name: string;
+  phone: string;
+  dueDate: string;
+  alertDate: string;
+}
+/** Default alert date = 2 days before the due date. */
+export function defaultAlertDate(dueDate: string): string {
+  if (!dueDate) return "";
+  const d = new Date(`${dueDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 2);
+  return d.toISOString().slice(0, 10);
+}
+function supplierPayload(input: SupplierInput) {
+  return {
+    supplier_name: input.name,
+    phone: input.phone,
+    due_date: input.dueDate || null,
+    alert_date: input.alertDate || defaultAlertDate(input.dueDate) || null,
+  };
+}
+export async function addSupplier(input: SupplierInput) {
+  const { error } = await supabase.from("suppliers").insert(supplierPayload(input));
   if (error) throw error;
 }
-export async function updateSupplier(id: string, input: { name: string; phone: string }) {
-  const { error } = await supabase.from("suppliers").update({ supplier_name: input.name, phone: input.phone }).eq("id", id);
+export async function updateSupplier(id: string, input: SupplierInput) {
+  const { error } = await supabase.from("suppliers").update(supplierPayload(input)).eq("id", id);
   if (error) throw error;
 }
 export async function deleteSupplier(id: string) {
@@ -1619,38 +1678,166 @@ export async function deleteSupplier(id: string) {
   if (error) throw error;
 }
 
-export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string }) {
-  const { error } = await supabase.from("supplier_payments").insert({ supplier_id: input.supplierId, amount: input.amount, method: input.method, notes: input.notes });
+export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string; date?: string }) {
+  const { error } = await supabase.from("supplier_payments").insert({
+    supplier_id: input.supplierId,
+    amount: input.amount,
+    method: input.method,
+    notes: input.notes,
+    ...(input.date ? { date: input.date } : {}),
+  });
   if (error) throw error;
+}
+export async function deleteSupplierPayment(id: string) {
+  const { error } = await supabase.from("supplier_payments").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---- Supplier invoices (with image attachment in private storage) ----
+
+const INVOICE_BUCKET = "supplier-invoices";
+
+export interface SupplierInvoiceInput {
+  supplierId: string;
+  invoiceDate: string;
+  invoiceRef: string;
+  totalAmount: number;
+  itemsDetails: string;
+  file?: File | null;
+}
+
+async function uploadInvoiceFile(supplierId: string, file: File): Promise<string> {
+  const ext = file.name.includes(".") ? file.name.split(".").pop() : "bin";
+  const path = `${supplierId}/${Date.now()}-${Math.floor(Math.random() * 1000)}.${ext}`;
+  const { error } = await supabase.storage.from(INVOICE_BUCKET).upload(path, file, file.type ? { contentType: file.type } : {});
+  if (error) throw error;
+  return path;
+}
+
+export async function addSupplierInvoice(input: SupplierInvoiceInput) {
+  const attachment = input.file ? await uploadInvoiceFile(input.supplierId, input.file) : null;
+  const { error } = await supabase.from("supplier_invoices").insert({
+    supplier_id: input.supplierId,
+    invoice_date: input.invoiceDate,
+    invoice_ref: input.invoiceRef,
+    total_amount: input.totalAmount,
+    items_details: input.itemsDetails,
+    attachment_path: attachment,
+  });
+  if (error) {
+    if (attachment) await supabase.storage.from(INVOICE_BUCKET).remove([attachment]);
+    throw error;
+  }
+}
+
+export async function updateSupplierInvoice(id: string, input: SupplierInvoiceInput, previousPath: string | null) {
+  const attachment = input.file ? await uploadInvoiceFile(input.supplierId, input.file) : previousPath;
+  const { error } = await supabase
+    .from("supplier_invoices")
+    .update({
+      invoice_date: input.invoiceDate,
+      invoice_ref: input.invoiceRef,
+      total_amount: input.totalAmount,
+      items_details: input.itemsDetails,
+      attachment_path: attachment,
+    })
+    .eq("id", id);
+  if (error) throw error;
+  if (input.file && previousPath) await supabase.storage.from(INVOICE_BUCKET).remove([previousPath]);
+}
+
+export async function deleteSupplierInvoice(id: string, attachmentPath: string | null) {
+  const { error } = await supabase.from("supplier_invoices").delete().eq("id", id);
+  if (error) throw error;
+  if (attachmentPath) await supabase.storage.from(INVOICE_BUCKET).remove([attachmentPath]);
+}
+
+export async function getInvoiceAttachmentUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(INVOICE_BUCKET).createSignedUrl(path, 60 * 10);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 export interface SupplierLedgerEntry {
   id: string;
+  source: "inventory" | "invoice" | "payment";
   date: string;
-  kind: "شراء" | "سداد";
+  kind: "شراء" | "فاتورة" | "سداد";
+  reference: string;
   description: string;
-  amount: number;
+  withdrawals: number; // المسحوبات (الصادر)
+  payments: number; // الدفعات المسددة
+  attachmentPath: string | null;
+  // raw invoice fields, for editing
+  invoiceRef?: string;
+  itemsDetails?: string;
 }
 
 export async function fetchSupplierLedger(supplierId: string): Promise<SupplierLedgerEntry[]> {
-  const [{ data: purchases }, { data: payments }] = await Promise.all([
-    supabase.from("inventory_transactions").select("*, inventory(name)").eq("supplier_id", supplierId).eq("type", "IN").order("created_at", { ascending: false }),
-    supabase.from("supplier_payments").select("*").eq("supplier_id", supplierId).order("date", { ascending: false }),
+  const [{ data: purchases }, { data: invoices }, { data: payments }] = await Promise.all([
+    supabase.from("inventory_transactions").select("*, inventory(name)").eq("supplier_id", supplierId).eq("type", "IN"),
+    supabase.from("supplier_invoices").select("*").eq("supplier_id", supplierId),
+    supabase.from("supplier_payments").select("*").eq("supplier_id", supplierId),
   ]);
   const entries: SupplierLedgerEntry[] = [];
   for (const p of purchases ?? []) {
     entries.push({
       id: p.id,
+      source: "inventory",
       date: (p.created_at as string).slice(0, 10),
       kind: "شراء",
+      reference: "توريد مخزون",
       description: `${p.inventory?.name ?? "صنف"} × ${p.quantity}`,
-      amount: Number(p.total_cost ?? 0),
+      withdrawals: Number(p.total_cost ?? 0),
+      payments: 0,
+      attachmentPath: null,
+    });
+  }
+  for (const i of invoices ?? []) {
+    entries.push({
+      id: i.id,
+      source: "invoice",
+      date: i.invoice_date,
+      kind: "فاتورة",
+      reference: i.invoice_ref,
+      description: i.items_details || "",
+      withdrawals: Number(i.total_amount ?? 0),
+      payments: 0,
+      attachmentPath: i.attachment_path ?? null,
+      invoiceRef: i.invoice_ref,
+      itemsDetails: i.items_details ?? "",
     });
   }
   for (const pay of payments ?? []) {
-    entries.push({ id: pay.id, date: pay.date, kind: "سداد", description: pay.notes || pay.method || "دفعة", amount: -Number(pay.amount ?? 0) });
+    entries.push({
+      id: pay.id,
+      source: "payment",
+      date: pay.date,
+      kind: "سداد",
+      reference: pay.method || "دفعة",
+      description: pay.notes || "",
+      withdrawals: 0,
+      payments: Number(pay.amount ?? 0),
+      attachmentPath: null,
+    });
   }
-  return entries.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return entries;
+}
+
+/** Orders entries oldest-first and attaches a running balance (المتبقي) to each. */
+export function computeSupplierStatement<T extends { date: string; withdrawals: number; payments: number }>(entries: T[]) {
+  const sorted = [...entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  let balance = 0;
+  const rows = sorted.map((e) => {
+    balance += e.withdrawals - e.payments;
+    return { ...e, balance };
+  });
+  return {
+    rows,
+    totalWithdrawals: sorted.reduce((a, e) => a + e.withdrawals, 0),
+    totalPayments: sorted.reduce((a, e) => a + e.payments, 0),
+    remaining: balance,
+  };
 }
 
 export async function receiveInventoryStock(input: {

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, Lock, Pencil, Plus, Printer, Trash2, Unlock } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,16 @@ import {
   deleteDailyShift,
   fetchDriverPayroll,
   fetchEmployeePayroll,
+  fetchEmployees,
+  fetchDispatchShifts,
+  fetchPayrollAdjustments,
+  savePayrollAdjustment,
+  computeFinalPayroll,
+  adjustmentKey,
+  EMPTY_ADJUSTMENT,
+  type PayrollAdjustment,
+  type PayrollSubjectType,
+  type DispatchShift,
   type EmployeePayrollRow,
   type DailyShift,
   type DriverPayrollRow,
@@ -60,6 +70,25 @@ const emptyForm = {
   notes: "",
 };
 
+interface PersonRow {
+  key: string;
+  type: PayrollSubjectType;
+  id: string;
+  name: string;
+  role: string;
+  baseSalary: number;
+  shiftAllowances: number;
+  tripFees: number;
+  dailyAdvances: number;
+  dailyPenalties: number;
+}
+
+const monthLabel = (m: string) => {
+  const [y, mo] = m.split("-");
+  const names = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+  return `${names[Number(mo) - 1] ?? mo} ${y}`;
+};
+
 function PayrollPage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [shifts, setShifts] = useState<DailyShift[]>([]);
@@ -76,19 +105,34 @@ function PayrollPage() {
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<DailyShift | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [driverIds, setDriverIds] = useState<Map<string, string>>(new Map());
+  const [employeeIds, setEmployeeIds] = useState<Map<string, string>>(new Map());
+  const [adjustments, setAdjustments] = useState<Map<string, PayrollAdjustment>>(new Map());
+  const [dispatchShifts, setDispatchShifts] = useState<DispatchShift[]>([]);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [adjFor, setAdjFor] = useState<PersonRow | null>(null);
+  const [adjForm, setAdjForm] = useState({ bonus: "", advances: "", penalties: "", tolls: "", notes: "" });
+  const [printing, setPrinting] = useState<PersonRow | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [s, p, ep, drivers, buses, routes] = await Promise.all([
+      const [s, p, ep, drivers, buses, routes, employees, adj, ds] = await Promise.all([
         fetchDailyShifts(month),
         fetchDriverPayroll(month),
         fetchEmployeePayroll(month),
         fetchDrivers(),
         fetchBuses(),
         fetchRoutes(),
+        fetchEmployees(),
+        fetchPayrollAdjustments(month),
+        fetchDispatchShifts(month),
       ]);
+      setDriverIds(new Map(drivers.map((d) => [d.name, d.id])));
+      setEmployeeIds(new Map(employees.map((e) => [e.name, e.id])));
+      setAdjustments(adj);
+      setDispatchShifts(ds);
       setShifts(s);
       setPayroll(p);
       setEmployeePayroll(ep);
@@ -172,9 +216,84 @@ function PayrollPage() {
     }
   };
 
-  const filteredPayroll = payroll.filter((p) => p.driver.includes(query) || query === "");
-  const filteredEmployeePayroll = employeePayroll.filter((p) => p.employee.includes(query) || p.jobTitle.includes(query) || query === "");
-  const grandTotal = filteredPayroll.reduce((a, p) => a + p.netSalary, 0) + filteredEmployeePayroll.reduce((a, p) => a + p.netSalary, 0);
+  const people: PersonRow[] = useMemo(() => {
+    const drivers: PersonRow[] = payroll.map((p) => ({
+      key: adjustmentKey("driver", driverIds.get(p.driver) ?? p.driver),
+      type: "driver",
+      id: driverIds.get(p.driver) ?? "",
+      name: p.driver,
+      role: "سائق",
+      baseSalary: p.baseSalary,
+      shiftAllowances: p.totalOvertime + p.shiftEarnings,
+      tripFees: p.tripFees,
+      dailyAdvances: p.totalAdvances,
+      dailyPenalties: p.totalPenalties,
+    }));
+    const employees: PersonRow[] = employeePayroll.map((p) => ({
+      key: adjustmentKey("employee", employeeIds.get(p.employee) ?? p.employee),
+      type: "employee",
+      id: employeeIds.get(p.employee) ?? "",
+      name: p.employee,
+      role: p.jobTitle || "موظف",
+      baseSalary: p.baseSalary,
+      shiftAllowances: p.totalAllowances,
+      tripFees: 0,
+      dailyAdvances: p.totalAdvances,
+      dailyPenalties: p.totalPenalties,
+    }));
+    return [...drivers, ...employees].filter((p) => p.name.includes(query) || p.role.includes(query) || query === "");
+  }, [payroll, employeePayroll, driverIds, employeeIds, query]);
+
+  const adjOf = (p: PersonRow): PayrollAdjustment => adjustments.get(p.key) ?? EMPTY_ADJUSTMENT;
+  const finalOf = (p: PersonRow) =>
+    computeFinalPayroll({ baseSalary: p.baseSalary, shiftAllowances: p.shiftAllowances, tripFees: p.tripFees, advances: p.dailyAdvances, penalties: p.dailyPenalties }, adjOf(p));
+  const grandTotal = people.reduce((a, p) => a + finalOf(p).net, 0);
+
+  const openAdjust = (p: PersonRow) => {
+    const a = adjOf(p);
+    setAdjForm({ bonus: a.bonus ? String(a.bonus) : "", advances: a.advances ? String(a.advances) : "", penalties: a.penalties ? String(a.penalties) : "", tolls: a.tolls ? String(a.tolls) : "", notes: a.notes });
+    setAdjFor(p);
+  };
+  const submitAdjust = async () => {
+    if (!adjFor || !adjFor.id) return setError("تعذر تحديد الشخص");
+    setSaving(true);
+    try {
+      await savePayrollAdjustment(adjFor.type, adjFor.id, month, {
+        bonus: Number(adjForm.bonus) || 0,
+        advances: Number(adjForm.advances) || 0,
+        penalties: Number(adjForm.penalties) || 0,
+        tolls: Number(adjForm.tolls) || 0,
+        notes: adjForm.notes,
+        locked: adjOf(adjFor).locked,
+      });
+      await loadAll();
+      setAdjFor(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر حفظ التعديل");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const toggleLock = async (p: PersonRow) => {
+    if (!p.id) return;
+    try {
+      await savePayrollAdjustment(p.type, p.id, month, { ...adjOf(p), locked: !adjOf(p).locked });
+      await loadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر تغيير القفل");
+    }
+  };
+  const printStatement = (p: PersonRow) => {
+    setPrinting(p);
+    document.body.classList.add("print-statement");
+    const cleanup = () => {
+      document.body.classList.remove("print-statement");
+      window.removeEventListener("afterprint", cleanup);
+      setPrinting(null);
+    };
+    window.addEventListener("afterprint", cleanup);
+    setTimeout(() => window.print(), 150);
+  };
 
   return (
     <AppShell>
@@ -231,76 +350,196 @@ function PayrollPage() {
         </DataTable>
       </Panel>
 
-      <Panel title="ملخص المرتبات الشهري" className="mt-4">
+      <Panel title={`كشوف المرتبات — ${monthLabel(month)}`} className="mt-4">
         <Toolbar
           query={query}
           onQuery={setQuery}
           placeholder="ابحث باسم السائق أو الموظف..."
-          onExport={() => exportToExcel("ملخص المرتبات", [
-            ...filteredPayroll.map((p) => ({ الفئة: "سائق", الاسم: p.driver, الوظيفة: "سائق", "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalOvertime + p.tripFees + p.shiftEarnings, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
-            ...filteredEmployeePayroll.map((p) => ({ الفئة: "موظف", الاسم: p.employee, الوظيفة: p.jobTitle, "المرتب الأساسي": p.baseSalary, "إضافي/بدلات": p.totalAllowances, السلف: p.totalAdvances, الجزاءات: p.totalPenalties, "صافي المرتب": p.netSalary })),
-          ] as Record<string, string | number>[])}
-          extra={
-            <>
-              <Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="h-9 w-40 border-border bg-input/60" />
-              <Button variant="outline" className="border-border" onClick={() => window.print()}>
-                <Printer className="ml-2 h-4 w-4" /> طباعة مفردات المرتب
-              </Button>
-            </>
-          }
+          onExport={() => exportToExcel("ملخص المرتبات", people.map((p) => { const f = finalOf(p); return { الفئة: p.type === "driver" ? "سائق" : "موظف", الاسم: p.name, الوظيفة: p.role, "المرتب الأساسي": f.baseSalary, "إضافي الورديات": f.shiftAllowances, "أجر الرحلات": f.tripFees, مكافآت: f.bonus, السُلف: f.advances, الجزاءات: f.penalties, الكرتات: f.tolls, الصافي: f.net, مقفل: adjOf(p).locked ? "نعم" : "لا" }; }) as Record<string, string | number>[])}
+          extra={<Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="h-9 w-40 border-border bg-input/60" />}
         />
-        <DataTable head={["اسم السائق", "المرتب الأساسي", "إجمالي الإضافي/البدلات", "عمولة الرحلات", "قيمة الورديات", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
+        <p className="mb-3 rounded-lg border border-border bg-secondary/30 p-2 text-xs text-muted-foreground">
+          الصافي = المرتب الأساسي + إضافي الورديات + أجر الرحلات (+ مكافآت) − (السُلف + الجزاءات + الكرتات)
+        </p>
+        <div className="space-y-3">
           {loading ? (
-            <tr>
-              <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
-            </tr>
-          ) : filteredPayroll.length === 0 ? (
-            <tr>
-              <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">لا يوجد سائقون بعد.</td>
-            </tr>
+            <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
+          ) : people.length === 0 ? (
+            <p className="py-6 text-center text-muted-foreground">لا يوجد سائقون أو موظفون نشطون بعد.</p>
           ) : (
-            filteredPayroll.map((p) => (
-              <tr key={p.driver} className="transition-colors hover:bg-secondary/30">
-                <td className="px-4 py-3 font-bold">{p.driver}</td>
-                <td className="px-4 py-3">{currency(p.baseSalary)}</td>
-                <td className="px-4 py-3 text-success">{currency(p.totalOvertime)}</td>
-                <td className="px-4 py-3 text-success">{currency(p.tripFees)}</td>
-                <td className="px-4 py-3 text-success">{currency(p.shiftEarnings)}</td>
-                <td className="px-4 py-3 text-warning">{currency(p.totalAdvances)}</td>
-                <td className="px-4 py-3 text-destructive">{currency(p.totalPenalties)}</td>
-                <td className="px-4 py-3 font-bold text-primary">{currency(p.netSalary)}</td>
-              </tr>
-            ))
-          )}
-        </DataTable>
-      </Panel>
+            people.map((p) => {
+              const f = finalOf(p);
+              const adj = adjOf(p);
+              const open = expandedKey === p.key;
+              return (
+                <div key={p.key} className={`panel overflow-hidden transition-colors ${open ? "border-primary/60" : ""}`}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={open}
+                    onClick={() => setExpandedKey(open ? null : p.key)}
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setExpandedKey(open ? null : p.key))}
+                    className="flex cursor-pointer flex-wrap items-center gap-x-6 gap-y-3 p-4 hover:bg-secondary/20"
+                  >
+                    <div className="min-w-[10rem] flex-1">
+                      <p className="text-lg font-extrabold">{p.name}</p>
+                      <p className="text-xs text-muted-foreground">{p.role}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">المرتب الأساسي</p>
+                      <p className="font-bold">{currency(f.baseSalary)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">إجمالي الإضافات</p>
+                      <p className="font-bold text-success">{currency(f.additions)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">إجمالي الخصومات</p>
+                      <p className="font-bold text-destructive">{currency(f.deductions)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">صافي المرتب</p>
+                      <p className="text-lg font-extrabold text-primary">{currency(f.net)}</p>
+                    </div>
+                    {adj.locked && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs text-primary">
+                        <Lock className="h-3 w-3" /> مقفل
+                      </span>
+                    )}
+                    <ChevronDown className={`h-5 w-5 text-primary transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
+                  </div>
 
-      <Panel title="مرتبات الموظفين الشهرية (غير السائقين)" className="mt-4">
-        <DataTable head={["اسم الموظف", "الوظيفة", "المرتب الأساسي", "البدلات / الإضافي", "إجمالي السُلف", "إجمالي الجزاءات", "صافي المرتب المستحق"]}>
-          {loading ? (
-            <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
-            </tr>
-          ) : filteredEmployeePayroll.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">لا يوجد موظفون نشطون. أضفهم من صفحة الأسطول ← إدارة الموظفين.</td>
-            </tr>
-          ) : (
-            filteredEmployeePayroll.map((p) => (
-              <tr key={p.employee} className="transition-colors hover:bg-secondary/30">
-                <td className="px-4 py-3 font-bold">{p.employee}</td>
-                <td className="px-4 py-3">{p.jobTitle || "—"}</td>
-                <td className="px-4 py-3">{currency(p.baseSalary)}</td>
-                <td className="px-4 py-3 text-success">{currency(p.totalAllowances)}</td>
-                <td className="px-4 py-3 text-warning">{currency(p.totalAdvances)}</td>
-                <td className="px-4 py-3 text-destructive">{currency(p.totalPenalties)}</td>
-                <td className="px-4 py-3 font-bold text-primary">{currency(p.netSalary)}</td>
-              </tr>
-            ))
+                  <div className={`grid transition-all duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+                    <div className="overflow-hidden">
+                      <div className="border-t border-border p-4">
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <Button size="sm" variant="outline" className="border-border" disabled={adj.locked} onClick={() => openAdjust(p)}>
+                            <Pencil className="ml-1 h-4 w-4" /> تعديل (مكافآت / جزاءات / سُلف / كرتات)
+                          </Button>
+                          <Button size="sm" variant="outline" className="border-border" onClick={() => toggleLock(p)}>
+                            {adj.locked ? <Unlock className="ml-1 h-4 w-4" /> : <Lock className="ml-1 h-4 w-4" />}
+                            {adj.locked ? "فتح القفل" : "قفل نهائي"}
+                          </Button>
+                          <Button size="sm" className="bg-primary text-primary-foreground" onClick={() => printStatement(p)}>
+                            <Printer className="ml-1 h-4 w-4" /> طباعة كشف حساب {p.type === "driver" ? "سائق" : "موظف"}
+                          </Button>
+                        </div>
+                        <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                          {[
+                            ["المرتب الأساسي", f.baseSalary, ""],
+                            ["إضافي الورديات", f.shiftAllowances, "text-success"],
+                            ["أجر الرحلات", f.tripFees, "text-success"],
+                            ["مكافآت", f.bonus, "text-success"],
+                            ["السُلف", f.advances, "text-warning"],
+                            ["الجزاءات", f.penalties, "text-destructive"],
+                            ["الكرتات", f.tolls, "text-destructive"],
+                            ["الصافي النهائي", f.net, "text-primary"],
+                          ].map(([label, value, tone]) => (
+                            <div key={label as string} className="rounded-lg border border-border bg-secondary/20 p-2">
+                              <dt className="text-xs text-muted-foreground">{label}</dt>
+                              <dd className={`font-bold ${tone}`}>{currency(value as number)}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        {adj.notes && <p className="mt-2 text-xs text-muted-foreground">ملاحظات: {adj.notes}</p>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
           )}
-        </DataTable>
+        </div>
         <p className="mt-3 text-sm font-bold text-primary">إجمالي المرتبات الشهرية (سائقين + موظفين): {currency(grandTotal)}</p>
       </Panel>
+
+      <Dialog open={!!adjFor} onOpenChange={(o) => !o && setAdjFor(null)}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">تعديل مرتب {adjFor?.name}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              تُضاف هذه القيم إلى ما سُجِّل يوميًا، لشهر {monthLabel(month)}. يمكن القفل النهائي بعد المراجعة.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {[
+              ["bonus", "مكافآت / إضافي"],
+              ["advances", "سُلف إضافية"],
+              ["penalties", "جزاءات إضافية"],
+              ["tolls", "كرتات"],
+            ].map(([key, label]) => (
+              <div key={key} className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{label}</Label>
+                <Input value={adjForm[key as keyof typeof adjForm]} onChange={(e) => setAdjForm({ ...adjForm, [key]: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
+              </div>
+            ))}
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">ملاحظات</Label>
+              <Input value={adjForm.notes} onChange={(e) => setAdjForm({ ...adjForm, notes: e.target.value })} className="border-border bg-input/60" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitAdjust} disabled={saving}>
+              {saving ? "جارِ الحفظ..." : "حفظ"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {printing && (() => {
+        const f = finalOf(printing);
+        const myShifts = shifts.filter((x) => x.driver === printing.name);
+        const myDispatch = dispatchShifts.filter((x) => x.driver === printing.name);
+        const td = { border: "1px solid #000", padding: 6 } as const;
+        return (
+          <div className="print-only" dir="rtl">
+            <h1 style={{ textAlign: "center", fontSize: 22, fontWeight: 800 }}>وليد وطلعت لخدمات النقل والرحلات</h1>
+            <h2 style={{ textAlign: "center", fontSize: 18, margin: "8px 0 16px" }}>كشف حساب {printing.type === "driver" ? "سائق" : "موظف"}</h2>
+            <p style={{ marginBottom: 12 }}>
+              <b>الاسم:</b> {printing.name} &nbsp;&nbsp; <b>الشهر:</b> {monthLabel(month)} &nbsp;&nbsp; <b>تاريخ الطباعة:</b> {new Date().toISOString().slice(0, 10)}
+            </p>
+            {printing.type === "driver" && (
+              <>
+                <h3 style={{ fontWeight: 700, margin: "8px 0" }}>بيان الورديات</h3>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 12 }}>
+                  <thead>
+                    <tr>{["التاريخ", "الأتوبيس", "الخط / الوردية", "إضافي / قيمة السواقة"].map((h) => <th key={h} style={{ ...td, background: "#eee" }}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {myShifts.length + myDispatch.length === 0 && <tr><td colSpan={4} style={td}>لا توجد ورديات مسجلة</td></tr>}
+                    {myDispatch.map((x) => (
+                      <tr key={`d${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.bus}</td><td style={td}>{x.route || x.client}</td><td style={td}>{currency(x.driverValue)}</td></tr>
+                    ))}
+                    {myShifts.map((x) => (
+                      <tr key={`s${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.bus}</td><td style={td}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td style={td}>{currency(x.overtimeAllowance)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <tbody>
+                {[
+                  ["المرتب الأساسي", f.baseSalary],
+                  ["إضافي الورديات", f.shiftAllowances],
+                  ["أجر الرحلات", f.tripFees],
+                  ["مكافآت", f.bonus],
+                  ["السُلف", f.advances],
+                  ["الخصومات (الجزاءات)", f.penalties],
+                  ["الكرتات", f.tolls],
+                ].map(([label, value]) => (
+                  <tr key={label as string}><td style={td}>{label}</td><td style={td}>{currency(value as number)}</td></tr>
+                ))}
+                <tr style={{ fontWeight: 800 }}><td style={td}>الإجمالي النهائي (الصافي المستحق)</td><td style={td}>{currency(f.net)}</td></tr>
+              </tbody>
+            </table>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 48 }}>
+              <span>التاريخ: ____ / ____ / ________</span>
+              <span>توقيع المستلم: ______________________</span>
+            </div>
+          </div>
+        );
+      })()}
 
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent className="glass max-h-[85vh] overflow-y-auto text-foreground" dir="rtl">

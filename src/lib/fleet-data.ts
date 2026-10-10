@@ -124,6 +124,9 @@ export interface TreasuryEntry {
   opening: number;
   deposits: number;
   withdrawals: number;
+  clientId: string;
+  isRollover: boolean;
+  notes: string;
 }
 
 
@@ -132,18 +135,28 @@ export interface Expense {
   date: string;
   category: "زيوت ومحروقات" | "قطع غيار" | "إداريات" | "مرتبات";
   supplier: string;
+  supplierId: string;
   amount: number;
   supplierBalance: number;
+  description: string;
+  notes: string;
+  payFrom: string;
 }
 
+
+export interface LoanInstallment {
+  id: string;
+  amount: number;
+  dueDate: string;
+}
 
 export interface Loan {
   id: string;
   lender: string;
   total: number;
-  paid: number;
   installment: number;
   nextDue: string;
+  installments: LoanInstallment[];
 }
 
 

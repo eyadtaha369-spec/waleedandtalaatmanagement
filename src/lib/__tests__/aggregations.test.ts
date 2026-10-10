@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -346,5 +346,33 @@ describe("workshop (Spec E)", () => {
     expect(l.rows.map((r) => r.id)).toEqual(["o1"]);
     expect(l.totalParts).toBe(100);
     expect(l.grandTotal).toBe(120);
+  });
+});
+
+describe("finance (Spec G)", () => {
+  it("computeFinalPayroll applies the net formula", () => {
+    const r = computeFinalPayroll(
+      { baseSalary: 5000, shiftAllowances: 800, tripFees: 200, advances: 300, penalties: 100 },
+      { bonus: 150, advances: 200, penalties: 50, tolls: 75, notes: "", locked: false },
+    );
+    expect(r.additions).toBe(1150);
+    expect(r.deductions).toBe(500 + 150 + 75);
+    expect(r.net).toBe(5000 + 1150 - 725);
+  });
+
+  it("computeFinalPayroll without adjustments", () => {
+    expect(computeFinalPayroll({ baseSalary: 1000, shiftAllowances: 0, tripFees: 0, advances: 100, penalties: 0 }).net).toBe(900);
+  });
+
+  it("nextInstallment picks the earliest upcoming, else the last", () => {
+    const list = [{ amount: 1, dueDate: "2026-01-10" }, { amount: 2, dueDate: "2026-03-10" }, { amount: 3, dueDate: "2026-02-10" }];
+    expect(nextInstallment(list, "2026-02-01")?.amount).toBe(3);
+    expect(nextInstallment(list, "2026-12-01")?.amount).toBe(2);
+    expect(nextInstallment([])).toBeNull();
+  });
+
+  it("computeClientMonthBalance rolls unpaid balance forward", () => {
+    const r = computeClientMonthBalance(1000, 5000, [{ debit: 0, credit: 2500 }]);
+    expect(r.closing).toBe(3500);
   });
 });

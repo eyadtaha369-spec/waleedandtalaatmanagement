@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, Pencil, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -45,6 +46,11 @@ import {
   updatePayslip,
   deletePayslip,
   fetchAttendanceSummary,
+  fetchClients,
+  fetchSuppliers,
+  PAY_FROM_OPTIONS,
+  type Client,
+  type Supplier,
 } from "@/lib/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -60,6 +66,68 @@ export const Route = createFileRoute("/finance")({
   component: FinancePage,
 });
 
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+/** Searchable client list that also accepts a free-typed account name. */
+function AccountPicker({
+  value,
+  clients,
+  onPick,
+}: {
+  value: string;
+  clients: Client[];
+  onPick: (name: string, clientId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const typed = text.trim();
+  const exact = clients.some((c) => c.name === typed);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between border-border bg-input/60 font-normal">
+          <span className="truncate">{value || "ابحث عن شركة أو اكتب اسم الحساب..."}</span>
+          <ChevronsUpDown className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] min-w-[16rem] p-0" dir="rtl" align="start">
+        <Command>
+          <CommandInput placeholder="ابحث أو اكتب اسمًا جديدًا..." value={text} onValueChange={setText} />
+          <CommandList>
+            <CommandEmpty>لا توجد شركة بهذا الاسم.</CommandEmpty>
+            <CommandGroup>
+              {typed && !exact && (
+                <CommandItem
+                  value={`__free ${typed}`}
+                  onSelect={() => {
+                    onPick(typed, "");
+                    setOpen(false);
+                  }}
+                >
+                  استخدام «{typed}» كاسم حساب
+                </CommandItem>
+              )}
+              {clients.map((c) => (
+                <CommandItem
+                  key={c.id}
+                  value={c.name}
+                  onSelect={() => {
+                    onPick(c.name, c.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check className={`ml-2 h-4 w-4 ${value === c.name ? "opacity-100" : "opacity-0"}`} />
+                  {c.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 type DeleteTarget = { kind: "treasury" | "expense" | "loan" | "payslip"; id: string; label: string } | null;
 
 function FinancePage() {
@@ -73,11 +141,16 @@ function FinancePage() {
   const [saving, setSaving] = useState(false);
 
   const [addingTreasury, setAddingTreasury] = useState(false);
-  const [treasuryForm, setTreasuryForm] = useState({ id: "", account: "", opening: "", deposits: "", withdrawals: "" });
+  const emptyTreasury = () => ({ id: "", date: todayStr(), account: "", clientId: "", opening: "", deposits: "", withdrawals: "", notes: "" });
+  const [treasuryForm, setTreasuryForm] = useState(emptyTreasury);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [addingExpense, setAddingExpense] = useState(false);
-  const [expenseForm, setExpenseForm] = useState({ id: "", category: "", supplier: "", amount: "", supplierBalance: "" });
+  const emptyExpense = () => ({ id: "", date: todayStr(), category: "", supplierId: "", description: "", notes: "", payFrom: "", amount: "" });
+  const [expenseForm, setExpenseForm] = useState(emptyExpense);
   const [addingLoan, setAddingLoan] = useState(false);
-  const [loanForm, setLoanForm] = useState({ id: "", lender: "", total: "", paid: "", installment: "", nextDue: "" });
+  const emptyLoan = () => ({ id: "", lender: "", total: "", installments: [{ amount: "", dueDate: "" }] as { amount: string; dueDate: string }[] });
+  const [loanForm, setLoanForm] = useState(emptyLoan);
   const [addingPayslip, setAddingPayslip] = useState(false);
   const [payslipForm, setPayslipForm] = useState({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
   const [payslipMonth, setPayslipMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -89,7 +162,9 @@ function FinancePage() {
     setLoading(true);
     setError(null);
     try {
-      const [t, e, l, p] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchPayroll()]);
+      const [t, e, l, p, c, sp] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchPayroll(), fetchClients(), fetchSuppliers()]);
+      setClients(c);
+      setSuppliers(sp);
       setTreasury(t);
       setExpenses(e);
       setLoans(l);
@@ -106,75 +181,102 @@ function FinancePage() {
   }, []);
 
   const openAddTreasury = () => {
-    setTreasuryForm({ id: "", account: "", opening: "", deposits: "", withdrawals: "" });
+    setTreasuryForm(emptyTreasury());
     setAddingTreasury(true);
   };
   const openEditTreasury = (t: TreasuryEntry) => {
-    setTreasuryForm({ id: t.id, account: t.account, opening: String(t.opening), deposits: String(t.deposits), withdrawals: String(t.withdrawals) });
+    setTreasuryForm({ id: t.id, date: t.date, account: t.account, clientId: t.clientId, opening: String(t.opening), deposits: String(t.deposits), withdrawals: String(t.withdrawals), notes: t.notes });
     setAddingTreasury(true);
   };
   const submitTreasury = async () => {
-    if (!treasuryForm.account.trim()) return;
+    if (!treasuryForm.account.trim()) return setError("اختر اسم الحساب / الشركة");
     setSaving(true);
+    setError(null);
     try {
-      const payload = { account: treasuryForm.account, opening: Number(treasuryForm.opening) || 0, deposits: Number(treasuryForm.deposits) || 0, withdrawals: Number(treasuryForm.withdrawals) || 0 };
+      const payload = {
+        date: treasuryForm.date,
+        account: treasuryForm.account.trim(),
+        clientId: treasuryForm.clientId,
+        opening: Number(treasuryForm.opening) || 0,
+        deposits: Number(treasuryForm.deposits) || 0,
+        withdrawals: Number(treasuryForm.withdrawals) || 0,
+        notes: treasuryForm.notes,
+      };
       if (treasuryForm.id) await updateTreasuryEntry(treasuryForm.id, payload);
       else await addTreasuryEntry(payload);
       await loadAll();
-      setTreasuryForm({ id: "", account: "", opening: "", deposits: "", withdrawals: "" });
       setAddingTreasury(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ الرصيد");
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر حفظ الرصيد");
     } finally {
       setSaving(false);
     }
   };
 
   const openAddExpense = () => {
-    setExpenseForm({ id: "", category: "", supplier: "", amount: "", supplierBalance: "" });
+    setExpenseForm(emptyExpense());
     setAddingExpense(true);
   };
   const openEditExpense = (e: Expense) => {
-    setExpenseForm({ id: e.id, category: e.category, supplier: e.supplier === "—" ? "" : e.supplier, amount: String(e.amount), supplierBalance: String(e.supplierBalance) });
+    setExpenseForm({ id: e.id, date: e.date, category: e.category, supplierId: e.supplierId, description: e.description, notes: e.notes, payFrom: e.payFrom, amount: String(e.amount) });
     setAddingExpense(true);
   };
   const submitExpense = async () => {
-    if (!expenseForm.category.trim()) return;
+    if (!expenseForm.category.trim()) return setError("اختر البند");
+    if (!(Number(expenseForm.amount) > 0)) return setError("أدخل مبلغ المصروف");
+    if (!expenseForm.payFrom) return setError("اختر طريقة الصرف / صُرفت من");
     setSaving(true);
+    setError(null);
     try {
-      const payload = { category: expenseForm.category, supplier: expenseForm.supplier, amount: Number(expenseForm.amount) || 0, supplierBalance: Number(expenseForm.supplierBalance) || 0 };
+      const payload = {
+        date: expenseForm.date,
+        category: expenseForm.category,
+        supplierId: expenseForm.supplierId === "__none" ? "" : expenseForm.supplierId,
+        description: expenseForm.description,
+        notes: expenseForm.notes,
+        payFrom: expenseForm.payFrom,
+        amount: Number(expenseForm.amount) || 0,
+      };
       if (expenseForm.id) await updateExpense(expenseForm.id, payload);
       else await addExpense(payload);
       await loadAll();
-      setExpenseForm({ id: "", category: "", supplier: "", amount: "", supplierBalance: "" });
       setAddingExpense(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ المصروف");
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر حفظ المصروف");
     } finally {
       setSaving(false);
     }
   };
 
   const openAddLoan = () => {
-    setLoanForm({ id: "", lender: "", total: "", paid: "", installment: "", nextDue: "" });
+    setLoanForm(emptyLoan());
     setAddingLoan(true);
   };
   const openEditLoan = (l: Loan) => {
-    setLoanForm({ id: l.id, lender: l.lender, total: String(l.total), paid: String(l.paid), installment: String(l.installment), nextDue: l.nextDue === "—" ? "" : l.nextDue });
+    setLoanForm({
+      id: l.id,
+      lender: l.lender,
+      total: String(l.total),
+      installments: l.installments.length ? l.installments.map((i) => ({ amount: String(i.amount), dueDate: i.dueDate })) : [{ amount: "", dueDate: "" }],
+    });
     setAddingLoan(true);
   };
   const submitLoan = async () => {
     if (!loanForm.lender.trim()) return;
     setSaving(true);
+    setError(null);
     try {
-      const payload = { lender: loanForm.lender, total: Number(loanForm.total) || 0, paid: Number(loanForm.paid) || 0, installment: Number(loanForm.installment) || 0, nextDue: loanForm.nextDue };
+      const payload = {
+        lender: loanForm.lender,
+        total: Number(loanForm.total) || 0,
+        installments: loanForm.installments.map((i) => ({ amount: Number(i.amount) || 0, dueDate: i.dueDate })),
+      };
       if (loanForm.id) await updateLoan(loanForm.id, payload);
       else await addLoan(payload);
       await loadAll();
-      setLoanForm({ id: "", lender: "", total: "", paid: "", installment: "", nextDue: "" });
       setAddingLoan(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ القرض");
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر حفظ القرض");
     } finally {
       setSaving(false);
     }
@@ -248,7 +350,7 @@ function FinancePage() {
         <TabsList className="no-print mb-4 flex-wrap border border-border bg-secondary/50">
           <TabsTrigger value="treasury">الخزينة والحسابات البنكية</TabsTrigger>
           <TabsTrigger value="expenses">المصروفات والموردون</TabsTrigger>
-          <TabsTrigger value="loans">القروض والالتزامات</TabsTrigger>
+          <TabsTrigger value="loans">أقساط والتزامات وقروض</TabsTrigger>
           <TabsTrigger value="payroll">المرتبات</TabsTrigger>
         </TabsList>
 
@@ -257,7 +359,7 @@ function FinancePage() {
             <Toolbar
               query={query}
               onQuery={setQuery}
-              placeholder="ابحث باسم الحساب..."
+              placeholder="ابحث باسم الحساب أو الشركة..."
               onExport={() => exportToExcel("الخزينة", treasury as unknown as Record<string, string | number>[])}
               extra={
                 <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddTreasury}>
@@ -276,7 +378,11 @@ function FinancePage() {
                   .map((t) => (
                     <tr key={t.id} className="transition-colors hover:bg-secondary/30">
                       <td className="px-4 py-3">{t.date}</td>
-                      <td className="px-4 py-3 font-bold">{t.account}</td>
+                      <td className="px-4 py-3 font-bold">
+                        {t.account}
+                        {t.isRollover && <span className="mr-2 text-xs font-normal text-primary">(ترحيل أول الشهر)</span>}
+                        {t.notes && !t.isRollover && <span className="block text-xs font-normal text-muted-foreground">{t.notes}</span>}
+                      </td>
                       <td className="px-4 py-3">{currency(t.opening)}</td>
                       <td className="px-4 py-3 text-success">{currency(t.deposits)}</td>
                       <td className="px-4 py-3 text-destructive">{currency(t.withdrawals)}</td>
@@ -318,18 +424,23 @@ function FinancePage() {
                 </Button>
               }
             />
-            <DataTable head={["التاريخ", "البند", "المورد", "المبلغ", "رصيد المورد", "الإجراءات"]}>
+            <DataTable head={["التاريخ", "البند", "البيان", "المورد", "صُرفت من", "المبلغ", "رصيد المورد الحالي", "الإجراءات"]}>
               {expenses
-                .filter((e) => (e.supplier + e.category).includes(query) || query === "")
+                .filter((e) => (e.supplier + e.category + e.description).includes(query) || query === "")
                 .map((e) => (
                   <tr key={e.id} className="transition-colors hover:bg-secondary/30">
                     <td className="px-4 py-3">{e.date}</td>
                     <td className="px-4 py-3">
                       <StatusPill label={e.category} tone="info" />
                     </td>
+                    <td className="px-4 py-3">
+                      {e.description || "—"}
+                      {e.notes && <span className="block text-xs text-muted-foreground">{e.notes}</span>}
+                    </td>
                     <td className="px-4 py-3 font-bold">{e.supplier}</td>
+                    <td className="px-4 py-3 text-xs">{e.payFrom || "—"}</td>
                     <td className="px-4 py-3 text-destructive">{currency(e.amount)}</td>
-                    <td className="px-4 py-3 text-warning">{currency(e.supplierBalance)}</td>
+                    <td className="px-4 py-3 text-warning">{e.supplierId ? currency(e.supplierBalance) : "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
                         <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditExpense(e)}>
@@ -352,7 +463,7 @@ function FinancePage() {
         </TabsContent>
 
         <TabsContent value="loans">
-          <Panel title="جدول سداد القروض">
+          <Panel title="أقساط والتزامات وقروض">
             <Toolbar
               query={query}
               onQuery={setQuery}
@@ -360,48 +471,47 @@ function FinancePage() {
               onExport={() => exportToExcel("القروض", loans as unknown as Record<string, string | number>[])}
               extra={
                 <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddLoan}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة قرض
+                  <Plus className="ml-2 h-4 w-4" /> إضافة قسط / قرض
                 </Button>
               }
             />
             <div className="grid gap-4 lg:grid-cols-3">
               {loans
                 .filter((l) => l.lender.includes(query) || query === "")
-                .map((l) => {
-                  const pct = l.total > 0 ? Math.round((l.paid / l.total) * 100) : 0;
-                  return (
-                    <div key={l.id} className="rounded-xl border border-border bg-secondary/25 p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="font-bold">{l.lender}</h3>
-                        <div className="flex items-center gap-1">
-                          <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={() => openEditLoan(l)}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-11 w-11 p-0 text-destructive sm:h-7 sm:w-7 hover:bg-destructive/10"
-                            onClick={() => setDeleteTarget({ kind: "loan", id: l.id, label: `قرض ${l.lender}` })}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground">إجمالي القرض: {currency(l.total)}</p>
-                      <div className="mt-3">
-                        <div className="mb-1 flex justify-between text-xs">
-                          <span className="text-success">المسدد {currency(l.paid)}</span>
-                          <span className="text-warning">المتبقي {currency(l.total - l.paid)}</span>
-                        </div>
-                        <Progress value={pct} className="h-2 bg-muted" />
-                      </div>
-                      <div className="mt-3 flex items-center justify-between text-sm">
-                        <span>القسط الشهري: <b className="text-primary">{currency(l.installment)}</b></span>
-                        <StatusPill label={`الاستحقاق ${l.nextDue}`} tone="warn" />
+                .map((l) => (
+                  <div key={l.id} className="rounded-xl border border-border bg-secondary/25 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="font-bold">{l.lender}</h3>
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={() => openEditLoan(l)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-11 w-11 p-0 text-destructive sm:h-7 sm:w-7 hover:bg-destructive/10"
+                          onClick={() => setDeleteTarget({ kind: "loan", id: l.id, label: `التزام ${l.lender}` })}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
                     </div>
-                  );
-                })}
+                    <p className="mt-2 text-sm text-muted-foreground">الإجمالي: {currency(l.total)}</p>
+                    <ul className="mt-3 space-y-1 text-sm">
+                      {l.installments.length === 0 && <li className="text-muted-foreground">لم تُسجَّل أقساط بعد.</li>}
+                      {l.installments.map((i) => (
+                        <li key={i.id} className="flex items-center justify-between rounded-md border border-border bg-card/60 px-2 py-1">
+                          <span>{i.dueDate}</span>
+                          <b className="text-primary">{currency(i.amount)}</b>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 flex items-center justify-between text-sm">
+                      <span>القسط القادم: <b className="text-primary">{currency(l.installment)}</b></span>
+                      <StatusPill label={`الاستحقاق ${l.nextDue}`} tone="warn" />
+                    </div>
+                  </div>
+                ))}
             </div>
           </Panel>
         </TabsContent>
@@ -458,15 +568,25 @@ function FinancePage() {
       <Dialog open={addingTreasury} onOpenChange={setAddingTreasury}>
         <DialogContent className="glass text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">{treasuryForm.id ? "تعديل رصيد يومي" : "إضافة رصيد يومي"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">أدخل بيانات الحساب لليوم</DialogDescription>
+            <DialogTitle className="text-primary">{treasuryForm.id ? "تعديل رصيد" : "إضافة رصيد"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              عند اختيار شركة، يُرحَّل الإيداع تلقائيًا إلى كشف حسابها بعنوان «تم الاستحقاق ش [التاريخ]». الأرصدة المتبقية تُرحَّل تلقائيًا أول كل شهر.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">اسم الحساب / الشركة</Label>
+              <AccountPicker value={treasuryForm.account} clients={clients} onPick={(name, clientId) => setTreasuryForm({ ...treasuryForm, account: name, clientId })} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">تاريخ إضافة الرصيد</Label>
+              <Input value={treasuryForm.date} onChange={(e) => setTreasuryForm({ ...treasuryForm, date: e.target.value })} type="date" className="border-border bg-input/60" />
+            </div>
             {[
-              ["account", "اسم الحساب"],
               ["opening", "رصيد أول المدة (للحساب الجديد فقط — يُحسب تلقائيًا بعد أول سجل)", "number"],
               ["deposits", "إيداعات", "number"],
               ["withdrawals", "مسحوبات", "number"],
+              ["notes", "ملاحظات"],
             ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>
@@ -488,43 +608,60 @@ function FinancePage() {
       </Dialog>
 
       <Dialog open={addingExpense} onOpenChange={setAddingExpense}>
-        <DialogContent className="glass text-foreground" dir="rtl">
+        <DialogContent className="glass max-h-[90vh] overflow-y-auto text-foreground" dir="rtl">
           <DialogHeader>
             <DialogTitle className="text-primary">{expenseForm.id ? "تعديل المصروف" : "إضافة مصروف"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">أدخل بيانات المصروف والمورد</DialogDescription>
+            <DialogDescription className="text-muted-foreground">
+              يُخصم المبلغ تلقائيًا من الحساب المختار، وعند اختيار مورد يُسجَّل كدفعة ويقل رصيده المستحق.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">البند</Label>
-              <Select value={expenseForm.category} onValueChange={(v) => setExpenseForm({ ...expenseForm, category: v })}>
-                <SelectTrigger className="border-border bg-input/60">
-                  <SelectValue placeholder="اختر البند" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="غاز">غاز</SelectItem>
-                  <SelectItem value="قطع غيار">قطع غيار</SelectItem>
-                  <SelectItem value="موردين">موردين</SelectItem>
-                  <SelectItem value="مرتبات">مرتبات</SelectItem>
-                  <SelectItem value="إداريات">إداريات</SelectItem>
-                  <SelectItem value="مصاريف خارجية">مصاريف خارجية</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {[
-              ["supplier", "المورد"],
-              ["amount", "المبلغ", "number"],
-              ["supplierBalance", "رصيد المورد بعد الدفع", "number"],
-            ].map(([key, label, type]) => (
-              <div key={key} className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">{label}</Label>
-                <Input
-                  value={expenseForm[key as keyof typeof expenseForm]}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, [key]: e.target.value })}
-                  type={type || "text"}
-                  className="border-border bg-input/60"
-                />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">التاريخ</Label>
+                <Input value={expenseForm.date} onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })} type="date" className="border-border bg-input/60" />
               </div>
-            ))}
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">البند</Label>
+                <Select value={expenseForm.category} onValueChange={(v) => setExpenseForm({ ...expenseForm, category: v })}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر البند" /></SelectTrigger>
+                  <SelectContent>
+                    {["غاز", "قطع غيار", "موردين", "مرتبات", "إداريات", "مصاريف خارجية"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">البيان</Label>
+              <Input value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">ملاحظات</Label>
+              <Input value={expenseForm.notes} onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })} className="border-border bg-input/60" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">المورد (اختياري)</Label>
+                <Select value={expenseForm.supplierId || "__none"} onValueChange={(v) => setExpenseForm({ ...expenseForm, supplierId: v === "__none" ? "" : v })}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">بدون مورد</SelectItem>
+                    {suppliers.map((sp) => <SelectItem key={sp.id} value={sp.id}>{sp.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">طريقة الصرف / صُرفت من</Label>
+                <Select value={expenseForm.payFrom} onValueChange={(v) => setExpenseForm({ ...expenseForm, payFrom: v })}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
+                  <SelectContent>{PAY_FROM_OPTIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">المبلغ</Label>
+              <Input value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
+            </div>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitExpense} disabled={saving}>
@@ -535,33 +672,58 @@ function FinancePage() {
       </Dialog>
 
       <Dialog open={addingLoan} onOpenChange={setAddingLoan}>
-        <DialogContent className="glass text-foreground" dir="rtl">
+        <DialogContent className="glass max-h-[90vh] overflow-y-auto text-foreground" dir="rtl">
           <DialogHeader>
-            <DialogTitle className="text-primary">{loanForm.id ? "تعديل القرض" : "إضافة قرض"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">أدخل بيانات القرض والجهة المقرضة</DialogDescription>
+            <DialogTitle className="text-primary">{loanForm.id ? "تعديل الالتزام" : "إضافة قسط / التزام / قرض"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              أضف كل قسط بمبلغه وتاريخه. يصلك تنبيه آخر كل شهر بأقساط الشهر التالي.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            {[
-              ["lender", "الجهة المقرضة"],
-              ["total", "إجمالي القرض", "number"],
-              ["paid", "المسدد حتى الآن", "number"],
-              ["installment", "القسط الشهري", "number"],
-              ["nextDue", "تاريخ الاستحقاق القادم (YYYY-MM-DD)", "date"],
-            ].map(([key, label, type]) => (
-              <div key={key} className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">{label}</Label>
-                <Input
-                  value={loanForm[key as keyof typeof loanForm]}
-                  onChange={(e) => setLoanForm({ ...loanForm, [key]: e.target.value })}
-                  type={type || "text"}
-                  className="border-border bg-input/60"
-                />
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الجهة المقرضة / الالتزام</Label>
+              <Input value={loanForm.lender} onChange={(e) => setLoanForm({ ...loanForm, lender: e.target.value })} className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الإجمالي</Label>
+              <Input value={loanForm.total} onChange={(e) => setLoanForm({ ...loanForm, total: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
+            </div>
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <p className="mb-2 text-xs font-bold text-primary">الأقساط</p>
+              <div className="space-y-2">
+                {loanForm.installments.map((inst, idx) => (
+                  <div key={idx} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">مبلغ القسط</Label>
+                      <Input
+                        value={inst.amount}
+                        onChange={(e) => setLoanForm({ ...loanForm, installments: loanForm.installments.map((x, i) => (i === idx ? { ...x, amount: e.target.value } : x)) })}
+                        type="number" min="0" step="any" className="border-border bg-input/60"
+                      />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">تاريخ القسط</Label>
+                      <Input
+                        value={inst.dueDate}
+                        onChange={(e) => setLoanForm({ ...loanForm, installments: loanForm.installments.map((x, i) => (i === idx ? { ...x, dueDate: e.target.value } : x)) })}
+                        type="date" className="border-border bg-input/60"
+                      />
+                    </div>
+                    <Button type="button" size="sm" variant="ghost" className="h-9 w-9 p-0 text-destructive hover:bg-destructive/10"
+                      onClick={() => setLoanForm({ ...loanForm, installments: loanForm.installments.length > 1 ? loanForm.installments.filter((_, i) => i !== idx) : [{ amount: "", dueDate: "" }] })}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
               </div>
-            ))}
+              <button type="button" className="mt-2 text-sm text-primary hover:underline" onClick={() => setLoanForm({ ...loanForm, installments: [...loanForm.installments, { amount: "", dueDate: "" }] })}>
+                + إضافة قسط
+              </button>
+            </div>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitLoan} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : loanForm.id ? "حفظ التعديلات" : "حفظ القرض"}
+              {saving ? "جارِ الحفظ..." : loanForm.id ? "حفظ التعديلات" : "حفظ"}
             </Button>
           </DialogFooter>
         </DialogContent>

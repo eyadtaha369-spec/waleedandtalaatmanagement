@@ -551,8 +551,18 @@ export function computeBusLedger(
 
 // ---- Finance ----
 
+export interface TreasuryInput {
+  date: string;
+  account: string;
+  clientId: string;
+  opening: number;
+  deposits: number;
+  withdrawals: number;
+  notes: string;
+}
+
 export async function fetchTreasury(): Promise<TreasuryEntry[]> {
-  const { data, error } = await supabase.from("treasury").select("*").order("date", { ascending: false });
+  const { data, error } = await supabase.from("treasury").select("*").order("date", { ascending: false }).order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((t: any) => ({
     id: t.id,
@@ -561,64 +571,134 @@ export async function fetchTreasury(): Promise<TreasuryEntry[]> {
     opening: Number(t.opening ?? 0),
     deposits: Number(t.deposits ?? 0),
     withdrawals: Number(t.withdrawals ?? 0),
+    clientId: t.client_id ?? "",
+    isRollover: !!t.is_rollover,
+    notes: t.notes ?? "",
   }));
 }
 
-export async function addTreasuryEntry(input: { account: string; opening: number; deposits: number; withdrawals: number }) {
-  const { error } = await supabase.from("treasury").insert({
-    account: input.account,
-    opening: input.opening,
-    deposits: input.deposits,
-    withdrawals: input.withdrawals,
-  });
+const treasuryRow = (input: TreasuryInput) => ({
+  date: input.date || undefined,
+  account: input.account,
+  client_id: input.clientId || null,
+  opening: input.opening,
+  deposits: input.deposits,
+  withdrawals: input.withdrawals,
+  notes: input.notes || null,
+});
+
+export async function addTreasuryEntry(input: TreasuryInput) {
+  const { error } = await supabase.from("treasury").insert(treasuryRow(input));
   if (error) throw error;
 }
 
+export interface ExpenseInput {
+  date: string;
+  category: string;
+  supplierId: string;
+  description: string;
+  notes: string;
+  payFrom: string;
+  amount: number;
+}
+
+export const PAY_FROM_OPTIONS = ["الخزينة الرئيسية", "حساب بنكي", "كاش"] as const;
+
 export async function fetchExpenses(): Promise<Expense[]> {
-  const { data, error } = await supabase.from("expenses").select("*").order("date", { ascending: false });
+  const { data, error } = await supabase.from("expenses").select("*, suppliers(supplier_name, balance_due)").order("date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((e: any) => ({
     id: e.id,
     date: e.date,
     category: e.category,
-    supplier: e.supplier ?? "—",
+    supplier: e.suppliers?.supplier_name ?? e.supplier ?? "—",
+    supplierId: e.supplier_id ?? "",
     amount: Number(e.amount ?? 0),
-    supplierBalance: Number(e.supplier_balance ?? 0),
+    supplierBalance: Number(e.suppliers?.balance_due ?? e.supplier_balance ?? 0),
+    description: e.description ?? "",
+    notes: e.notes ?? "",
+    payFrom: e.pay_from ?? "",
   }));
 }
 
-export async function addExpense(input: { category: string; supplier: string; amount: number; supplierBalance: number }) {
-  const { error } = await supabase.from("expenses").insert({
+const expenseRow = async (input: ExpenseInput) => {
+  let supplierName: string | null = null;
+  if (input.supplierId) {
+    const { data } = await supabase.from("suppliers").select("supplier_name").eq("id", input.supplierId).maybeSingle();
+    supplierName = data?.supplier_name ?? null;
+  }
+  return {
+    date: input.date || undefined,
     category: input.category,
-    supplier: input.supplier,
+    supplier: supplierName,
+    supplier_id: input.supplierId || null,
+    description: input.description || null,
+    notes: input.notes || null,
+    pay_from: input.payFrom || null,
     amount: input.amount,
-    supplier_balance: input.supplierBalance,
-  });
+  };
+};
+
+/** Saving also (via database trigger) deducts the amount from the chosen treasury account and, for a supplier, posts a payment. */
+export async function addExpense(input: ExpenseInput) {
+  const { error } = await supabase.from("expenses").insert(await expenseRow(input));
   if (error) throw error;
+}
+
+export interface LoanInput {
+  lender: string;
+  total: number;
+  installments: { amount: number; dueDate: string }[];
+}
+
+/** Earliest installment due today or later (falls back to the last one). */
+export function nextInstallment(installments: { amount: number; dueDate: string }[], today = new Date().toISOString().slice(0, 10)) {
+  const sorted = [...installments].filter((i) => i.dueDate).sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+  return sorted.find((i) => i.dueDate >= today) ?? sorted[sorted.length - 1] ?? null;
 }
 
 export async function fetchLoans(): Promise<Loan[]> {
-  const { data, error } = await supabase.from("loans").select("*").order("next_due");
+  const [{ data, error }, { data: inst, error: e2 }] = await Promise.all([
+    supabase.from("loans").select("*").order("created_at"),
+    supabase.from("loan_installments").select("*").order("due_date"),
+  ]);
   if (error) throw error;
-  return (data ?? []).map((l: any) => ({
-    id: l.id,
-    lender: l.lender,
-    total: Number(l.total ?? 0),
-    paid: Number(l.paid ?? 0),
-    installment: Number(l.installment ?? 0),
-    nextDue: l.next_due ?? "—",
-  }));
+  if (e2) throw e2;
+  return (data ?? []).map((l: any) => {
+    const installments = (inst ?? [])
+      .filter((i: any) => i.loan_id === l.id)
+      .map((i: any) => ({ id: i.id, amount: Number(i.amount ?? 0), dueDate: i.due_date as string }));
+    const next = nextInstallment(installments);
+    return {
+      id: l.id,
+      lender: l.lender,
+      total: Number(l.total ?? 0),
+      installment: next?.amount ?? Number(l.installment ?? 0),
+      nextDue: next?.dueDate ?? l.next_due ?? "—",
+      installments,
+    };
+  });
 }
 
-export async function addLoan(input: { lender: string; total: number; paid: number; installment: number; nextDue: string }) {
-  const { error } = await supabase.from("loans").insert({
-    lender: input.lender,
-    total: input.total,
-    paid: input.paid,
-    installment: input.installment,
-    next_due: input.nextDue || null,
-  });
+async function saveLoanInstallments(loanId: string, installments: LoanInput["installments"]) {
+  const { error: delErr } = await supabase.from("loan_installments").delete().eq("loan_id", loanId);
+  if (delErr) throw delErr;
+  const rows = installments.filter((i) => i.dueDate && i.amount > 0).map((i) => ({ loan_id: loanId, amount: i.amount, due_date: i.dueDate }));
+  if (rows.length) {
+    const { error } = await supabase.from("loan_installments").insert(rows);
+    if (error) throw error;
+  }
+}
+
+const loanSummary = (input: LoanInput) => {
+  const next = nextInstallment(input.installments);
+  return { lender: input.lender, total: input.total, installment: next?.amount ?? 0, next_due: next?.dueDate ?? null };
+};
+
+export async function addLoan(input: LoanInput) {
+  const { data, error } = await supabase.from("loans").insert(loanSummary(input)).select("id").single();
   if (error) throw error;
+  await saveLoanInstallments(data.id, input.installments);
 }
 
 export async function addPayslip(input: { employeeName: string; role: string; baseSalary: number; overtime: number; advances: number; penalties: number }) {
@@ -1116,6 +1196,58 @@ export async function fetchDriverPayroll(monthPrefix: string): Promise<DriverPay
   );
 }
 
+// ---- Payroll adjustments + final net formula ----
+
+export type PayrollSubjectType = "driver" | "employee";
+
+export interface PayrollAdjustment {
+  bonus: number;
+  advances: number;
+  penalties: number;
+  tolls: number;
+  notes: string;
+  locked: boolean;
+}
+
+export const EMPTY_ADJUSTMENT: PayrollAdjustment = { bonus: 0, advances: 0, penalties: 0, tolls: 0, notes: "", locked: false };
+
+/**
+ * Net = base + shift allowances + trip fees + bonus - (advances + penalties + tolls/karta fees)
+ * `advances`/`penalties` combine the daily records with the month adjustment.
+ */
+export function computeFinalPayroll(
+  row: { baseSalary: number; shiftAllowances: number; tripFees: number; advances: number; penalties: number },
+  adj: PayrollAdjustment = EMPTY_ADJUSTMENT,
+) {
+  const additions = row.shiftAllowances + row.tripFees + adj.bonus;
+  const advances = row.advances + adj.advances;
+  const penalties = row.penalties + adj.penalties;
+  const tolls = adj.tolls;
+  const deductions = advances + penalties + tolls;
+  return { baseSalary: row.baseSalary, shiftAllowances: row.shiftAllowances, tripFees: row.tripFees, bonus: adj.bonus, advances, penalties, tolls, additions, deductions, net: row.baseSalary + additions - deductions };
+}
+
+export const adjustmentKey = (type: PayrollSubjectType, id: string) => `${type}:${id}`;
+
+export async function fetchPayrollAdjustments(month: string): Promise<Map<string, PayrollAdjustment>> {
+  const { data, error } = await supabase.from("payroll_adjustments").select("*").eq("month", month);
+  if (error) throw error;
+  return new Map(
+    (data ?? []).map((r: any) => [
+      adjustmentKey(r.subject_type, r.subject_id),
+      { bonus: Number(r.bonus ?? 0), advances: Number(r.advances ?? 0), penalties: Number(r.penalties ?? 0), tolls: Number(r.tolls ?? 0), notes: r.notes ?? "", locked: !!r.locked },
+    ]),
+  );
+}
+
+export async function savePayrollAdjustment(type: PayrollSubjectType, id: string, month: string, adj: PayrollAdjustment) {
+  const { error } = await supabase.from("payroll_adjustments").upsert(
+    { subject_type: type, subject_id: id, month, bonus: adj.bonus, advances: adj.advances, penalties: adj.penalties, tolls: adj.tolls, notes: adj.notes || null, locked: adj.locked },
+    { onConflict: "subject_type,subject_id,month" },
+  );
+  if (error) throw error;
+}
+
 // ---- Client ledger & statement (Module 2) ----
 
 export interface LedgerEntry {
@@ -1298,13 +1430,8 @@ export async function deleteFuelLog(id: string) {
   if (error) throw error;
 }
 
-export async function updateTreasuryEntry(id: string, input: { account: string; opening: number; deposits: number; withdrawals: number }) {
-  const { error } = await supabase.from("treasury").update({
-    account: input.account,
-    opening: input.opening,
-    deposits: input.deposits,
-    withdrawals: input.withdrawals,
-  }).eq("id", id);
+export async function updateTreasuryEntry(id: string, input: TreasuryInput) {
+  const { error } = await supabase.from("treasury").update(treasuryRow(input)).eq("id", id);
   if (error) throw error;
 }
 export async function deleteTreasuryEntry(id: string) {
@@ -1312,13 +1439,8 @@ export async function deleteTreasuryEntry(id: string) {
   if (error) throw error;
 }
 
-export async function updateExpense(id: string, input: { category: string; supplier: string; amount: number; supplierBalance: number }) {
-  const { error } = await supabase.from("expenses").update({
-    category: input.category,
-    supplier: input.supplier,
-    amount: input.amount,
-    supplier_balance: input.supplierBalance,
-  }).eq("id", id);
+export async function updateExpense(id: string, input: ExpenseInput) {
+  const { error } = await supabase.from("expenses").update(await expenseRow(input)).eq("id", id);
   if (error) throw error;
 }
 export async function deleteExpense(id: string) {
@@ -1326,15 +1448,10 @@ export async function deleteExpense(id: string) {
   if (error) throw error;
 }
 
-export async function updateLoan(id: string, input: { lender: string; total: number; paid: number; installment: number; nextDue: string }) {
-  const { error } = await supabase.from("loans").update({
-    lender: input.lender,
-    total: input.total,
-    paid: input.paid,
-    installment: input.installment,
-    next_due: input.nextDue || null,
-  }).eq("id", id);
+export async function updateLoan(id: string, input: LoanInput) {
+  const { error } = await supabase.from("loans").update(loanSummary(input)).eq("id", id);
   if (error) throw error;
+  await saveLoanInstallments(id, input.installments);
 }
 export async function deleteLoan(id: string) {
   const { error } = await supabase.from("loans").delete().eq("id", id);
@@ -1574,6 +1691,44 @@ export function computeClientInvoiceSummary(rows: ClientInvoiceRow[]) {
     totalBusesDeployed: new Set(rows.map((r) => r.busCode)).size,
     totalDue: rows.reduce((sum, r) => sum + r.amount, 0),
   };
+}
+
+// ---- Client statement: ledger postings + month-to-month carry-forward ----
+
+export interface ClientLedgerPosting {
+  id: string;
+  date: string;
+  description: string;
+  debit: number;
+  credit: number;
+}
+
+/** Balance still owed by the client = dues - credits. Anything unpaid rolls into the next month's opening balance. */
+export function computeClientMonthBalance(opening: number, monthDues: number, postings: { debit: number; credit: number }[]) {
+  const debits = postings.reduce((s, p) => s + p.debit, 0);
+  const credits = postings.reduce((s, p) => s + p.credit, 0);
+  return { opening, monthDues, debits, credits, closing: opening + monthDues + debits - credits };
+}
+
+export async function fetchClientStatementExtras(clientName: string, monthPrefix: string): Promise<{ opening: number; postings: ClientLedgerPosting[] }> {
+  const { data: client } = await supabase.from("clients").select("id").eq("client_name", clientName).maybeSingle();
+  if (!client) return { opening: 0, postings: [] };
+  const start = `${monthPrefix}-01`;
+  const end = `${nextMonthPrefix(monthPrefix)}-01`;
+  const [{ data: priorShifts, error: e1 }, { data: entries, error: e2 }] = await Promise.all([
+    supabase.from("dispatch_shifts").select("bus_value").eq("client_id", client.id).lt("op_date", start),
+    supabase.from("client_ledger_entries").select("*").eq("client_id", client.id).order("entry_date"),
+  ]);
+  if (e1) throw e1;
+  if (e2) throw e2;
+  const prior = (entries ?? []).filter((e: any) => e.entry_date < start);
+  const opening =
+    (priorShifts ?? []).reduce((s: number, r: any) => s + Number(r.bus_value ?? 0), 0) +
+    prior.reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0);
+  const postings = (entries ?? [])
+    .filter((e: any) => e.entry_date >= start && e.entry_date < end)
+    .map((e: any) => ({ id: e.id, date: e.entry_date, description: e.description, debit: Number(e.debit ?? 0), credit: Number(e.credit ?? 0) }));
+  return { opening, postings };
 }
 
 // ---- Executive P&L ----

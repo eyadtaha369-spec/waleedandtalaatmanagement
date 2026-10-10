@@ -33,6 +33,9 @@ import {
   updateClient,
   deleteClient,
   fetchClientInvoiceRows,
+  fetchClientStatementExtras,
+  computeClientMonthBalance,
+  type ClientLedgerPosting,
   computeClientInvoiceSummary,
   fetchClientRoutes,
   addClientRoute,
@@ -67,6 +70,7 @@ function ClientsPage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [invoiceRows, setInvoiceRows] = useState<ClientInvoiceRow[]>([]);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [extras, setExtras] = useState<{ opening: number; postings: ClientLedgerPosting[] }>({ opening: 0, postings: [] });
 
   const [routesFor, setRoutesFor] = useState<Client | null>(null);
   const [clientRoutes, setClientRoutes] = useState<ClientRoute[]>([]);
@@ -96,6 +100,9 @@ function ClientsPage() {
       return;
     }
     setInvoiceLoading(true);
+    fetchClientStatementExtras(selectedClient, month)
+      .then(setExtras)
+      .catch(() => setExtras({ opening: 0, postings: [] }));
     fetchClientInvoiceRows(selectedClient, month)
       .then(setInvoiceRows)
       .catch((e) => setError(e instanceof Error ? e.message : "تعذر تحميل كشف الحساب"))
@@ -179,6 +186,7 @@ function ClientsPage() {
   };
 
   const summary = computeClientInvoiceSummary(invoiceRows);
+  const balance = computeClientMonthBalance(extras.opening, summary.totalDue, extras.postings);
   const filteredClients = clients.filter((c) => (c.name + c.phone).includes(query) || query === "");
 
   return (
@@ -222,10 +230,12 @@ function ClientsPage() {
 
           {selectedClient && (
             <>
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <div className="mt-4 grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
                 <StatCard label="عدد الورديات" value={`${summary.totalShifts} وردية`} icon={Receipt} />
                 <StatCard label="عدد الأتوبيسات المشتغلة" value={`${summary.totalBusesDeployed} أتوبيس`} icon={Bus} />
                 <StatCard label="إجمالي المطالبة المستحقة" value={currency(summary.totalDue)} icon={FileText} />
+                <StatCard label="رصيد أول المدة (مرحّل)" value={currency(balance.opening)} icon={FileText} />
+                <StatCard label="المتبقي آخر الشهر (يُرحَّل للشهر التالي)" value={currency(balance.closing)} icon={FileText} />
               </div>
 
               <Panel title={`كشف حساب: ${selectedClient}`} className="mt-4">
@@ -257,6 +267,25 @@ function ClientsPage() {
                         <td className="px-4 py-3">{r.driver}</td>
                         <td className="px-4 py-3">{r.route || "—"}</td>
                         <td className="px-4 py-3 font-bold text-success">{currency(r.amount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </DataTable>
+              </Panel>
+
+              <Panel title="قيود الحساب (من الخزينة)" className="mt-4">
+                <DataTable head={["التاريخ", "البيان", "مدين", "دائن"]}>
+                  {extras.postings.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-4 text-center text-muted-foreground">لا توجد قيود هذا الشهر.</td>
+                    </tr>
+                  ) : (
+                    extras.postings.map((p) => (
+                      <tr key={p.id} className="transition-colors hover:bg-secondary/30">
+                        <td className="px-4 py-3">{p.date}</td>
+                        <td className="px-4 py-3">{p.description}</td>
+                        <td className="px-4 py-3 text-destructive">{p.debit ? currency(p.debit) : "—"}</td>
+                        <td className="px-4 py-3 text-success">{p.credit ? currency(p.credit) : "—"}</td>
                       </tr>
                     ))
                   )}

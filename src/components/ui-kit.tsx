@@ -64,7 +64,7 @@ export function StatCard({
           <p className="mt-2 text-2xl font-extrabold text-gold-gradient">{value}</p>
           {hint ? <p className="mt-2 text-xs text-muted-foreground">{hint}</p> : null}
         </div>
-        <span className="rounded-xl border border-primary/40 bg-primary/10 p-2.5 shadow-[0_0_16px_rgba(212,175,55,0.2)] transition-shadow group-hover:shadow-[0_0_24px_rgba(212,175,55,0.45)]">
+        <span className="rounded-xl border border-primary/40 bg-primary/10 p-2.5 shadow-[0_0_16px_rgba(59,130,246,0.2)] transition-shadow group-hover:shadow-[0_0_24px_rgba(59,130,246,0.45)]">
           <Icon className="h-5 w-5 text-primary" />
         </span>
       </div>

@@ -84,11 +84,11 @@ function NavList({
             className={cn(
               "flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
               active
-                ? "border border-primary/40 bg-primary/12 text-primary"
+                ? "border border-sidebar-primary/40 bg-sidebar-primary/15 text-sidebar-primary"
                 : "text-sidebar-foreground hover:bg-sidebar-accent",
             )}
           >
-            <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "text-primary/70")} />
+            <item.icon className={cn("h-5 w-5 shrink-0", active ? "text-sidebar-primary" : "text-sidebar-primary/70")} />
             {showLabels && <span>{item.label}</span>}
           </Link>
         );
@@ -183,8 +183,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           <LogoCrest size={46} />
           {open && (
             <div className="leading-tight">
-              <p className="text-sm font-extrabold text-gold-gradient">وليد وطلعت</p>
-              <p className="text-[11px] text-muted-foreground">إدارة التشغيل والأسطول</p>
+              <p className="text-sm font-extrabold text-gold-metal">وليد وطلعت</p>
+              <p className="text-[11px] text-sidebar-foreground/70">إدارة التشغيل والأسطول</p>
             </div>
           )}
         </div>
@@ -192,7 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <NavList items={visibleNav} pathname={pathname} showLabels={open} />
 
         {open && (
-          <div className="m-3 rounded-xl border border-primary/30 bg-primary/8 p-3 text-xs text-muted-foreground">
+          <div className="m-3 rounded-xl border border-sidebar-border bg-sidebar-accent/60 p-3 text-xs text-sidebar-foreground/80">
             شركة وليد وطلعت لخدمات النقل والرحلات
           </div>
         )}
@@ -203,8 +203,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
             <LogoCrest size={46} />
             <div className="leading-tight">
-              <p className="text-sm font-extrabold text-gold-gradient">وليد وطلعت</p>
-              <p className="text-[11px] text-muted-foreground">إدارة التشغيل والأسطول</p>
+              <p className="text-sm font-extrabold text-gold-metal">وليد وطلعت</p>
+              <p className="text-[11px] text-sidebar-foreground/70">إدارة التشغيل والأسطول</p>
             </div>
           </div>
           <NavList items={visibleNav} pathname={pathname} showLabels onNavigate={() => setMobileNavOpen(false)} />
@@ -212,7 +212,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </Sheet>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-amber-500/20 bg-background/70 px-4 py-3 backdrop-blur-md">
+        <header className="no-print sticky top-0 z-20 flex items-center gap-3 border-b border-primary/20 bg-background/70 px-4 py-3 backdrop-blur-md">
           <button
             onClick={() => setMobileNavOpen(true)}
             className="flex h-11 w-11 items-center justify-center rounded-lg border border-border text-primary hover:bg-accent md:hidden"
@@ -256,7 +256,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="mr-auto flex items-center gap-3">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="relative rounded-lg border border-amber-500/30 bg-card/60 p-2 transition-shadow hover:shadow-[0_0_14px_rgba(212,175,55,0.3)]">
+                <button className="relative rounded-lg border border-primary/30 bg-card/80 p-2 transition-shadow hover:shadow-[0_0_14px_rgba(59,130,246,0.35)]">
                   <Bell className="h-5 w-5 text-primary" />
                   {alerts.length > 0 && (
                     <span className="pulse-badge absolute -left-1 -top-1 rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, applySupplierRange } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -374,5 +374,37 @@ describe("finance (Spec G)", () => {
   it("computeClientMonthBalance rolls unpaid balance forward", () => {
     const r = computeClientMonthBalance(1000, 5000, [{ debit: 0, credit: 2500 }]);
     expect(r.closing).toBe(3500);
+  });
+});
+
+describe("date ranges and rented ledger", () => {
+  it("periodBounds handles month and range", () => {
+    expect(periodBounds("2026-10")).toEqual({ start: "2026-10-01", end: "2026-11-01" });
+    expect(periodBounds({ from: "2026-10-05", to: "2026-10-31" })).toEqual({ start: "2026-10-05", end: "2026-11-01" });
+  });
+  it("periodMonths lists touched months", () => {
+    expect(periodMonths({ from: "2026-10-20", to: "2026-12-02" })).toEqual(["2026-10", "2026-11", "2026-12"]);
+    expect(periodMonths("2026-10")).toEqual(["2026-10"]);
+  });
+  it("rangeForPreset", () => {
+    expect(rangeForPreset("current", "2026-10-11")).toEqual({ from: "2026-10-01", to: "2026-10-31" });
+    expect(rangeForPreset("previous", "2026-01-15")).toEqual({ from: "2025-12-01", to: "2025-12-31" });
+    expect(rangeForPreset("all")).toEqual({ from: "", to: "" });
+  });
+  it("inDateRange is inclusive", () => {
+    expect(inDateRange("2026-10-01", { from: "2026-10-01", to: "2026-10-01" })).toBe(true);
+    expect(inDateRange("2026-10-02", { from: "2026-10-01", to: "2026-10-01" })).toBe(false);
+  });
+  it("computeRentedLedger totals and filters", () => {
+    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", gasCost: 10, fare, paid, paidAt: "", notes: "" });
+    const ops = [mk("1", "2026-10-01", "B1", 100, true), mk("2", "2026-10-05", "B1", 200, false), mk("3", "2026-09-05", "B2", 50, false)];
+    const l = computeRentedLedger(ops, { owner: "أ", bus: "", range: { from: "2026-10-01", to: "2026-10-31" } });
+    expect([l.totalDue, l.totalPaid, l.remaining, l.totalGas, l.unpaidIds]).toEqual([300, 100, 200, 20, ["2"]]);
+    expect(computeRentedLedger(ops, { owner: "أ", bus: "B2", range: { from: "", to: "" } }).remaining).toBe(50);
+  });
+  it("applySupplierRange carries opening balance", () => {
+    const e = (date: string, w: number, p: number) => ({ id: date, source: "payment" as const, date, kind: "سداد" as const, reference: "", description: "", withdrawals: w, payments: p, attachmentPath: null });
+    const out = applySupplierRange([e("2026-09-01", 500, 0), e("2026-10-02", 100, 0)], { from: "2026-10-01", to: "2026-10-31" });
+    expect(out.map((x) => x.withdrawals)).toEqual([500, 100]);
   });
 });

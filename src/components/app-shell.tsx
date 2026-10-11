@@ -18,6 +18,7 @@ import {
   Wallet,
   Wrench,
   Bell,
+  Car,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ const nav = [
   { to: "/", label: "لوحة التحكّم", icon: LayoutDashboard, roles: null },
   { to: "/fleet", label: "الأسطول والسائقون", icon: Bus, roles: null },
   { to: "/dispatch", label: "الحركة والورديات اليومية", icon: Truck, roles: ["admin", "accountant", "dispatcher"] },
+  { to: "/rented", label: "السيارات المستأجرة", icon: Car, roles: ["admin", "accountant", "dispatcher"] },
   { to: "/trips", label: "إدارة الرحلات والتنبيهات", icon: MapPinned, roles: ["admin", "accountant", "dispatcher"] },
   { to: "/operations", label: "الطلاب والاشتراكات", icon: RouteIcon, roles: null },
   { to: "/clients", label: "كشف حساب الشركات", icon: Building2, roles: ["admin", "accountant"] },

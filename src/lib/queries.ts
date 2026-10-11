@@ -824,6 +824,62 @@ export function nextMonthPrefix(monthPrefix: string): string {
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+// ---- Date ranges (shared by every statement) ----
+
+/** Inclusive date range (YYYY-MM-DD). An empty bound means "open". */
+export interface DateRange {
+  from: string;
+  to: string;
+}
+/** A calendar month ("YYYY-MM") or an explicit date range. */
+export type Period = string | DateRange;
+
+const addDaysIso = (iso: string, days: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+/** [start, end) bounds for `.gte(start).lt(end)` queries. */
+export function periodBounds(p: Period): { start: string; end: string } {
+  if (typeof p === "string") return { start: `${p}-01`, end: `${nextMonthPrefix(p)}-01` };
+  return { start: p.from || "1900-01-01", end: p.to ? addDaysIso(p.to, 1) : "2999-12-31" };
+}
+
+/** Calendar months touched by the period (used for monthly base salaries and adjustments). */
+export function periodMonths(p: Period): string[] {
+  if (typeof p === "string") return [p];
+  if (!p.from || !p.to) return [(p.from || p.to || new Date().toISOString().slice(0, 10)).slice(0, 7)];
+  const out: string[] = [];
+  let m = p.from.slice(0, 7);
+  const last = p.to.slice(0, 7);
+  while (m <= last && out.length < 600) {
+    out.push(m);
+    m = nextMonthPrefix(m);
+  }
+  return out;
+}
+
+export type RangePreset = "current" | "previous" | "all";
+
+export function rangeForPreset(preset: RangePreset, today = new Date().toISOString().slice(0, 10)): DateRange {
+  const cur = today.slice(0, 7);
+  if (preset === "all") return { from: "", to: "" };
+  if (preset === "current") return { from: `${cur}-01`, to: addDaysIso(`${nextMonthPrefix(cur)}-01`, -1) };
+  const prev = addDaysIso(`${cur}-01`, -1).slice(0, 7);
+  return { from: `${prev}-01`, to: addDaysIso(`${cur}-01`, -1) };
+}
+
+export function inDateRange(date: string, r: DateRange) {
+  return (!r.from || date >= r.from) && (!r.to || date <= r.to);
+}
+
+export function periodLabel(p: Period): string {
+  if (typeof p === "string") return p;
+  if (!p.from && !p.to) return "كل الفترات";
+  return `${p.from || "البداية"} إلى ${p.to || "اليوم"}`;
+}
+
 export async function fetchAttendanceSummary(driverName: string, monthPrefix: string) {
   const { data, error } = await supabase
     .from("attendance")
@@ -1046,12 +1102,13 @@ export interface DailyShift {
   notes: string;
 }
 
-export async function fetchDailyShifts(monthPrefix: string): Promise<DailyShift[]> {
+export async function fetchDailyShifts(period: Period): Promise<DailyShift[]> {
+  const { start, end } = periodBounds(period);
   const { data, error } = await supabase
     .from("attendance")
     .select("*, drivers(name), buses(bus_code), routes(route_name)")
-    .gte("date", `${monthPrefix}-01`)
-    .lt("date", `${nextMonthPrefix(monthPrefix)}-01`)
+    .gte("date", start)
+    .lt("date", end)
     .order("date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((a: any) => ({
@@ -1179,17 +1236,17 @@ export function computeDriverPayroll(
   });
 }
 
-export async function fetchDriverPayroll(monthPrefix: string): Promise<DriverPayrollRow[]> {
-  const nextMonth = nextMonthPrefix(monthPrefix);
+export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollRow[]> {
+  const { start, end } = periodBounds(period);
   const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts] = await Promise.all([
     supabase.from("drivers").select("name, base_salary"),
-    fetchDailyShifts(monthPrefix),
-    supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", `${monthPrefix}-01`).lt("trip_date", `${nextMonth}-01`),
-    fetchDispatchShifts(monthPrefix),
+    fetchDailyShifts(period),
+    supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
+    fetchDispatchShifts(period),
   ]);
   if (dErr) throw dErr;
   return computeDriverPayroll(
-    (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) })),
+    (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) * periodMonths(period).length })),
     shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty })),
     (tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
     dispatchShifts.map((o) => ({ driver: o.driver, value: o.driverValue })),
@@ -1229,14 +1286,26 @@ export function computeFinalPayroll(
 
 export const adjustmentKey = (type: PayrollSubjectType, id: string) => `${type}:${id}`;
 
-export async function fetchPayrollAdjustments(month: string): Promise<Map<string, PayrollAdjustment>> {
-  const { data, error } = await supabase.from("payroll_adjustments").select("*").eq("month", month);
+/** Adjustments for every month the period touches, summed per person (locked only if all of them are locked). */
+export async function fetchPayrollAdjustments(period: Period): Promise<Map<string, PayrollAdjustment>> {
+  const months = periodMonths(period);
+  const { data, error } = await supabase.from("payroll_adjustments").select("*").in("month", months);
   if (error) throw error;
+  const out = new Map<string, PayrollAdjustment & { n: number; lockedN: number }>();
+  for (const r of data ?? []) {
+    const key = adjustmentKey((r as any).subject_type, (r as any).subject_id);
+    const cur = out.get(key) ?? { ...EMPTY_ADJUSTMENT, n: 0, lockedN: 0 };
+    cur.bonus += Number((r as any).bonus ?? 0);
+    cur.advances += Number((r as any).advances ?? 0);
+    cur.penalties += Number((r as any).penalties ?? 0);
+    cur.tolls += Number((r as any).tolls ?? 0);
+    cur.notes = cur.notes || ((r as any).notes ?? "");
+    cur.n += 1;
+    if ((r as any).locked) cur.lockedN += 1;
+    out.set(key, cur);
+  }
   return new Map(
-    (data ?? []).map((r: any) => [
-      adjustmentKey(r.subject_type, r.subject_id),
-      { bonus: Number(r.bonus ?? 0), advances: Number(r.advances ?? 0), penalties: Number(r.penalties ?? 0), tolls: Number(r.tolls ?? 0), notes: r.notes ?? "", locked: !!r.locked },
-    ]),
+    [...out.entries()].map(([k, v]) => [k, { bonus: v.bonus, advances: v.advances, penalties: v.penalties, tolls: v.tolls, notes: v.notes, locked: v.n > 0 && v.lockedN === v.n }]),
   );
 }
 
@@ -1565,12 +1634,13 @@ function mapShift(o: any): DispatchShift {
   };
 }
 
-export async function fetchDispatchShifts(monthPrefix: string): Promise<DispatchShift[]> {
+export async function fetchDispatchShifts(period: Period): Promise<DispatchShift[]> {
+  const { start, end } = periodBounds(period);
   const { data, error } = await supabase
     .from("dispatch_shifts")
     .select(SHIFT_SELECT)
-    .gte("op_date", `${monthPrefix}-01`)
-    .lt("op_date", `${nextMonthPrefix(monthPrefix)}-01`)
+    .gte("op_date", start)
+    .lt("op_date", end)
     .order("op_date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map(mapShift);
@@ -1678,8 +1748,9 @@ export interface ClientInvoiceRow {
   amount: number;
 }
 
-export async function fetchClientInvoiceRows(clientName: string, monthPrefix: string): Promise<ClientInvoiceRow[]> {
-  const shifts = await fetchDispatchShifts(monthPrefix);
+export async function fetchClientInvoiceRows(clientName: string, period: Period): Promise<ClientInvoiceRow[]> {
+  const { start, end } = periodBounds(period);
+  const shifts = await fetchDispatchShifts(period);
   return shifts
     .filter((o) => o.client === clientName)
     .map((o) => ({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route, amount: o.busValue }));
@@ -1710,11 +1781,10 @@ export function computeClientMonthBalance(opening: number, monthDues: number, po
   return { opening, monthDues, debits, credits, closing: opening + monthDues + debits - credits };
 }
 
-export async function fetchClientStatementExtras(clientName: string, monthPrefix: string): Promise<{ opening: number; postings: ClientLedgerPosting[] }> {
+export async function fetchClientStatementExtras(clientName: string, period: Period): Promise<{ opening: number; postings: ClientLedgerPosting[] }> {
+  const { start, end } = periodBounds(period);
   const { data: client } = await supabase.from("clients").select("id").eq("client_name", clientName).maybeSingle();
   if (!client) return { opening: 0, postings: [] };
-  const start = `${monthPrefix}-01`;
-  const end = `${nextMonthPrefix(monthPrefix)}-01`;
   const [{ data: priorShifts, error: e1 }, { data: entries, error: e2 }] = await Promise.all([
     supabase.from("dispatch_shifts").select("bus_value").eq("client_id", client.id).lt("op_date", start),
     supabase.from("client_ledger_entries").select("*").eq("client_id", client.id).order("entry_date"),
@@ -1825,19 +1895,20 @@ export function computeEmployeePayroll(
     });
 }
 
-export async function fetchEmployeePayroll(monthPrefix: string): Promise<EmployeePayrollRow[]> {
-  const nextMonth = nextMonthPrefix(monthPrefix);
+export async function fetchEmployeePayroll(period: Period): Promise<EmployeePayrollRow[]> {
+  const { start, end } = periodBounds(period);
   const [employees, { data, error }] = await Promise.all([
     fetchEmployees(),
     supabase
       .from("employee_attendance")
       .select("allowance, advance, penalty, employees(name)")
-      .gte("date", `${monthPrefix}-01`)
-      .lt("date", `${nextMonth}-01`),
+      .gte("date", start)
+      .lt("date", end),
   ]);
   if (error) throw error;
+  const monthsCount = periodMonths(period).length;
   return computeEmployeePayroll(
-    employees,
+    employees.map((e) => ({ ...e, baseSalary: e.baseSalary * monthsCount })),
     (data ?? []).map((r: any) => ({
       employeeName: r.employees?.name ?? "",
       allowance: Number(r.allowance ?? 0),
@@ -2090,9 +2161,9 @@ export async function getInvoiceAttachmentUrl(path: string): Promise<string> {
 
 export interface SupplierLedgerEntry {
   id: string;
-  source: "inventory" | "invoice" | "payment";
+  source: "inventory" | "invoice" | "payment" | "opening";
   date: string;
-  kind: "شراء" | "فاتورة" | "سداد";
+  kind: "شراء" | "فاتورة" | "سداد" | "رصيد سابق";
   reference: string;
   description: string;
   withdrawals: number; // المسحوبات (الصادر)
@@ -2155,6 +2226,19 @@ export async function fetchSupplierLedger(supplierId: string): Promise<SupplierL
 }
 
 /** Orders entries oldest-first and attaches a running balance (المتبقي) to each. */
+/** Restrict a supplier ledger to a date range; earlier activity is carried in as one opening-balance row. */
+export function applySupplierRange(entries: SupplierLedgerEntry[], range: DateRange): SupplierLedgerEntry[] {
+  const inside = entries.filter((e) => inDateRange(e.date, range));
+  if (!range.from) return inside;
+  const opening = entries.filter((e) => e.date < range.from).reduce((a, e) => a + e.withdrawals - e.payments, 0);
+  if (!opening) return inside;
+  const row: SupplierLedgerEntry = {
+    id: "opening", source: "opening", date: range.from, kind: "رصيد سابق", reference: "", description: "رصيد مرحَّل من قبل الفترة",
+    withdrawals: opening > 0 ? opening : 0, payments: opening < 0 ? -opening : 0, attachmentPath: null,
+  };
+  return [row, ...inside];
+}
+
 export function computeSupplierStatement<T extends { date: string; withdrawals: number; payments: number }>(entries: T[]) {
   const sorted = [...entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   let balance = 0;
@@ -2361,9 +2445,8 @@ export function computeFinancialReport(inputs: {
   };
 }
 
-export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<MonthlyFinancialReport> {
-  const nextMonth = `${nextMonthPrefix(monthPrefix)}-01`;
-  const monthStart = `${monthPrefix}-01`;
+export async function fetchMonthlyFinancialReport(period: Period): Promise<MonthlyFinancialReport> {
+  const { start, end } = periodBounds(period);
 
   const [
     ops,
@@ -2375,14 +2458,14 @@ export async function fetchMonthlyFinancialReport(monthPrefix: string): Promise<
     { data: fuelLogs },
     { data: generalExpenses },
   ] = await Promise.all([
-    fetchDispatchShifts(monthPrefix),
-    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", monthStart).lt("date", nextMonth),
-    fetchDriverPayroll(monthPrefix),
-    fetchEmployeePayroll(monthPrefix),
-    supabase.from("inventory_transactions").select("quantity, inventory(unit_price)").eq("type", "OUT").gte("created_at", monthStart).lt("created_at", nextMonth),
-    supabase.from("maintenance_orders").select("total_cost").gte("created_at", monthStart).lt("created_at", nextMonth),
-    supabase.from("fuel_logs").select("cost").gte("date", monthStart).lt("date", nextMonth),
-    supabase.from("expenses").select("category, amount").gte("date", monthStart).lt("date", nextMonth),
+    fetchDispatchShifts(period),
+    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end),
+    fetchDriverPayroll(period),
+    fetchEmployeePayroll(period),
+    supabase.from("inventory_transactions").select("quantity, inventory(unit_price)").eq("type", "OUT").gte("created_at", start).lt("created_at", end),
+    supabase.from("maintenance_orders").select("total_cost").gte("created_at", start).lt("created_at", end),
+    supabase.from("fuel_logs").select("cost").gte("date", start).lt("date", end),
+    supabase.from("expenses").select("category, amount").gte("date", start).lt("date", end),
   ]);
 
   const clientRevenue = ops.reduce((sum, o) => sum + o.busValue, 0);
@@ -2415,12 +2498,11 @@ export interface SupplierMonthlySummary {
   balanceDue: number;
 }
 
-export async function fetchSupplierMonthlySummary(monthPrefix: string): Promise<SupplierMonthlySummary[]> {
-  const nextMonth = `${nextMonthPrefix(monthPrefix)}-01`;
-  const monthStart = `${monthPrefix}-01`;
+export async function fetchSupplierMonthlySummary(period: Period): Promise<SupplierMonthlySummary[]> {
+  const { start, end } = periodBounds(period);
   const [suppliers, { data: purchases }] = await Promise.all([
     fetchSuppliers(),
-    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN").gte("created_at", monthStart).lt("created_at", nextMonth),
+    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN").gte("created_at", start).lt("created_at", end),
   ]);
   const bySupplier = new Map<string, number>();
   for (const p of purchases ?? []) {
@@ -2461,8 +2543,8 @@ export function computeMonthlyReport(input: {
   return { ...input, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
 }
 
-export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyReportBreakdown> {
-  const nextMonth = nextMonthPrefix(monthPrefix);
+export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportBreakdown> {
+  const { start, end } = periodBounds(period);
   const [
     { data: subPayments },
     ops,
@@ -2473,14 +2555,14 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
     { data: outTx },
     { data: allExpenses },
   ] = await Promise.all([
-    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", `${monthPrefix}-01`).lt("date", `${nextMonth}-01`),
-    fetchDispatchShifts(monthPrefix),
-    fetchDriverPayroll(monthPrefix),
-    supabase.from("payslips").select("overtime, advances, penalties, staff(base_salary)").gte("month", `${monthPrefix}-01`).lt("month", `${nextMonth}-01`),
-    fetchEmployeePayroll(monthPrefix),
-    supabase.from("maintenance_orders").select("total_cost, created_at").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
-    supabase.from("inventory_transactions").select("total_cost, created_at").eq("type", "OUT").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
-    supabase.from("expenses").select("category, amount, date").gte("date", `${monthPrefix}-01`).lt("date", `${nextMonth}-01`),
+    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end),
+    fetchDispatchShifts(period),
+    fetchDriverPayroll(period),
+    supabase.from("payslips").select("overtime, advances, penalties, staff(base_salary)").gte("month", start).lt("month", end),
+    fetchEmployeePayroll(period),
+    supabase.from("maintenance_orders").select("total_cost, created_at").gte("created_at", start).lt("created_at", end),
+    supabase.from("inventory_transactions").select("total_cost, created_at").eq("type", "OUT").gte("created_at", start).lt("created_at", end),
+    supabase.from("expenses").select("category, amount, date").gte("date", start).lt("date", end),
   ]);
 
   const subscriptionRevenue = (subPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
@@ -2489,8 +2571,8 @@ export async function fetchMonthlyReport(monthPrefix: string): Promise<MonthlyRe
     .from("trips")
     .select("total_price")
     .neq("status", "ملغاة")
-    .gte("trip_date", `${monthPrefix}-01`)
-    .lt("trip_date", `${nextMonth}-01`);
+    .gte("trip_date", start)
+    .lt("trip_date", end);
   const tripRevenue = (tripsThisMonth ?? []).reduce((sum: number, t: any) => sum + Number(t.total_price ?? 0), 0);
 
   const driverPayrollTotal = driverPayroll.reduce((sum, p) => sum + p.netSalary, 0);
@@ -2527,11 +2609,11 @@ export interface SupplierMonthlyRow {
   balanceDue: number;
 }
 
-export async function fetchSupplierMonthlyBreakdown(monthPrefix: string): Promise<SupplierMonthlyRow[]> {
-  const nextMonth = nextMonthPrefix(monthPrefix);
+export async function fetchSupplierMonthlyBreakdown(period: Period): Promise<SupplierMonthlyRow[]> {
+  const { start, end } = periodBounds(period);
   const [{ data: suppliers }, { data: transactions }] = await Promise.all([
     supabase.from("suppliers").select("*"),
-    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN").gte("created_at", `${monthPrefix}-01`).lt("created_at", `${nextMonth}-01`),
+    supabase.from("inventory_transactions").select("supplier_id, total_cost").eq("type", "IN").gte("created_at", start).lt("created_at", end),
   ]);
   const purchasedBySupplier = new Map<string, number>();
   for (const t of transactions ?? []) {
@@ -2645,4 +2727,105 @@ export async function updateTrip(id: string, input: TripInput) {
 export async function deleteTrip(id: string) {
   const { error } = await supabase.from("trips").delete().eq("id", id);
   if (error) throw error;
+}
+
+// ---- Rented / external vehicles ----
+
+export interface RentedOp {
+  id: string;
+  date: string;
+  owner: string;
+  bus: string;
+  driver: string;
+  clientId: string;
+  destination: string;
+  gasCost: number;
+  fare: number;
+  paid: boolean;
+  paidAt: string;
+  notes: string;
+}
+
+export interface RentedOpInput {
+  date: string;
+  owner: string;
+  bus: string;
+  driver: string;
+  clientId: string;
+  destination: string;
+  gasCost: number;
+  fare: number;
+  paid: boolean;
+  notes: string;
+}
+
+export async function fetchRentedOps(): Promise<RentedOp[]> {
+  const { data, error } = await supabase.from("rented_bus_operations").select("*").order("op_date", { ascending: false }).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    date: r.op_date,
+    owner: r.owner_name,
+    bus: r.bus_label,
+    driver: r.driver_name ?? "",
+    clientId: r.client_id ?? "",
+    destination: r.destination ?? "",
+    gasCost: Number(r.gas_cost ?? 0),
+    fare: Number(r.rental_fare ?? 0),
+    paid: !!r.paid,
+    paidAt: r.paid_at ?? "",
+    notes: r.notes ?? "",
+  }));
+}
+
+const rentedRow = (i: RentedOpInput) => ({
+  op_date: i.date,
+  owner_name: i.owner.trim(),
+  bus_label: i.bus.trim(),
+  driver_name: i.driver.trim() || null,
+  client_id: i.clientId || null,
+  destination: i.destination.trim() || null,
+  gas_cost: i.gasCost,
+  rental_fare: i.fare,
+  paid: i.paid,
+  paid_at: i.paid ? new Date().toISOString().slice(0, 10) : null,
+  notes: i.notes || null,
+});
+
+export async function addRentedOp(input: RentedOpInput) {
+  const { error } = await supabase.from("rented_bus_operations").insert(rentedRow(input));
+  if (error) throw error;
+}
+export async function updateRentedOp(id: string, input: RentedOpInput, wasPaid: boolean, paidAt: string) {
+  const row = rentedRow(input);
+  if (input.paid && wasPaid && paidAt) row.paid_at = paidAt; // keep the original settlement date
+  const { error } = await supabase.from("rented_bus_operations").update(row).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteRentedOp(id: string) {
+  const { error } = await supabase.from("rented_bus_operations").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/** "تم السداد / تصفير الحساب": marks the given trips as paid. */
+export async function settleRentedOps(ids: string[]) {
+  if (!ids.length) return;
+  const { error } = await supabase.from("rented_bus_operations").update({ paid: true, paid_at: new Date().toISOString().slice(0, 10) }).in("id", ids);
+  if (error) throw error;
+}
+
+export function computeRentedLedger(ops: RentedOp[], filter: { owner: string; bus: string; range: DateRange }) {
+  const rows = ops
+    .filter((o) => (!filter.owner || o.owner === filter.owner) && (!filter.bus || o.bus === filter.bus) && inDateRange(o.date, filter.range))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const totalDue = rows.reduce((s, r) => s + r.fare, 0);
+  const totalPaid = rows.filter((r) => r.paid).reduce((s, r) => s + r.fare, 0);
+  return {
+    rows,
+    totalDue,
+    totalPaid,
+    remaining: totalDue - totalPaid,
+    totalGas: rows.reduce((s, r) => s + r.gasCost, 0),
+    unpaidIds: rows.filter((r) => !r.paid).map((r) => r.id),
+  };
 }

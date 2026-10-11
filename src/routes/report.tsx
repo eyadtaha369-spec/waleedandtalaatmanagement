@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Printer, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { DateRangeFilter } from "@/components/date-range-filter";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatCard } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { currency } from "@/lib/fleet-data";
 import {
   fetchMonthlyReport,
+  rangeForPreset,
+  type DateRange,
   fetchSupplierMonthlyBreakdown,
   addSupplierPayment,
   type MonthlyReportBreakdown,
@@ -31,7 +34,7 @@ function LineRow({ label, value, tone }: { label: string; value: number; tone: "
 }
 
 function ReportPage() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [range, setRange] = useState<DateRange>(rangeForPreset("current"));
   const [report, setReport] = useState<MonthlyReportBreakdown | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierMonthlyRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,7 +46,7 @@ function ReportPage() {
     setLoading(true);
     setError(null);
     try {
-      const [r, s] = await Promise.all([fetchMonthlyReport(month), fetchSupplierMonthlyBreakdown(month)]);
+      const [r, s] = await Promise.all([fetchMonthlyReport(range), fetchSupplierMonthlyBreakdown(range)]);
       setReport(r);
       setSuppliers(s);
     } catch (e) {
@@ -56,7 +59,7 @@ function ReportPage() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, [range]);
 
   const paySupplier = async (supplierId: string) => {
     const amount = Number(payAmounts[supplierId]) || 0;
@@ -86,7 +89,7 @@ function ReportPage() {
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="h-10 w-44 border-border bg-input/60" />
+        <DateRangeFilter value={range} onChange={setRange} />
         <Button variant="outline" className="border-border" onClick={() => window.print()}>
           <Printer className="ml-2 h-4 w-4" /> طباعة التقرير الشهري / PDF
         </Button>

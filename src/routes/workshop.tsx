@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, Check, ChevronsUpDown, FileText, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { DateRangeFilter } from "@/components/date-range-filter";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -855,14 +856,7 @@ function WorkshopPage() {
                 <SelectContent>{busCodes.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">من تاريخ</Label>
-              <Input value={ledgerFrom} onChange={(e) => setLedgerFrom(e.target.value)} type="date" className="border-border bg-input/60" />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">إلى تاريخ</Label>
-              <Input value={ledgerTo} onChange={(e) => setLedgerTo(e.target.value)} type="date" className="border-border bg-input/60" />
-            </div>
+            <DateRangeFilter value={{ from: ledgerFrom, to: ledgerTo }} onChange={(r) => { setLedgerFrom(r.from); setLedgerTo(r.to); }} className="sm:col-span-2" />
           </div>
 
           {!ledgerBus ? (

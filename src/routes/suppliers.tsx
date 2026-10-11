@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { currency } from "@/lib/fleet-data";
+import { DateRangeFilter } from "@/components/date-range-filter";
 import {
   fetchSupplierSummaries,
   addSupplier,
@@ -38,6 +39,10 @@ import {
   deleteSupplierInvoice,
   getInvoiceAttachmentUrl,
   fetchSupplierLedger,
+  applySupplierRange,
+  periodLabel,
+  rangeForPreset,
+  type DateRange,
   computeSupplierStatement,
   defaultAlertDate,
   type SupplierSummary,
@@ -58,6 +63,7 @@ const emptyPayment = { date: todayStr(), amount: "", method: "نقدي", notes: 
 
 const kindTone: Record<string, string> = {
   شراء: "border-warning/40 bg-warning/15 text-warning",
+  "رصيد سابق": "border-border bg-secondary/40 text-muted-foreground",
   فاتورة: "border-primary/40 bg-primary/10 text-primary",
   سداد: "border-success/40 bg-success/15 text-success",
 };
@@ -71,6 +77,7 @@ function SuppliersPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [ledger, setLedger] = useState<SupplierLedgerEntry[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [range, setRange] = useState<DateRange>(rangeForPreset("all"));
 
   const [supplierDialog, setSupplierDialog] = useState(false);
   const [supplierForm, setSupplierForm] = useState(emptySupplier);
@@ -256,7 +263,7 @@ function SuppliersPage() {
   const printStatement = async (s: SupplierSummary) => {
     try {
       const entries = expandedId === s.id && ledger.length ? ledger : await fetchSupplierLedger(s.id);
-      setPrintFor({ supplier: s, entries });
+      setPrintFor({ supplier: s, entries: applySupplierRange(entries, range) });
       document.body.classList.add("print-statement");
       const cleanup = () => {
         document.body.classList.remove("print-statement");
@@ -269,7 +276,7 @@ function SuppliersPage() {
     }
   };
 
-  const statement = useMemo(() => computeSupplierStatement(ledger), [ledger]);
+  const statement = useMemo(() => computeSupplierStatement(applySupplierRange(ledger, range)), [ledger, range]);
   const printStatementData = useMemo(() => (printFor ? computeSupplierStatement(printFor.entries) : null), [printFor]);
 
   const filtered = suppliers.filter((s) => (s.name + s.phone).includes(query) || query === "");
@@ -388,6 +395,7 @@ function SuppliersPage() {
                         </div>
                       </div>
 
+                      <DateRangeFilter value={range} onChange={setRange} className="mb-3" />
                       {ledgerLoading ? (
                         <p className="py-4 text-center text-sm text-muted-foreground">جارِ التحميل...</p>
                       ) : statement.rows.length === 0 ? (
@@ -605,7 +613,7 @@ function SuppliersPage() {
           <h1 style={{ textAlign: "center", fontSize: 22, fontWeight: 800 }}>وليد وطلعت لخدمات النقل والرحلات</h1>
           <h2 style={{ textAlign: "center", fontSize: 18, margin: "8px 0 16px" }}>كشف حساب مورد</h2>
           <p style={{ marginBottom: 12 }}>
-            <b>اسم المورد:</b> {printFor.supplier.name} &nbsp;&nbsp; <b>الهاتف:</b> {printFor.supplier.phone || "—"} &nbsp;&nbsp; <b>تاريخ الطباعة:</b> {todayStr()}
+            <b>اسم المورد:</b> {printFor.supplier.name} &nbsp;&nbsp; <b>الهاتف:</b> {printFor.supplier.phone || "—"} &nbsp;&nbsp; <b>الفترة:</b> {periodLabel(range)} &nbsp;&nbsp; <b>تاريخ الطباعة:</b> {todayStr()}
           </p>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>

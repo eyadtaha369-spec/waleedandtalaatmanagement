@@ -19,6 +19,7 @@ import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
 import { Route as PayrollRouteImport } from './routes/payroll'
+import { Route as RentedRouteImport } from './routes/rented'
 import { Route as ReportRouteImport } from './routes/report'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SuppliersRouteImport } from './routes/suppliers'
@@ -76,6 +77,11 @@ const PayrollRoute = PayrollRouteImport.update({
   path: '/payroll',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RentedRoute = RentedRouteImport.update({
+  id: '/rented',
+  path: '/rented',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportRoute = ReportRouteImport.update({
   id: '/report',
   path: '/report',
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
+  '/rented': typeof RentedRoute
   '/report': typeof ReportRoute
   '/reset-password': typeof ResetPasswordRoute
   '/suppliers': typeof SuppliersRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
+  '/rented': typeof RentedRoute
   '/report': typeof ReportRoute
   '/reset-password': typeof ResetPasswordRoute
   '/suppliers': typeof SuppliersRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
+  '/rented': typeof RentedRoute
   '/report': typeof ReportRoute
   '/reset-password': typeof ResetPasswordRoute
   '/suppliers': typeof SuppliersRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/operations'
     | '/payroll'
+    | '/rented'
     | '/report'
     | '/reset-password'
     | '/suppliers'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/operations'
     | '/payroll'
+    | '/rented'
     | '/report'
     | '/reset-password'
     | '/suppliers'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/operations'
     | '/payroll'
+    | '/rented'
     | '/report'
     | '/reset-password'
     | '/suppliers'
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
   PayrollRoute: typeof PayrollRoute
+  RentedRoute: typeof RentedRoute
   ReportRoute: typeof ReportRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SuppliersRoute: typeof SuppliersRoute
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PayrollRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/rented': {
+      id: '/rented'
+      path: '/rented'
+      fullPath: '/rented'
+      preLoaderRoute: typeof RentedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/report': {
       id: '/report'
       path: '/report'
@@ -366,6 +386,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
   PayrollRoute: PayrollRoute,
+  RentedRoute: RentedRoute,
   ReportRoute: ReportRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SuppliersRoute: SuppliersRoute,

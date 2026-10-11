@@ -1,13 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { AccountPicker } from "@/components/account-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -67,66 +66,6 @@ export const Route = createFileRoute("/finance")({
 });
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
-
-/** Searchable client list that also accepts a free-typed account name. */
-function AccountPicker({
-  value,
-  clients,
-  onPick,
-}: {
-  value: string;
-  clients: Client[];
-  onPick: (name: string, clientId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const typed = text.trim();
-  const exact = clients.some((c) => c.name === typed);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between border-border bg-input/60 font-normal">
-          <span className="truncate">{value || "ابحث عن شركة أو اكتب اسم الحساب..."}</span>
-          <ChevronsUpDown className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] min-w-[16rem] p-0" dir="rtl" align="start">
-        <Command>
-          <CommandInput placeholder="ابحث أو اكتب اسمًا جديدًا..." value={text} onValueChange={setText} />
-          <CommandList>
-            <CommandEmpty>لا توجد شركة بهذا الاسم.</CommandEmpty>
-            <CommandGroup>
-              {typed && !exact && (
-                <CommandItem
-                  value={`__free ${typed}`}
-                  onSelect={() => {
-                    onPick(typed, "");
-                    setOpen(false);
-                  }}
-                >
-                  استخدام «{typed}» كاسم حساب
-                </CommandItem>
-              )}
-              {clients.map((c) => (
-                <CommandItem
-                  key={c.id}
-                  value={c.name}
-                  onSelect={() => {
-                    onPick(c.name, c.id);
-                    setOpen(false);
-                  }}
-                >
-                  <Check className={`ml-2 h-4 w-4 ${value === c.name ? "opacity-100" : "opacity-0"}`} />
-                  {c.name}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 type DeleteTarget = { kind: "treasury" | "expense" | "loan" | "payslip"; id: string; label: string } | null;
 

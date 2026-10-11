@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Lock, Pencil, Plus, Printer, Trash2, Unlock } from "lucide-react";
+import { DateRangeFilter } from "@/components/date-range-filter";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,9 @@ import { currency } from "@/lib/fleet-data";
 import { fetchDrivers, fetchBuses, fetchRoutes } from "@/lib/queries";
 import {
   fetchDailyShifts,
+  periodLabel,
+  rangeForPreset,
+  type DateRange,
   upsertDailyShift,
   deleteDailyShift,
   fetchDriverPayroll,
@@ -83,14 +87,10 @@ interface PersonRow {
   dailyPenalties: number;
 }
 
-const monthLabel = (m: string) => {
-  const [y, mo] = m.split("-");
-  const names = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-  return `${names[Number(mo) - 1] ?? mo} ${y}`;
-};
-
 function PayrollPage() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [range, setRange] = useState<DateRange>(rangeForPreset("current"));
+  const month = range.from.slice(0, 7);
+  const canEdit = range.from.slice(0, 7) === range.to.slice(0, 7);
   const [shifts, setShifts] = useState<DailyShift[]>([]);
   const [payroll, setPayroll] = useState<DriverPayrollRow[]>([]);
   const [employeePayroll, setEmployeePayroll] = useState<EmployeePayrollRow[]>([]);
@@ -119,15 +119,15 @@ function PayrollPage() {
     setError(null);
     try {
       const [s, p, ep, drivers, buses, routes, employees, adj, ds] = await Promise.all([
-        fetchDailyShifts(month),
-        fetchDriverPayroll(month),
-        fetchEmployeePayroll(month),
+        fetchDailyShifts(range),
+        fetchDriverPayroll(range),
+        fetchEmployeePayroll(range),
         fetchDrivers(),
         fetchBuses(),
         fetchRoutes(),
         fetchEmployees(),
-        fetchPayrollAdjustments(month),
-        fetchDispatchShifts(month),
+        fetchPayrollAdjustments(range),
+        fetchDispatchShifts(range),
       ]);
       setDriverIds(new Map(drivers.map((d) => [d.name, d.id])));
       setEmployeeIds(new Map(employees.map((e) => [e.name, e.id])));
@@ -149,7 +149,7 @@ function PayrollPage() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, [range]);
 
   const openAdd = () => {
     setForm(emptyForm);
@@ -256,6 +256,7 @@ function PayrollPage() {
   };
   const submitAdjust = async () => {
     if (!adjFor || !adjFor.id) return setError("تعذر تحديد الشخص");
+    if (!canEdit) return setError("التعديل متاح عند اختيار فترة داخل شهر واحد");
     setSaving(true);
     try {
       await savePayrollAdjustment(adjFor.type, adjFor.id, month, {
@@ -276,6 +277,7 @@ function PayrollPage() {
   };
   const toggleLock = async (p: PersonRow) => {
     if (!p.id) return;
+    if (!canEdit) return setError("القفل متاح عند اختيار فترة داخل شهر واحد");
     try {
       await savePayrollAdjustment(p.type, p.id, month, { ...adjOf(p), locked: !adjOf(p).locked });
       await loadAll();
@@ -350,13 +352,13 @@ function PayrollPage() {
         </DataTable>
       </Panel>
 
-      <Panel title={`كشوف المرتبات — ${monthLabel(month)}`} className="mt-4">
+      <Panel title={`كشوف المرتبات — ${periodLabel(range)}`} className="mt-4">
         <Toolbar
           query={query}
           onQuery={setQuery}
           placeholder="ابحث باسم السائق أو الموظف..."
           onExport={() => exportToExcel("ملخص المرتبات", people.map((p) => { const f = finalOf(p); return { الفئة: p.type === "driver" ? "سائق" : "موظف", الاسم: p.name, الوظيفة: p.role, "المرتب الأساسي": f.baseSalary, "إضافي الورديات": f.shiftAllowances, "أجر الرحلات": f.tripFees, مكافآت: f.bonus, السُلف: f.advances, الجزاءات: f.penalties, الكرتات: f.tolls, الصافي: f.net, مقفل: adjOf(p).locked ? "نعم" : "لا" }; }) as Record<string, string | number>[])}
-          extra={<Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="h-9 w-40 border-border bg-input/60" />}
+          extra={<DateRangeFilter value={range} onChange={setRange} />}
         />
         <p className="mb-3 rounded-lg border border-border bg-secondary/30 p-2 text-xs text-muted-foreground">
           الصافي = المرتب الأساسي + إضافي الورديات + أجر الرحلات (+ مكافآت) − (السُلف + الجزاءات + الكرتات)
@@ -458,7 +460,7 @@ function PayrollPage() {
           <DialogHeader>
             <DialogTitle className="text-primary">تعديل مرتب {adjFor?.name}</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              تُضاف هذه القيم إلى ما سُجِّل يوميًا، لشهر {monthLabel(month)}. يمكن القفل النهائي بعد المراجعة.
+              تُضاف هذه القيم إلى ما سُجِّل يوميًا، لشهر {periodLabel(range)}. يمكن القفل النهائي بعد المراجعة.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
@@ -496,7 +498,7 @@ function PayrollPage() {
             <h1 style={{ textAlign: "center", fontSize: 22, fontWeight: 800 }}>وليد وطلعت لخدمات النقل والرحلات</h1>
             <h2 style={{ textAlign: "center", fontSize: 18, margin: "8px 0 16px" }}>كشف حساب {printing.type === "driver" ? "سائق" : "موظف"}</h2>
             <p style={{ marginBottom: 12 }}>
-              <b>الاسم:</b> {printing.name} &nbsp;&nbsp; <b>الشهر:</b> {monthLabel(month)} &nbsp;&nbsp; <b>تاريخ الطباعة:</b> {new Date().toISOString().slice(0, 10)}
+              <b>الاسم:</b> {printing.name} &nbsp;&nbsp; <b>الشهر:</b> {periodLabel(range)} &nbsp;&nbsp; <b>تاريخ الطباعة:</b> {new Date().toISOString().slice(0, 10)}
             </p>
             {printing.type === "driver" && (
               <>

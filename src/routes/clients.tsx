@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Bus, FileText, MapPin, Pencil, Plus, Printer, Receipt, Trash2 } from "lucide-react";
+import { DateRangeFilter } from "@/components/date-range-filter";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatCard, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,8 @@ import {
   fetchClientInvoiceRows,
   fetchClientStatementExtras,
   computeClientMonthBalance,
+  rangeForPreset,
+  type DateRange,
   type ClientLedgerPosting,
   computeClientInvoiceSummary,
   fetchClientRoutes,
@@ -67,7 +70,7 @@ function ClientsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const [selectedClient, setSelectedClient] = useState("");
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [range, setRange] = useState<DateRange>(rangeForPreset("current"));
   const [invoiceRows, setInvoiceRows] = useState<ClientInvoiceRow[]>([]);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [extras, setExtras] = useState<{ opening: number; postings: ClientLedgerPosting[] }>({ opening: 0, postings: [] });
@@ -100,14 +103,14 @@ function ClientsPage() {
       return;
     }
     setInvoiceLoading(true);
-    fetchClientStatementExtras(selectedClient, month)
+    fetchClientStatementExtras(selectedClient, range)
       .then(setExtras)
       .catch(() => setExtras({ opening: 0, postings: [] }));
-    fetchClientInvoiceRows(selectedClient, month)
+    fetchClientInvoiceRows(selectedClient, range)
       .then(setInvoiceRows)
       .catch((e) => setError(e instanceof Error ? e.message : "تعذر تحميل كشف الحساب"))
       .finally(() => setInvoiceLoading(false));
-  }, [selectedClient, month]);
+  }, [selectedClient, range]);
 
   const openAdd = () => {
     setForm({ id: "", name: "", contactPerson: "", phone: "" });
@@ -221,10 +224,7 @@ function ClientsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">الشهر</Label>
-                <Input value={month} onChange={(e) => setMonth(e.target.value)} type="month" className="border-border bg-input/60" />
-              </div>
+              <DateRangeFilter value={range} onChange={setRange} />
             </div>
           </Panel>
 

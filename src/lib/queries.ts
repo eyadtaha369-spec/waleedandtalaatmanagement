@@ -605,7 +605,7 @@ export interface ExpenseInput {
 export const PAY_FROM_OPTIONS = ["الخزينة الرئيسية", "حساب بنكي", "كاش"] as const;
 
 export async function fetchExpenses(): Promise<Expense[]> {
-  const { data, error } = await supabase.from("expenses").select("*, suppliers(supplier_name, balance_due)").order("date", { ascending: false });
+  const { data, error } = await supabase.from("expenses").select("*, suppliers!expenses_supplier_id_fkey(supplier_name, balance_due)").order("date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((e: any) => ({
     id: e.id,

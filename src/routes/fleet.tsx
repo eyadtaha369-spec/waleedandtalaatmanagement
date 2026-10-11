@@ -73,6 +73,13 @@ const busTypes = ["أتوبيس 50", "أتوبيس 33", "هاي إي اس (فا�
 
 type DeleteTarget = { kind: "bus" | "driver" | "attendance" | "employee" | "employeeAttendance"; id: string; label: string } | null;
 
+function errText(e: unknown, fallback: string) {
+  const o = e as { code?: string; message?: string; details?: string } | null;
+  if (o?.code === "23505") return "كود الأتوبيس أو الرقم مستخدم من قبل — اختر كودًا مختلفًا";
+  if (o?.code === "42501" || /row-level security/i.test(o?.message ?? "")) return "ليس لديك صلاحية تنفيذ هذا الإجراء";
+  return o?.message ? `${fallback}: ${o.message}` : fallback;
+}
+
 function FleetPage() {
   const [buses, setBuses] = useState<Bus[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -119,7 +126,7 @@ function FleetPage() {
       setEmployees(emp);
       setEmployeeAttendanceRows(empAtt);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
+      setError(errText(e, "تعذر تحميل البيانات"));
     } finally {
       setLoading(false);
     }
@@ -148,7 +155,9 @@ function FleetPage() {
   };
 
   const submitBus = async () => {
-    if (!form.code.trim()) return;
+    if (!form.code.trim()) return setError("أدخل كود الأتوبيس");
+    if (buses.some((b) => b.id !== form.id && b.code.trim().toLowerCase() === form.code.trim().toLowerCase())) return setError("كود الأتوبيس مستخدم من قبل — اختر كودًا مختلفًا");
+    setError(null);
     setSaving(true);
     try {
       const payload = {
@@ -169,7 +178,7 @@ function FleetPage() {
       setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
       setAdding(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ الأتوبيس");
+      setError(errText(e, "تعذر حفظ الأتوبيس"));
     } finally {
       setSaving(false);
     }
@@ -194,7 +203,7 @@ function FleetPage() {
       setEmployeeForm({ id: "", name: "", phone: "", jobTitle: EMPLOYEE_JOB_TITLES[0] as string, baseSalary: "", isActive: true });
       setAddingEmployee(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ بيانات الموظف");
+      setError(errText(e, "تعذر حفظ بيانات الموظف"));
     } finally {
       setSaving(false);
     }
@@ -225,7 +234,7 @@ function FleetPage() {
       await loadAll();
       setAddingEmployeeAttendance(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ سجل حضور الموظف");
+      setError(errText(e, "تعذر حفظ سجل حضور الموظف"));
     } finally {
       setSaving(false);
     }
@@ -255,7 +264,7 @@ function FleetPage() {
       setDriverForm({ id: "", name: "", phone: "", license: "", licenseExpiry: "", baseSalary: "" });
       setAddingDriver(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ السائق");
+      setError(errText(e, "تعذر حفظ السائق"));
     } finally {
       setSaving(false);
     }
@@ -267,7 +276,7 @@ function FleetPage() {
       await checkInDriver(driverId);
       await loadAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر تسجيل الحضور");
+      setError(errText(e, "تعذر تسجيل الحضور"));
     } finally {
       setAttendanceBusy(null);
     }
@@ -279,7 +288,7 @@ function FleetPage() {
       await checkOutDriver(driverId);
       await loadAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر تسجيل الانصراف");
+      setError(errText(e, "تعذر تسجيل الانصراف"));
     } finally {
       setAttendanceBusy(null);
     }
@@ -316,7 +325,7 @@ function FleetPage() {
       await loadAll();
       setAddingAttendance(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ سجل الحضور");
+      setError(errText(e, "تعذر حفظ سجل الحضور"));
     } finally {
       setSaving(false);
     }
@@ -334,7 +343,7 @@ function FleetPage() {
       await loadAll();
       setDeleteTarget(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر الحذف");
+      setError(errText(e, "تعذر الحذف"));
     } finally {
       setDeleting(false);
     }
@@ -743,6 +752,7 @@ function FleetPage() {
               </Select>
             </div>
           </div>
+          {error && <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitBus} disabled={saving}>
               {saving ? "جارِ الحفظ..." : form.id ? "حفظ التعديلات" : "حفظ الأتوبيس"}

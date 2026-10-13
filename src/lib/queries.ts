@@ -1980,6 +1980,11 @@ export async function fetchClientRoutes(clientId: string): Promise<ClientRoute[]
   if (error) throw error;
   return (data ?? []).map((r: any) => ({ id: r.id, clientId: r.client_id, routeName: r.route_name, vehicleCapacity: Number(r.vehicle_capacity ?? 0) }));
 }
+export async function fetchAllClientRoutes(): Promise<ClientRoute[]> {
+  const { data, error } = await supabase.from("client_routes").select("*").order("route_name");
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ id: r.id, clientId: r.client_id, routeName: r.route_name, vehicleCapacity: Number(r.vehicle_capacity ?? 0) }));
+}
 export async function addClientRoute(input: { clientId: string; routeName: string; vehicleCapacity: number }) {
   const { error } = await supabase.from("client_routes").insert({ client_id: input.clientId, route_name: input.routeName, vehicle_capacity: input.vehicleCapacity });
   if (error) throw error;
@@ -2740,11 +2745,19 @@ export interface RentedOp {
   clientId: string;
   destination: string;
   gasCost: number;
-  fare: number;
+  fare: number; // تكلفة التأجير المستحقة لمالك العربية
+  clientFare: number; // سعر الشركة (إيراد)
+  vehicleType: string;
+  routeName: string;
   paid: boolean;
   paidAt: string;
   notes: string;
 }
+
+export const RENTED_VEHICLE_TYPES = ["هاي إس (HiAce)", "ملاكي", "أوتوبيس 33", "أوتوبيس 50", "دوبل كابينة"] as const;
+
+/** صافي ربح الوردية = سعر الشركة − تكلفة التأجير − تكلفة السولار */
+export const rentedNetProfit = (o: { clientFare: number; fare: number; gasCost: number }) => o.clientFare - o.fare - o.gasCost;
 
 export interface RentedOpInput {
   date: string;
@@ -2755,6 +2768,9 @@ export interface RentedOpInput {
   destination: string;
   gasCost: number;
   fare: number;
+  clientFare: number;
+  vehicleType: string;
+  routeName: string;
   paid: boolean;
   notes: string;
 }
@@ -2772,6 +2788,9 @@ export async function fetchRentedOps(): Promise<RentedOp[]> {
     destination: r.destination ?? "",
     gasCost: Number(r.gas_cost ?? 0),
     fare: Number(r.rental_fare ?? 0),
+    clientFare: Number(r.client_fare ?? 0),
+    vehicleType: r.vehicle_type ?? "",
+    routeName: r.route_name ?? "",
     paid: !!r.paid,
     paidAt: r.paid_at ?? "",
     notes: r.notes ?? "",
@@ -2787,6 +2806,9 @@ const rentedRow = (i: RentedOpInput) => ({
   destination: i.destination.trim() || null,
   gas_cost: i.gasCost,
   rental_fare: i.fare,
+  client_fare: i.clientFare,
+  vehicle_type: i.vehicleType || null,
+  route_name: i.routeName.trim() || null,
   paid: i.paid,
   paid_at: i.paid ? new Date().toISOString().slice(0, 10) : null,
   notes: i.notes || null,
@@ -2826,6 +2848,8 @@ export function computeRentedLedger(ops: RentedOp[], filter: { owner: string; bu
     totalPaid,
     remaining: totalDue - totalPaid,
     totalGas: rows.reduce((s, r) => s + r.gasCost, 0),
+    totalClientFare: rows.reduce((s, r) => s + r.clientFare, 0),
+    totalNet: rows.reduce((s, r) => s + rentedNetProfit(r), 0),
     unpaidIds: rows.filter((r) => !r.paid).map((r) => r.id),
   };
 }

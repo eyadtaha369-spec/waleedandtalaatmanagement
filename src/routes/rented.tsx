@@ -27,6 +27,10 @@ import {
   computeRentedLedger,
   deleteRentedOp,
   fetchClients,
+  fetchAllClientRoutes,
+  rentedNetProfit,
+  RENTED_VEHICLE_TYPES,
+  type ClientRoute,
   fetchRentedOps,
   inDateRange,
   periodLabel,
@@ -49,11 +53,13 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const PENDING = "معلق / لم يتم السداد";
 const PAID = "تم السداد";
 
-const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", gasCost: "", fare: "", status: PENDING, notes: "" });
+const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", gasCost: "", fare: "", clientFare: "", vehicleType: "", routeName: "", status: PENDING, notes: "" });
 
 function RentedPage() {
   const [ops, setOps] = useState<RentedOp[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [clientRoutes, setClientRoutes] = useState<ClientRoute[]>([]);
+  const [manualRoute, setManualRoute] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -71,8 +77,9 @@ function RentedPage() {
     setLoading(true);
     setError(null);
     try {
-      const [o, c] = await Promise.all([fetchRentedOps(), fetchClients()]);
+      const [o, c, cr] = await Promise.all([fetchRentedOps(), fetchClients(), fetchAllClientRoutes()]);
       setOps(o);
+      setClientRoutes(cr);
       setClients(c);
     } catch (e) {
       setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر تحميل البيانات");
@@ -97,21 +104,28 @@ function RentedPage() {
     [ops, ledgerOwner, ledgerBus, range],
   );
 
+  const routesOfClient = useMemo(() => clientRoutes.filter((r) => r.clientId === form.clientId), [clientRoutes, form.clientId]);
+
+  const formNet = rentedNetProfit({ clientFare: Number(form.clientFare) || 0, fare: Number(form.fare) || 0, gasCost: Number(form.gasCost) || 0 });
+
   const openAdd = () => {
     setForm({ ...emptyForm(), owner: ledgerOwner });
+    setManualRoute(false);
     setAdding(true);
   };
   const openEdit = (o: RentedOp) => {
     const client = clients.find((c) => c.id === o.clientId);
-    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, gasCost: String(o.gasCost), fare: String(o.fare), status: o.paid ? PAID : PENDING, notes: o.notes });
+    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, gasCost: String(o.gasCost), fare: String(o.fare), clientFare: String(o.clientFare), vehicleType: o.vehicleType, routeName: o.routeName, status: o.paid ? PAID : PENDING, notes: o.notes });
+    setManualRoute(!!o.routeName && !clientRoutes.some((r) => r.clientId === o.clientId && r.routeName === o.routeName));
     setAdding(true);
   };
   const submit = async () => {
     if (!form.owner.trim() || !form.bus.trim()) return setError("أدخل اسم صاحب العربية ورقم / اسم العربية");
+    if (!form.vehicleType) return setError("اختر نوع السيارة");
     setSaving(true);
     setError(null);
     try {
-      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, gasCost: Number(form.gasCost) || 0, fare: Number(form.fare) || 0, paid: form.status === PAID, notes: form.notes };
+      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, gasCost: Number(form.gasCost) || 0, fare: Number(form.fare) || 0, clientFare: Number(form.clientFare) || 0, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, notes: form.notes };
       if (form.id) await updateRentedOp(form.id, payload, form.wasPaid, form.paidAt);
       else await addRentedOp(payload);
       await loadAll();
@@ -176,28 +190,31 @@ function RentedPage() {
 
       <Panel title="سجل حركة العربيات المستأجرة">
         <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "تكلفة السولار": o.gasCost, الإيجار: o.fare, الحالة: o.paid ? PAID : PENDING })))}>
+          <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "نوع السيارة": o.vehicleType, الخط: o.routeName, "تكلفة السولار": o.gasCost, "تكلفة التأجير": o.fare, "سعر الشركة": o.clientFare, "صافي الربح": rentedNetProfit(o), الحالة: o.paid ? PAID : PENDING })))}>
             تصدير Excel
           </Button>
           <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAdd}>
             <Plus className="ml-2 h-4 w-4" /> تسجيل حركة عربية مستأجرة
           </Button>
         </div>
-        <DataTable head={["التاريخ", "صاحب العربية / المكتب", "العربية", "السائق", "الشركة / المكان", "تكلفة السولار", "قيمة الإيجار", "الحالة", "الإجراءات"]}>
+        <DataTable head={["التاريخ", "صاحب العربية / المكتب", "العربية", "النوع", "السائق", "الشركة / الخط", "تكلفة السولار", "تكلفة التأجير", "سعر الشركة", "صافي الربح", "الحالة", "الإجراءات"]}>
           {loading ? (
-            <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
+            <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
           ) : logRows.length === 0 ? (
-            <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات في هذه الفترة.</td></tr>
+            <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات في هذه الفترة.</td></tr>
           ) : (
             logRows.map((o) => (
               <tr key={o.id} className="transition-colors hover:bg-secondary/30">
                 <td className="px-4 py-3">{o.date}</td>
                 <td className="px-4 py-3 font-bold">{o.owner}</td>
                 <td className="px-4 py-3">{o.bus}</td>
+                <td className="px-4 py-3">{o.vehicleType || "—"}</td>
                 <td className="px-4 py-3">{o.driver || "—"}</td>
-                <td className="px-4 py-3">{clients.find((c) => c.id === o.clientId)?.name ?? (o.destination || "—")}</td>
+                <td className="px-4 py-3">{clients.find((c) => c.id === o.clientId)?.name ?? (o.destination || "—")}{o.routeName ? ` — ${o.routeName}` : ""}</td>
                 <td className="px-4 py-3">{currency(o.gasCost)}</td>
                 <td className="px-4 py-3 font-bold text-warning">{currency(o.fare)}</td>
+                <td className="px-4 py-3">{currency(o.clientFare)}</td>
+                <td className={`px-4 py-3 font-bold ${rentedNetProfit(o) < 0 ? "text-destructive" : "text-success"}`}>{currency(rentedNetProfit(o))}</td>
                 <td className="px-4 py-3"><StatusPill label={o.paid ? PAID : "معلق"} tone={o.paid ? "good" : "warn"} /></td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
@@ -236,10 +253,12 @@ function RentedPage() {
           <p className="py-4 text-center text-sm text-muted-foreground">سجّل أول حركة لعربية مستأجرة لعرض الكشف.</p>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
               <StatCard label="إجمالي المستحق" value={currency(ledger.totalDue)} icon={Receipt} />
               <StatCard label="إجمالي المسدد" value={currency(ledger.totalPaid)} icon={Wallet} />
               <StatCard label="المتبقي" value={currency(ledger.remaining)} icon={Bus} />
+              <StatCard label="إيراد الشركات" value={currency(ledger.totalClientFare)} icon={Receipt} />
+              <StatCard label="صافي الربح" value={currency(ledger.totalNet)} icon={Wallet} />
             </div>
             <div className="no-print mt-3 flex flex-wrap items-center gap-2">
               <Button className="bg-primary text-primary-foreground" disabled={toSettle.length === 0} onClick={() => setConfirmSettle(true)}>
@@ -316,7 +335,7 @@ function RentedPage() {
             </tfoot>
           </table>
           <p style={{ marginTop: 14, fontWeight: 700 }}>
-            إجمالي المستحق: {currency(ledger.totalDue)} &nbsp;|&nbsp; إجمالي المسدد: {currency(ledger.totalPaid)} &nbsp;|&nbsp; المتبقي: {currency(ledger.remaining)}
+            إجمالي المستحق: {currency(ledger.totalDue)} &nbsp;|&nbsp; إجمالي المسدد: {currency(ledger.totalPaid)} &nbsp;|&nbsp; المتبقي: {currency(ledger.remaining)} &nbsp;|&nbsp; إيراد الشركات: {currency(ledger.totalClientFare)} &nbsp;|&nbsp; صافي الربح: {currency(ledger.totalNet)}
           </p>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 40 }}>
             <span>التاريخ: ____ / ____ / ________</span>
@@ -350,18 +369,48 @@ function RentedPage() {
                 <Label className="text-xs text-muted-foreground">اسم السائق</Label>
                 <Input value={form.driver} onChange={(e) => setForm({ ...form, driver: e.target.value })} className="border-border bg-input/60" />
               </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">نوع السيارة *</Label>
+                <Select value={form.vehicleType} onValueChange={(v) => setForm({ ...form, vehicleType: v })}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر نوع السيارة" /></SelectTrigger>
+                  <SelectContent>{RENTED_VEHICLE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">الشركة / المكان المستهدف</Label>
-              <AccountPicker value={form.destination} clients={clients} placeholder="ابحث عن شركة أو اكتب المكان..." onPick={(name, clientId) => setForm({ ...form, destination: name, clientId })} />
+              <AccountPicker value={form.destination} clients={clients} placeholder="ابحث عن شركة أو اكتب المكان..." onPick={(name, clientId) => { setManualRoute(false); setForm({ ...form, destination: name, clientId, routeName: "" }); }} />
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">الخط / خط السير</Label>
+              {form.clientId && !manualRoute ? (
+                <Select value={form.routeName} onValueChange={(v) => (v === "__manual" ? (setManualRoute(true), setForm({ ...form, routeName: "" })) : setForm({ ...form, routeName: v }))}>
+                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder={routesOfClient.length ? "اختر الخط" : "لا توجد خطوط مسجلة — أضف يدويًا"} /></SelectTrigger>
+                  <SelectContent>
+                    {routesOfClient.map((r) => <SelectItem key={r.id} value={r.routeName}>{r.routeName}</SelectItem>)}
+                    <SelectItem value="__manual">+ كتابة خط جديد يدويًا</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="flex gap-2">
+                  <Input value={form.routeName} onChange={(e) => setForm({ ...form, routeName: e.target.value })} placeholder="اكتب خط السير" className="border-border bg-input/60" />
+                  {form.clientId && (
+                    <Button type="button" variant="outline" className="border-border" onClick={() => { setManualRoute(false); setForm({ ...form, routeName: "" }); }}>من القائمة</Button>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">تكلفة الوقود / السولار</Label>
                 <Input type="number" min="0" step="any" value={form.gasCost} onChange={(e) => setForm({ ...form, gasCost: e.target.value })} className="border-border bg-input/60" />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">قيمة الإيجار المستحقة</Label>
+                <Label className="text-xs text-muted-foreground">سعر الشركة (إيراد)</Label>
+                <Input type="number" min="0" step="any" value={form.clientFare} onChange={(e) => setForm({ ...form, clientFare: e.target.value })} className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">تكلفة التأجير (لمالك العربية)</Label>
                 <Input type="number" min="0" step="any" value={form.fare} onChange={(e) => setForm({ ...form, fare: e.target.value })} className="border-border bg-input/60" />
               </div>
               <div className="grid gap-1.5">
@@ -374,6 +423,10 @@ function RentedPage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">صافي ربح الوردية (سعر الشركة − التأجير − السولار)</span>
+              <b className={formNet < 0 ? "text-destructive" : "text-success"}>{currency(formNet)}</b>
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">ملاحظات</Label>

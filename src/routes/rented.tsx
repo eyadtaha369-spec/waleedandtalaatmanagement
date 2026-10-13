@@ -213,7 +213,7 @@ function RentedPage() {
                 <td className="px-4 py-3">{clients.find((c) => c.id === o.clientId)?.name ?? (o.destination || "—")}{o.routeName ? ` — ${o.routeName}` : ""}</td>
                 <td className="px-4 py-3">{currency(o.gasCost)}</td>
                 <td className="px-4 py-3 font-bold text-warning">{currency(o.fare)}</td>
-                <td className="px-4 py-3">{currency(o.clientFare)}</td>
+                <td className="px-4 py-3">{o.clientId && o.clientFare <= 0 && !o.missionId ? <span className="text-xs text-warning" title="أدخل سعر الشركة ليُرحَّل إلى كشف حساب الشركة">لم يُرحَّل — بدون سعر</span> : currency(o.clientFare)}</td>
                 <td className={`px-4 py-3 font-bold ${rentedNetProfit(o) < 0 ? "text-destructive" : "text-success"}`}>{currency(rentedNetProfit(o))}</td>
                 <td className="px-4 py-3"><StatusPill label={o.paid ? PAID : "معلق"} tone={o.paid ? "good" : "warn"} /></td>
                 <td className="px-4 py-3">

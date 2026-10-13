@@ -11,11 +11,14 @@ export function AccountPicker({
   clients,
   onPick,
   placeholder = "ابحث عن شركة أو اكتب اسمًا...",
+  strict = false,
 }: {
   value: string;
   clients: Client[];
   onPick: (name: string, clientId: string) => void;
   placeholder?: string;
+  /** Only registered clients can be picked (no free-typed names). */
+  strict?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -35,7 +38,7 @@ export function AccountPicker({
           <CommandList>
             <CommandEmpty>لا توجد شركة بهذا الاسم.</CommandEmpty>
             <CommandGroup>
-              {typed && !exact && (
+              {!strict && typed && !exact && (
                 <CommandItem
                   value={`__free ${typed}`}
                   onSelect={() => {

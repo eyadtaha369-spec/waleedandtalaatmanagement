@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { currency } from "@/lib/fleet-data";
+import { MissionsPanel } from "@/components/missions-panel";
 import { fetchBuses, fetchDrivers } from "@/lib/queries";
 import { fetchTrips, addTrip, updateTrip, deleteTrip, TRIP_NOTIFICATION_OPTIONS, type Trip } from "@/lib/queries";
 
@@ -236,7 +237,9 @@ function TripsPage() {
             <TabsTrigger value="finished">الرحلات المنتهية ({finished.length})</TabsTrigger>
             <TabsTrigger value="balance">المتبقيات المالية ({withBalance.length})</TabsTrigger>
             <TabsTrigger value="all">الكل ({filtered.length})</TabsTrigger>
+            <TabsTrigger value="missions">المأموريات</TabsTrigger>
           </TabsList>
+          <TabsContent value="missions"><MissionsPanel /></TabsContent>
           <TabsContent value="upcoming">{renderTable(upcoming)}</TabsContent>
           <TabsContent value="finished">{renderTable(finished)}</TabsContent>
           <TabsContent value="balance">{renderTable(withBalance)}</TabsContent>

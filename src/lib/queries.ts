@@ -2752,6 +2752,7 @@ export interface RentedOp {
   paid: boolean;
   paidAt: string;
   notes: string;
+  missionId: string;
 }
 
 export const RENTED_VEHICLE_TYPES = ["هاي إس (HiAce)", "ملاكي", "أوتوبيس 33", "أوتوبيس 50", "دوبل كابينة"] as const;
@@ -2794,6 +2795,7 @@ export async function fetchRentedOps(): Promise<RentedOp[]> {
     paid: !!r.paid,
     paidAt: r.paid_at ?? "",
     notes: r.notes ?? "",
+    missionId: r.mission_id ?? "",
   }));
 }
 
@@ -2852,4 +2854,95 @@ export function computeRentedLedger(ops: RentedOp[], filter: { owner: string; bu
     totalNet: rows.reduce((s, r) => s + rentedNetProfit(r), 0),
     unpaidIds: rows.filter((r) => !r.paid).map((r) => r.id),
   };
+}
+
+// ---- المأموريات (missions) ----
+// A DB trigger posts each mission to: the client statement + driver earnings (dispatch_shifts row)
+// and, for rented vehicles, to the owner's payable (rented_bus_operations row).
+
+export type MissionSource = "internal" | "rented";
+
+export interface Mission {
+  id: string;
+  date: string;
+  clientId: string;
+  clientName: string;
+  vehicleType: string;
+  source: MissionSource;
+  route: string;
+  waitingHours: number;
+  clientPrice: number;
+  vehicleCost: number;
+  driverFee: number;
+  busId: string;
+  driverId: string;
+  owner: string;
+  busLabel: string;
+  externalDriver: string;
+  notes: string;
+}
+
+export type MissionInput = Omit<Mission, "id" | "clientName">;
+
+export const MISSION_SOURCE_LABEL: Record<MissionSource, string> = {
+  internal: "سيارة من الأسطول الداخلي",
+  rented: "سيارة مستأجرة / خارجية",
+};
+
+/** صافي المأمورية = سعر الشركة − تكلفة السيارة − أجر السائق */
+export const missionNet = (m: { clientPrice: number; vehicleCost: number; driverFee: number }) => m.clientPrice - m.vehicleCost - m.driverFee;
+
+export async function fetchMissions(): Promise<Mission[]> {
+  const { data, error } = await supabase.from("missions").select("*, clients(client_name)").order("mission_date", { ascending: false }).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    date: r.mission_date,
+    clientId: r.client_id,
+    clientName: r.clients?.client_name ?? "—",
+    vehicleType: r.vehicle_type,
+    source: r.vehicle_source,
+    route: r.route_text,
+    waitingHours: Number(r.waiting_hours ?? 0),
+    clientPrice: Number(r.client_price ?? 0),
+    vehicleCost: Number(r.vehicle_cost ?? 0),
+    driverFee: Number(r.driver_fee ?? 0),
+    busId: r.bus_id ?? "",
+    driverId: r.driver_id ?? "",
+    owner: r.owner_name ?? "",
+    busLabel: r.bus_label ?? "",
+    externalDriver: r.external_driver ?? "",
+    notes: r.notes ?? "",
+  }));
+}
+
+const missionRow = (i: MissionInput) => ({
+  mission_date: i.date,
+  client_id: i.clientId,
+  vehicle_type: i.vehicleType,
+  vehicle_source: i.source,
+  route_text: i.route.trim(),
+  waiting_hours: i.waitingHours,
+  client_price: i.clientPrice,
+  vehicle_cost: i.source === "rented" ? i.vehicleCost : 0,
+  driver_fee: i.driverFee,
+  bus_id: i.source === "internal" ? i.busId || null : null,
+  driver_id: i.driverId || null,
+  owner_name: i.source === "rented" ? i.owner.trim() || null : null,
+  bus_label: i.source === "rented" ? i.busLabel.trim() || null : null,
+  external_driver: i.source === "rented" ? i.externalDriver.trim() || null : null,
+  notes: i.notes.trim() || null,
+});
+
+export async function addMission(input: MissionInput) {
+  const { error } = await supabase.from("missions").insert(missionRow(input));
+  if (error) throw error;
+}
+export async function updateMission(id: string, input: MissionInput) {
+  const { error } = await supabase.from("missions").update(missionRow(input)).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteMission(id: string) {
+  const { error } = await supabase.from("missions").delete().eq("id", id); // linked postings cascade
+  if (error) throw error;
 }

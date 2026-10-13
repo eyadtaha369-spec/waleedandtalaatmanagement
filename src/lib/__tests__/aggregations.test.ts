@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, applySupplierRange } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -396,7 +396,7 @@ describe("date ranges and rented ledger", () => {
     expect(inDateRange("2026-10-02", { from: "2026-10-01", to: "2026-10-01" })).toBe(false);
   });
   it("computeRentedLedger totals and filters", () => {
-    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", gasCost: 10, fare, clientFare: fare + 100, vehicleType: "ملاكي", routeName: "", paid, paidAt: "", notes: "" });
+    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", gasCost: 10, fare, clientFare: fare + 100, vehicleType: "ملاكي", routeName: "", missionId: "", paid, paidAt: "", notes: "" });
     const ops = [mk("1", "2026-10-01", "B1", 100, true), mk("2", "2026-10-05", "B1", 200, false), mk("3", "2026-09-05", "B2", 50, false)];
     const l = computeRentedLedger(ops, { owner: "أ", bus: "", range: { from: "2026-10-01", to: "2026-10-31" } });
     expect([l.totalDue, l.totalPaid, l.remaining, l.totalGas, l.unpaidIds]).toEqual([300, 100, 200, 20, ["2"]]);
@@ -408,5 +408,11 @@ describe("date ranges and rented ledger", () => {
     const e = (date: string, w: number, p: number) => ({ id: date, source: "payment" as const, date, kind: "سداد" as const, reference: "", description: "", withdrawals: w, payments: p, attachmentPath: null });
     const out = applySupplierRange([e("2026-09-01", 500, 0), e("2026-10-02", 100, 0)], { from: "2026-10-01", to: "2026-10-31" });
     expect(out.map((x) => x.withdrawals)).toEqual([500, 100]);
+  });
+});
+
+describe("missions", () => {
+  it("missionNet = client price - vehicle cost - driver fee", () => {
+    expect(missionNet({ clientPrice: 1000, vehicleCost: 600, driverFee: 150 })).toBe(250);
   });
 });

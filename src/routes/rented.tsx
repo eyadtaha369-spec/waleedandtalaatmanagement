@@ -218,8 +218,14 @@ function RentedPage() {
                 <td className="px-4 py-3"><StatusPill label={o.paid ? PAID : "معلق"} tone={o.paid ? "good" : "warn"} /></td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEdit(o)}><Pencil className="h-4 w-4" /></Button>
-                    <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(o)}><Trash2 className="h-4 w-4" /></Button>
+                    {o.missionId ? (
+                      <span className="text-xs text-muted-foreground">من المأموريات</span>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEdit(o)}><Pencil className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(o)}><Trash2 className="h-4 w-4" /></Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>

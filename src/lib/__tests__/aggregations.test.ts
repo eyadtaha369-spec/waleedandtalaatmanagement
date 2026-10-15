@@ -70,14 +70,14 @@ describe("computeDriverPayroll", () => {
       ],
     );
     expect(result).toEqual([
-      { driver: "أحمد", baseSalary: 3000, totalOvertime: 300, totalAdvances: 100, totalPenalties: 50, tripFees: 0, netSalary: 3150 , shiftEarnings: 0},
+      { driver: "أحمد", baseSalary: 3000, totalOvertime: 300, totalAdvances: 100, totalPenalties: 50, totalTolls: 0, tripFees: 0, netSalary: 3150 , shiftEarnings: 0},
     ]);
   });
 
   it("gives a driver with no shifts this month just their base salary", () => {
     const result = computeDriverPayroll([{ name: "سارة", base_salary: 2500 }], []);
     expect(result).toEqual([
-      { driver: "سارة", baseSalary: 2500, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 0, netSalary: 2500 , shiftEarnings: 0},
+      { driver: "سارة", baseSalary: 2500, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, totalTolls: 0, tripFees: 0, netSalary: 2500 , shiftEarnings: 0},
     ]);
   });
 
@@ -87,7 +87,7 @@ describe("computeDriverPayroll", () => {
       [{ driver: "أحمد", overtimeAllowance: 500, dailyAdvance: 0, penalty: 0 }],
     );
     expect(result.find((r) => r.driver === "محمد")).toEqual({
-      driver: "محمد", baseSalary: 2800, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 0, netSalary: 2800, shiftEarnings: 0,
+      driver: "محمد", baseSalary: 2800, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, totalTolls: 0, tripFees: 0, netSalary: 2800, shiftEarnings: 0,
     });
   });
 
@@ -98,7 +98,7 @@ describe("computeDriverPayroll", () => {
       [{ driver: "أحمد", fee: 200 }, { driver: "أحمد", fee: 150 }],
     );
     expect(result[0]).toEqual({
-      driver: "أحمد", baseSalary: 3000, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, tripFees: 350, netSalary: 3350, shiftEarnings: 0,
+      driver: "أحمد", baseSalary: 3000, totalOvertime: 0, totalAdvances: 0, totalPenalties: 0, totalTolls: 0, tripFees: 350, netSalary: 3350, shiftEarnings: 0,
     });
   });
 });

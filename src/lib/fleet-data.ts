@@ -14,7 +14,7 @@ export interface Bus {
   driver: string;
   status: BusStatus;
   fuelTarget: number | null; // معيار الاستهلاك المستهدف
-  fuelBasis: "shift" | "km100"; // لتر/وردية أو لتر/100كم
+  fuelBasis: "shift" | "km100" | "km"; // لتر/وردية أو لتر/100كم أو لتر/كم
 }
 
 

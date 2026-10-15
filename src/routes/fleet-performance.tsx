@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { currency, type Bus } from "@/lib/fleet-data";
 import {
   FUEL_BASIS_LABEL,
+  FUEL_BASIS_SHORT,
   computeBusProfile,
   fetchBusProfile,
   fetchBuses,
@@ -105,7 +106,7 @@ function FleetPerformancePage() {
     setTimeout(() => window.print(), 150);
   };
 
-  const unit = basis === "km100" ? "لتر/100كم" : "لتر/وردية";
+  const unit = FUEL_BASIS_LABEL[basis].replace(/ /g, "");
   const fuel = profile?.fuel;
   const border = { border: "1px solid #000", padding: 6 } as const;
 
@@ -147,7 +148,7 @@ function FleetPerformancePage() {
                   </div>
                   <div className="rounded-lg border border-border bg-secondary/20 p-2">
                     <dt className="text-muted-foreground">معيار السولار</dt>
-                    <dd className="font-bold">{b.fuelTarget != null ? `${num(b.fuelTarget, 2)} ${b.fuelBasis === "km100" ? "ل/100كم" : "ل/وردية"}` : "غير محدد"}</dd>
+                    <dd className="font-bold">{b.fuelTarget != null ? `${num(b.fuelTarget, 2)} ${FUEL_BASIS_SHORT[b.fuelBasis]}` : "غير محدد"}</dd>
                   </div>
                 </dl>
                 <p className="mt-3 text-xs text-primary">اضغط لفتح ملف العربية ←</p>
@@ -179,8 +180,9 @@ function FleetPerformancePage() {
                   <Select value={basis} onValueChange={(v) => setBasis(v as FuelBasis)}>
                     <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="shift">{FUEL_BASIS_LABEL.shift}</SelectItem>
+                      <SelectItem value="km">{FUEL_BASIS_LABEL.km}</SelectItem>
                       <SelectItem value="km100">{FUEL_BASIS_LABEL.km100}</SelectItem>
+                      <SelectItem value="shift">{FUEL_BASIS_LABEL.shift}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -208,7 +210,7 @@ function FleetPerformancePage() {
                 </div>
               )}
               {fuel.status === "no-target" && <p className="mb-4 rounded-xl border border-border bg-secondary/30 p-3 text-sm text-muted-foreground">حدّد «معيار الاستهلاك المستهدف» لهذه العربية لتفعيل كشف الهدر.</p>}
-              {fuel.status === "no-data" && <p className="mb-4 rounded-xl border border-border bg-secondary/30 p-3 text-sm text-muted-foreground">لا توجد بيانات سولار أو {basis === "km100" ? "مسافة (عداد)" : "ورديات"} كافية في هذه الفترة لحساب الاستهلاك.</p>}
+              {fuel.status === "no-data" && <p className="mb-4 rounded-xl border border-border bg-secondary/30 p-3 text-sm text-muted-foreground">لا توجد بيانات سولار أو {basis === "shift" ? "ورديات" : "مسافة (عداد)"} كافية في هذه الفترة لحساب الاستهلاك.</p>}
 
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard label="الورديات والمشاوير" value={String(profile.shifts)} icon={RouteIcon} />

@@ -448,3 +448,15 @@ describe("fuel waste analysis", () => {
     expect(computeFuelAnalysis({ liters: 10, cost: 100, km: 0, shifts: 2, target: null, basis: "shift" }).status).toBe("no-target");
   });
 });
+
+describe("fuel waste per km", () => {
+  it("target 0.25 L/km vs actual 0.30 flags 20% waste", () => {
+    const r = computeFuelAnalysis({ liters: 300, cost: 3000, km: 1000, shifts: 10, target: 0.25, basis: "km" });
+    expect(r.status).toBe("waste");
+    expect(r.actual).toBeCloseTo(0.3);
+    expect(Math.round(r.wastePct)).toBe(20);
+    expect(r.wastedLiters).toBeCloseTo(50);
+    expect(r.excessCost).toBeCloseTo(500);
+    expect(computeFuelAnalysis({ liters: 240, cost: 2400, km: 1000, shifts: 10, target: 0.25, basis: "km" }).status).toBe("ok");
+  });
+});

@@ -38,7 +38,7 @@ export async function fetchBuses(): Promise<Bus[]> {
     driver: b.routes?.[0]?.drivers?.name ?? "—",
     status: b.status ?? "تعمل",
     fuelTarget: b.fuel_target_ratio == null ? null : Number(b.fuel_target_ratio),
-    fuelBasis: b.fuel_target_basis === "km100" ? "km100" : "shift",
+    fuelBasis: b.fuel_target_basis === "km100" ? "km100" : b.fuel_target_basis === "km" ? "km" : "shift",
   }));
 }
 
@@ -2964,8 +2964,9 @@ export async function deleteMission(id: string) {
 
 // ---- ملف وكفاءة الأسطول (bus master profile + fuel waste) ----
 
-export type FuelBasis = "shift" | "km100";
-export const FUEL_BASIS_LABEL: Record<FuelBasis, string> = { shift: "لتر / وردية", km100: "لتر / 100 كم" };
+export type FuelBasis = "shift" | "km100" | "km";
+export const FUEL_BASIS_LABEL: Record<FuelBasis, string> = { km: "لتر / كيلو", km100: "لتر / 100 كم", shift: "لتر / وردية" };
+export const FUEL_BASIS_SHORT: Record<FuelBasis, string> = { km: "ل/كم", km100: "ل/100كم", shift: "ل/وردية" };
 
 export interface BusActivity {
   key: string;
@@ -3063,7 +3064,7 @@ export interface FuelAnalysis {
 
 /** Actual = liters / shifts (or / (km/100)). Waste when actual > target. */
 export function computeFuelAnalysis(input: { liters: number; cost: number; km: number; shifts: number; target: number | null; basis: FuelBasis }): FuelAnalysis {
-  const units = input.basis === "km100" ? input.km / 100 : input.shifts;
+  const units = input.basis === "km" ? input.km : input.basis === "km100" ? input.km / 100 : input.shifts;
   const base = { liters: input.liters, cost: input.cost, km: input.km, units, target: input.target };
   if (!input.target || input.target <= 0) return { ...base, actual: units > 0 ? input.liters / units : null, status: "no-target", wastePct: 0, wastedLiters: 0, excessCost: 0 };
   if (units <= 0 || input.liters <= 0) return { ...base, actual: null, status: "no-data", wastePct: 0, wastedLiters: 0, excessCost: 0 };

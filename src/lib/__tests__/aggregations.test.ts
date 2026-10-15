@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -491,5 +491,24 @@ describe("odometer deltas between fills", () => {
     expect(f.get("l")?.distance).toBe(200);
     expect(f.get("n")?.distance).toBe(300);
     expect(f.get("bad")?.distance).toBeNull();
+  });
+});
+
+describe("computeItemLedger", () => {
+  const mv = (id: string, kind: "IN" | "OUT", date: string, q: number, p = 10) => ({ id, kind, date, at: `${date}T10:00:00Z`, party: "x", quantity: q, unitPrice: p });
+  it("anchors running balance on current stock and respects range", () => {
+    // manual opening 5, +20 (Jan), -8 (Feb), +3 (Mar) => 20 now
+    const m = [mv("a", "IN", "2026-01-05", 20), mv("b", "OUT", "2026-02-05", 8), mv("c", "IN", "2026-03-05", 3)];
+    const l = computeItemLedger(m, { from: "2026-02-01", to: "2026-03-31" }, 20, 10);
+    expect(l.rows.map((r) => r.balance)).toEqual([17, 20]);
+    expect(l.openingBalance).toBe(25);
+    expect(l.totalIn).toBe(3);
+    expect(l.totalOut).toBe(8);
+    expect(l.stockValue).toBe(200);
+  });
+  it("opening balance with empty range rows", () => {
+    const l = computeItemLedger([mv("a", "IN", "2026-01-05", 4)], { from: "2026-02-01", to: "2026-02-28" }, 4, 1);
+    expect(l.rows).toEqual([]);
+    expect(l.openingBalance).toBe(4);
   });
 });

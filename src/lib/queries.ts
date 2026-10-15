@@ -2518,6 +2518,97 @@ export async function fetchInventoryPurchases(): Promise<InventoryPurchase[]> {
   }));
 }
 
+// ---- Item movement statement (كشف حركة الصنف) ----
+
+export interface ItemMovement {
+  id: string;
+  kind: "IN" | "OUT";
+  /** yyyy-mm-dd */
+  date: string;
+  /** ISO timestamp used for ordering and the time-of-day column */
+  at: string;
+  party: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface ItemLedgerRow extends ItemMovement {
+  qtyIn: number;
+  qtyOut: number;
+  value: number;
+  balance: number;
+}
+
+export interface ItemLedger {
+  openingBalance: number;
+  rows: ItemLedgerRow[];
+  totalIn: number;
+  totalOut: number;
+  totalInValue: number;
+  totalOutValue: number;
+  currentStock: number;
+  stockValue: number;
+}
+
+export async function fetchItemMovements(itemId: string): Promise<ItemMovement[]> {
+  const { data, error } = await supabase
+    .from("inventory_transactions")
+    .select("id, type, quantity, unit_price, tx_date, created_at, suppliers(supplier_name), maintenance_orders(order_number, buses(plate_number, bus_code))")
+    .eq("inventory_id", itemId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((t: any) => {
+    const kind: "IN" | "OUT" = t.type === "IN" ? "IN" : "OUT";
+    const order = t.maintenance_orders;
+    const bus = order?.buses;
+    const party =
+      kind === "IN"
+        ? t.suppliers?.supplier_name ?? "—"
+        : order
+          ? `عربية ${bus?.plate_number ?? bus?.bus_code ?? "—"} • أمر صيانة ${order.order_number ?? "—"}`
+          : "صرف / تسوية مخزنية";
+    return {
+      id: t.id,
+      kind,
+      date: t.tx_date ?? String(t.created_at).slice(0, 10),
+      at: String(t.created_at),
+      party,
+      quantity: Number(t.quantity),
+      unitPrice: Number(t.unit_price ?? 0),
+    };
+  });
+}
+
+/**
+ * Chronological statement for one item. The running balance is anchored on the
+ * item's current stock, so stock that was entered manually (without a movement)
+ * is still reflected as an opening balance. Rows are filtered to the range
+ * after the balance has been computed over the full history.
+ */
+export function computeItemLedger(movements: ItemMovement[], range: DateRange, currentStock: number, unitPrice: number): ItemLedger {
+  const sorted = [...movements].sort((a, b) => (a.date === b.date ? a.at.localeCompare(b.at) : a.date.localeCompare(b.date)));
+  const net = sorted.reduce((sum, m) => sum + (m.kind === "IN" ? m.quantity : -m.quantity), 0);
+  const base = currentStock - net;
+  let bal = base;
+  const all: ItemLedgerRow[] = sorted.map((m) => {
+    bal += m.kind === "IN" ? m.quantity : -m.quantity;
+    return { ...m, qtyIn: m.kind === "IN" ? m.quantity : 0, qtyOut: m.kind === "OUT" ? m.quantity : 0, value: m.quantity * m.unitPrice, balance: bal };
+  });
+  const rows = all.filter((r) => inDateRange(r.date, range));
+  const first = rows[0];
+  const openingBalance = first ? first.balance - first.qtyIn + first.qtyOut : all.filter((r) => range.from && r.date < range.from).at(-1)?.balance ?? base;
+  return {
+    openingBalance,
+    rows,
+    totalIn: rows.reduce((s, r) => s + r.qtyIn, 0),
+    totalOut: rows.reduce((s, r) => s + r.qtyOut, 0),
+    totalInValue: rows.reduce((s, r) => s + (r.kind === "IN" ? r.value : 0), 0),
+    totalOutValue: rows.reduce((s, r) => s + (r.kind === "OUT" ? r.value : 0), 0),
+    currentStock,
+    stockValue: currentStock * unitPrice,
+  };
+}
+
 // ---- Executive Monthly Financial Report (Spec #2) ----
 
 export interface MonthlyFinancialReport {

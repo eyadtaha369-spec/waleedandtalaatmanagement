@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, Check, ChevronsUpDown, FileText, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { BusPicker } from "@/components/bus-picker";
+import { ItemStatementSheet } from "@/components/item-statement";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -490,6 +491,8 @@ function WorkshopPage() {
     }
   };
 
+  const [statementItem, setStatementItem] = useState<InventoryItem | null>(null);
+
   // ---------- bus maintenance ledger ----------
   const ledger = useMemo(() => {
     const busByOrder = new Map(orders.map((o) => [o.id, o.bus]));
@@ -655,6 +658,9 @@ function WorkshopPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
+                        <Button size="sm" variant="outline" className="border-border whitespace-nowrap" onClick={() => setStatementItem(i)}>
+                          كشف حركة الصنف 📋
+                        </Button>
                         <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditItem(i)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -909,6 +915,8 @@ function WorkshopPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ItemStatementSheet item={statementItem} onClose={() => setStatementItem(null)} />
 
       {/* printable maintenance ledger (only visible when printing) */}
       {ledgerOpen && ledgerBus && ledger.rows.length > 0 && (

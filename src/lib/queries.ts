@@ -244,6 +244,94 @@ export async function addStudent(input: {
   if (error) throw error;
 }
 
+// ---- Subscription finance dashboard & expenses ----
+
+export interface SubscriptionExpense {
+  id: string;
+  date: string;
+  description: string;
+  routeName: string;
+  amount: number;
+  payFrom: string;
+  notes: string;
+}
+
+export interface SubscriptionExpenseInput {
+  date: string;
+  description: string;
+  routeName: string;
+  amount: number;
+  payFrom: string;
+  notes: string;
+}
+
+export interface SubscriptionFinance {
+  collected: number;
+  remaining: number;
+  expenses: number;
+  net: number;
+}
+
+/** collected = Σ paid, remaining = Σ max(0, total − paid), net = collected − expenses. */
+export function computeSubscriptionFinance(
+  students: { monthly: number; paid: number }[],
+  expenses: { amount: number }[],
+): SubscriptionFinance {
+  const collected = students.reduce((s, x) => s + x.paid, 0);
+  const remaining = students.reduce((s, x) => s + Math.max(0, x.monthly - x.paid), 0);
+  const exp = expenses.reduce((s, x) => s + x.amount, 0);
+  return { collected, remaining, expenses: exp, net: collected - exp };
+}
+
+export async function fetchSubscriptionExpenses(): Promise<SubscriptionExpense[]> {
+  const { data, error } = await supabase.from("subscription_expenses").select("*").order("date", { ascending: false }).order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((e: any) => ({
+    id: e.id,
+    date: e.date,
+    description: e.description,
+    routeName: e.route_name ?? "",
+    amount: Number(e.amount ?? 0),
+    payFrom: e.pay_from ?? "",
+    notes: e.notes ?? "",
+  }));
+}
+
+const subscriptionExpenseRow = async (input: SubscriptionExpenseInput) => {
+  if (!input.description.trim()) throw new Error("أدخل بيان المصروف");
+  if (!(input.amount > 0)) throw new Error("أدخل مبلغًا صحيحًا");
+  let routeId: string | null = null;
+  if (input.routeName) {
+    const { data } = await supabase.from("routes").select("id").eq("route_name", input.routeName).maybeSingle();
+    routeId = data?.id ?? null;
+  }
+  return {
+    date: input.date || undefined,
+    description: input.description.trim(),
+    route_id: routeId,
+    route_name: input.routeName || null,
+    amount: input.amount,
+    pay_from: input.payFrom || "الخزينة الرئيسية",
+    notes: input.notes.trim() || null,
+  };
+};
+
+/** The database trigger also posts the matching withdrawal to the treasury. */
+export async function addSubscriptionExpense(input: SubscriptionExpenseInput) {
+  const { error } = await supabase.from("subscription_expenses").insert(await subscriptionExpenseRow(input));
+  if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ المصروف"));
+}
+
+export async function updateSubscriptionExpense(id: string, input: SubscriptionExpenseInput) {
+  const { error } = await supabase.from("subscription_expenses").update(await subscriptionExpenseRow(input)).eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تعديل المصروف"));
+}
+
+export async function deleteSubscriptionExpense(id: string) {
+  const { error } = await supabase.from("subscription_expenses").delete().eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر حذف المصروف"));
+}
+
 export async function fetchPaymentHistory(studentId: string) {
   const { data, error } = await supabase
     .from("payments")

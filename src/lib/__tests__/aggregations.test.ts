@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -568,5 +568,15 @@ describe("student import pricing, refunds and dedup", () => {
     ]);
     expect(rev.map((r) => [r.target, r.remaining])).toEqual([[13500, 6500], [9500, 0], [4000, 0], [13500, 0]]);
     expect(summarizeImport(rev)).toEqual({ approved: 4, collected: 35500, remaining: 6500 });
+  });
+});
+
+describe("computeSubscriptionFinance", () => {
+  it("sums collected, remaining (never negative), expenses and net", () => {
+    const f = computeSubscriptionFinance(
+      [{ monthly: 13500, paid: 5000 }, { monthly: 9500, paid: 9500 }, { monthly: 4000, paid: 4500 }],
+      [{ amount: 1200 }, { amount: 800 }],
+    );
+    expect(f).toEqual({ collected: 19000, remaining: 8500, expenses: 2000, net: 17000 });
   });
 });

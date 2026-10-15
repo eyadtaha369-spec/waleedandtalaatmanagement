@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, Wallet, Hourglass, Receipt, TrendingUp } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
+import { DataTable, PageHeader, Panel, StatCard, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SubscriptionExpensesPanel } from "@/components/subscription-expenses";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +35,10 @@ import {
   updateStudent,
   deleteStudent,
   bulkInsertStudents,
+  fetchRoutes,
+  fetchSubscriptionExpenses,
+  computeSubscriptionFinance,
+  type SubscriptionExpense,
 } from "@/lib/queries";
 import { CsvImportDialog } from "@/components/csv-import-dialog";
 import { StudentImportDialog } from "@/components/student-import-dialog";
@@ -51,6 +57,8 @@ export const Route = createFileRoute("/operations")({
 
 function OperationsPage() {
   const [studentsList, setStudentsList] = useState<Student[]>([]);
+  const [subExpenses, setSubExpenses] = useState<SubscriptionExpense[]>([]);
+  const [routeNames, setRouteNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -70,7 +78,10 @@ function OperationsPage() {
     setLoading(true);
     setError(null);
     try {
-      setStudentsList(await fetchStudents());
+      const [st, ex, rt] = await Promise.all([fetchStudents(), fetchSubscriptionExpenses(), fetchRoutes().catch(() => [])]);
+      setStudentsList(st);
+      setSubExpenses(ex);
+      setRouteNames(rt.map((r) => r.name));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
     } finally {
@@ -92,6 +103,8 @@ function OperationsPage() {
     () => studentsList.filter((s) => (s.name + s.route).includes(query) || query === ""),
     [studentsList, query],
   );
+
+  const finance = useMemo(() => computeSubscriptionFinance(studentsList, subExpenses), [studentsList, subExpenses]);
 
   const recordPayment = async () => {
     if (!student || !payAmount.trim()) return;
@@ -163,6 +176,22 @@ function OperationsPage() {
         </p>
       )}
 
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="إجمالي التحصيل الفعلي (المحصل)" value={currency(finance.collected)} icon={Wallet} />
+        <StatCard label="إجمالي المتبقي (الأقساط المستحقة)" value={currency(finance.remaining)} icon={Hourglass} />
+        <StatCard label="إجمالي المصروفات الخاصة بالاشتراكات" value={currency(finance.expenses)} icon={Receipt} />
+        <StatCard label="الصافي المتبقي في الخزينة / الأرباح الصافية" value={currency(finance.net)} hint={finance.net < 0 ? "عجز: المصروفات أعلى من التحصيل" : "التحصيل − المصروفات"} icon={TrendingUp} />
+      </div>
+
+      <Tabs defaultValue="students" dir="rtl">
+        <TabsList className="mb-4">
+          <TabsTrigger value="students">اشتراكات الطلاب</TabsTrigger>
+          <TabsTrigger value="expenses">مصروفات الاشتراكات والخطوط</TabsTrigger>
+        </TabsList>
+        <TabsContent value="expenses">
+          <SubscriptionExpensesPanel expenses={subExpenses} routeNames={routeNames} onChanged={loadAll} />
+        </TabsContent>
+        <TabsContent value="students">
       <Panel title="اشتراكات الطلاب">
         <Toolbar
           query={query}
@@ -226,6 +255,8 @@ function OperationsPage() {
           )}
         </DataTable>
       </Panel>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={!!student} onOpenChange={(o) => !o && setStudent(null)}>
         <DialogContent className="glass text-foreground" dir="rtl">

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -429,5 +429,22 @@ describe("live payroll", () => {
     expect(rows[0]?.netSalary).toBe(5000 + 100 + 400 + 150 - (200 + 50 + 30));
     const f = computeFinalPayroll({ baseSalary: 5000, shiftAllowances: 250, tripFees: 400, advances: 200, penalties: 50, tolls: 30 });
     expect(f.net).toBe(5000 + 250 + 400 - 280);
+  });
+});
+
+describe("fuel waste analysis", () => {
+  it("flags waste above target with liters and cost", () => {
+    const r = computeFuelAnalysis({ liters: 300, cost: 3000, km: 0, shifts: 20, target: 10, basis: "shift" });
+    expect(r.status).toBe("waste");
+    expect(r.actual).toBe(15);
+    expect(Math.round(r.wastePct)).toBe(50);
+    expect(r.wastedLiters).toBe(100);
+    expect(r.excessCost).toBe(1000);
+  });
+  it("is ok within target, handles km basis and missing data", () => {
+    expect(computeFuelAnalysis({ liters: 150, cost: 1500, km: 0, shifts: 20, target: 10, basis: "shift" }).status).toBe("ok");
+    expect(computeFuelAnalysis({ liters: 40, cost: 400, km: 1000, shifts: 5, target: 35, basis: "km100" }).status).toBe("ok");
+    expect(computeFuelAnalysis({ liters: 0, cost: 0, km: 0, shifts: 0, target: 10, basis: "shift" }).status).toBe("no-data");
+    expect(computeFuelAnalysis({ liters: 10, cost: 100, km: 0, shifts: 2, target: null, basis: "shift" }).status).toBe("no-target");
   });
 });

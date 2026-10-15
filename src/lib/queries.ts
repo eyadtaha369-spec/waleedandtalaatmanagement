@@ -37,6 +37,8 @@ export async function fetchBuses(): Promise<Bus[]> {
     lastMaintenance: "—",
     driver: b.routes?.[0]?.drivers?.name ?? "—",
     status: b.status ?? "تعمل",
+    fuelTarget: b.fuel_target_ratio == null ? null : Number(b.fuel_target_ratio),
+    fuelBasis: b.fuel_target_basis === "km100" ? "km100" : "shift",
   }));
 }
 
@@ -2957,5 +2959,144 @@ export async function updateMission(id: string, input: MissionInput) {
 }
 export async function deleteMission(id: string) {
   const { error } = await supabase.from("missions").delete().eq("id", id); // linked postings cascade
+  if (error) throw error;
+}
+
+// ---- ملف وكفاءة الأسطول (bus master profile + fuel waste) ----
+
+export type FuelBasis = "shift" | "km100";
+export const FUEL_BASIS_LABEL: Record<FuelBasis, string> = { shift: "لتر / وردية", km100: "لتر / 100 كم" };
+
+export interface BusActivity {
+  key: string;
+  date: string;
+  kind: "وردية" | "رحلة" | "مأمورية" | "حركة يومية";
+  route: string;
+  client: string;
+  driver: string;
+  revenue: number;
+}
+
+export interface BusMaintenanceRow {
+  id: string;
+  code: string;
+  date: string;
+  issue: string;
+  status: string;
+  parts: { name: string; quantity: number; unitType: string; total: number }[];
+  total: number;
+}
+
+export interface BusFuelRow {
+  id: string;
+  date: string;
+  driver: string;
+  liters: number;
+  cost: number;
+  km: number;
+}
+
+export interface BusProfileData {
+  activities: BusActivity[];
+  maintenance: BusMaintenanceRow[];
+  fuel: BusFuelRow[];
+}
+
+export async function fetchBusProfile(busId: string, range: DateRange): Promise<BusProfileData> {
+  const { start, end } = periodBounds(range);
+  const [att, disp, trips, orders, fuel] = await Promise.all([
+    supabase.from("attendance").select("id, date, status, drivers(name), routes(route_name)").eq("bus_id", busId).gte("date", start).lt("date", end),
+    supabase.from("dispatch_shifts").select("id, op_date, route, bus_value, mission_id, rented_op_id, drivers(name), clients(client_name)").eq("bus_id", busId).gte("op_date", start).lt("op_date", end),
+    supabase.from("trips").select("id, trip_date, client_name, destination, total_price, status, drivers(name)").eq("bus_id", busId).neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
+    supabase.from("maintenance_orders").select("id, order_number, order_date, created_at, issue_description, status, total_cost, maintenance_order_items(quantity, unit_price, inventory(name, unit_type))").eq("bus_id", busId),
+    supabase.from("fuel_logs").select("id, date, odo_start, odo_end, liters, cost, drivers(name)").eq("bus_id", busId).gte("date", start).lt("date", end).order("date", { ascending: false }),
+  ]);
+  for (const r of [att, disp, trips, orders, fuel]) if (r.error) throw r.error;
+
+  const dispatchDates = new Set((disp.data ?? []).map((d: any) => d.op_date));
+  const activities: BusActivity[] = [
+    ...(disp.data ?? []).map((d: any): BusActivity => ({
+      key: `d${d.id}`, date: d.op_date, kind: d.mission_id ? "مأمورية" : "وردية",
+      route: d.route ?? "", client: d.clients?.client_name ?? "—", driver: d.drivers?.name ?? "—", revenue: Number(d.bus_value ?? 0),
+    })),
+    ...(trips.data ?? []).map((t: any): BusActivity => ({
+      key: `t${t.id}`, date: String(t.trip_date).slice(0, 10), kind: "رحلة",
+      route: t.destination ?? "", client: t.client_name ?? "—", driver: t.drivers?.name ?? "—", revenue: Number(t.total_price ?? 0),
+    })),
+    // a daily-operations record only counts when no dispatch row already covers that bus-day
+    ...(att.data ?? [])
+      .filter((a: any) => a.status !== "غائب" && !dispatchDates.has(a.date))
+      .map((a: any): BusActivity => ({
+        key: `a${a.id}`, date: a.date, kind: "حركة يومية", route: a.routes?.route_name ?? "", client: "—", driver: a.drivers?.name ?? "—", revenue: 0,
+      })),
+  ].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+  const maintenance: BusMaintenanceRow[] = (orders.data ?? [])
+    .map((o: any) => ({ o, date: (o.order_date ?? String(o.created_at).slice(0, 10)) as string }))
+    .filter(({ date }) => date >= start && date < end)
+    .map(({ o, date }) => ({
+      id: o.id, code: o.order_number, date, issue: o.issue_description ?? "—", status: o.status ?? "—", total: Number(o.total_cost ?? 0),
+      parts: (o.maintenance_order_items ?? []).map((i: any) => ({
+        name: i.inventory?.name ?? "صنف", unitType: i.inventory?.unit_type ?? "", quantity: Number(i.quantity ?? 0), total: Number(i.quantity ?? 0) * Number(i.unit_price ?? 0),
+      })),
+    }))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const fuelRows: BusFuelRow[] = (fuel.data ?? []).map((f: any) => ({
+    id: f.id, date: f.date, driver: f.drivers?.name ?? "—", liters: Number(f.liters ?? 0), cost: Number(f.cost ?? 0), km: Math.max(Number(f.odo_end ?? 0) - Number(f.odo_start ?? 0), 0),
+  }));
+  return { activities, maintenance, fuel: fuelRows };
+}
+
+export interface FuelAnalysis {
+  liters: number;
+  cost: number;
+  km: number;
+  units: number; // shifts, or hundreds of km
+  actual: number | null;
+  target: number | null;
+  status: "no-target" | "no-data" | "waste" | "ok";
+  wastePct: number;
+  wastedLiters: number;
+  excessCost: number;
+}
+
+/** Actual = liters / shifts (or / (km/100)). Waste when actual > target. */
+export function computeFuelAnalysis(input: { liters: number; cost: number; km: number; shifts: number; target: number | null; basis: FuelBasis }): FuelAnalysis {
+  const units = input.basis === "km100" ? input.km / 100 : input.shifts;
+  const base = { liters: input.liters, cost: input.cost, km: input.km, units, target: input.target };
+  if (!input.target || input.target <= 0) return { ...base, actual: units > 0 ? input.liters / units : null, status: "no-target", wastePct: 0, wastedLiters: 0, excessCost: 0 };
+  if (units <= 0 || input.liters <= 0) return { ...base, actual: null, status: "no-data", wastePct: 0, wastedLiters: 0, excessCost: 0 };
+  const actual = input.liters / units;
+  if (actual <= input.target) return { ...base, actual, status: "ok", wastePct: 0, wastedLiters: 0, excessCost: 0 };
+  const wastedLiters = (actual - input.target) * units;
+  const price = input.liters > 0 ? input.cost / input.liters : 0;
+  return { ...base, actual, status: "waste", wastePct: ((actual - input.target) / input.target) * 100, wastedLiters, excessCost: wastedLiters * price };
+}
+
+export function computeBusProfile(data: BusProfileData, target: number | null, basis: FuelBasis) {
+  const revenue = data.activities.reduce((s, a) => s + a.revenue, 0);
+  const maintenanceTotal = data.maintenance.reduce((s, m) => s + m.total, 0);
+  const liters = data.fuel.reduce((s, f) => s + f.liters, 0);
+  const fuelCost = data.fuel.reduce((s, f) => s + f.cost, 0);
+  const km = data.fuel.reduce((s, f) => s + f.km, 0);
+  const shifts = data.activities.length;
+  const drivers = new Map<string, number>();
+  for (const a of data.activities) if (a.driver !== "—") drivers.set(a.driver, (drivers.get(a.driver) ?? 0) + 1);
+  return {
+    shifts,
+    trips: data.activities.filter((a) => a.kind === "رحلة").length,
+    revenue,
+    maintenanceTotal,
+    liters,
+    fuelCost,
+    km,
+    drivers: [...drivers.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    fuel: computeFuelAnalysis({ liters, cost: fuelCost, km, shifts, target, basis }),
+  };
+}
+
+export async function updateBusFuelTarget(id: string, target: number | null, basis: FuelBasis) {
+  const { error } = await supabase.from("buses").update({ fuel_target_ratio: target, fuel_target_basis: basis }).eq("id", id);
   if (error) throw error;
 }

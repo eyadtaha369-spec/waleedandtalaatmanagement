@@ -16,6 +16,7 @@ import { Route as ClientsRouteImport } from './routes/clients'
 import { Route as DispatchRouteImport } from './routes/dispatch'
 import { Route as FinanceRouteImport } from './routes/finance'
 import { Route as FleetRouteImport } from './routes/fleet'
+import { Route as FleetPerformanceRouteImport } from './routes/fleet-performance'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
 import { Route as PayrollRouteImport } from './routes/payroll'
@@ -60,6 +61,11 @@ const FinanceRoute = FinanceRouteImport.update({
 const FleetRoute = FleetRouteImport.update({
   id: '/fleet',
   path: '/fleet',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FleetPerformanceRoute = FleetPerformanceRouteImport.update({
+  id: '/fleet-performance',
+  path: '/fleet-performance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -121,6 +127,7 @@ export interface FileRoutesByFullPath {
   '/dispatch': typeof DispatchRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/fleet-performance': typeof FleetPerformanceRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
@@ -140,6 +147,7 @@ export interface FileRoutesByTo {
   '/dispatch': typeof DispatchRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/fleet-performance': typeof FleetPerformanceRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
@@ -160,6 +168,7 @@ export interface FileRoutesById {
   '/dispatch': typeof DispatchRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
+  '/fleet-performance': typeof FleetPerformanceRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/payroll': typeof PayrollRoute
@@ -181,6 +190,7 @@ export interface FileRouteTypes {
     | '/dispatch'
     | '/finance'
     | '/fleet'
+    | '/fleet-performance'
     | '/login'
     | '/operations'
     | '/payroll'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/dispatch'
     | '/finance'
     | '/fleet'
+    | '/fleet-performance'
     | '/login'
     | '/operations'
     | '/payroll'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/dispatch'
     | '/finance'
     | '/fleet'
+    | '/fleet-performance'
     | '/login'
     | '/operations'
     | '/payroll'
@@ -239,6 +251,7 @@ export interface RootRouteChildren {
   DispatchRoute: typeof DispatchRoute
   FinanceRoute: typeof FinanceRoute
   FleetRoute: typeof FleetRoute
+  FleetPerformanceRoute: typeof FleetPerformanceRoute
   LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
   PayrollRoute: typeof PayrollRoute
@@ -300,6 +313,13 @@ declare module '@tanstack/react-router' {
       path: '/fleet'
       fullPath: '/fleet'
       preLoaderRoute: typeof FleetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fleet-performance': {
+      id: '/fleet-performance'
+      path: '/fleet-performance'
+      fullPath: '/fleet-performance'
+      preLoaderRoute: typeof FleetPerformanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -383,6 +403,7 @@ const rootRouteChildren: RootRouteChildren = {
   DispatchRoute: DispatchRoute,
   FinanceRoute: FinanceRoute,
   FleetRoute: FleetRoute,
+  FleetPerformanceRoute: FleetPerformanceRoute,
   LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
   PayrollRoute: PayrollRoute,

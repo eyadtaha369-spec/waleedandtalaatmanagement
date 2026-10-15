@@ -18,6 +18,7 @@ import {
   Wallet,
   Wrench,
   Bell,
+  Gauge,
   Car,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -40,6 +41,7 @@ import { motion } from "framer-motion";
 const nav = [
   { to: "/", label: "لوحة التحكّم", icon: LayoutDashboard, roles: null },
   { to: "/fleet", label: "الأسطول والسائقون", icon: Bus, roles: null },
+  { to: "/fleet-performance", label: "ملف وكفاءة الأسطول", icon: Gauge, roles: ["admin", "accountant", "dispatcher"] },
   { to: "/dispatch", label: "الحركة والورديات اليومية", icon: Truck, roles: ["admin", "accountant", "dispatcher"] },
   { to: "/rented", label: "السيارات المستأجرة", icon: Car, roles: ["admin", "accountant", "dispatcher"] },
   { to: "/trips", label: "إدارة الرحلات والتنبيهات", icon: MapPinned, roles: ["admin", "accountant", "dispatcher"] },

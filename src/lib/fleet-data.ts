@@ -13,6 +13,8 @@ export interface Bus {
   lastMaintenance: string;
   driver: string;
   status: BusStatus;
+  fuelTarget: number | null; // معيار الاستهلاك المستهدف
+  fuelBasis: "shift" | "km100"; // لتر/وردية أو لتر/100كم
 }
 
 

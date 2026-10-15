@@ -37,6 +37,7 @@ import {
   saveMaintenanceOrder,
   computeOrderTotals,
   computeFuelByBus,
+  dbErrorMessage,
   computeFuelFills,
   computeBusLedger,
   addInventoryItem,
@@ -440,6 +441,9 @@ function WorkshopPage() {
       setError("اختر رقم العربية واسم السائق");
       return;
     }
+    if (!fuelForm.date) return setError("أدخل تاريخ التموين");
+    if (!(Number(fuelForm.currentOdometer) > 0)) return setError("أدخل العداد الحالي");
+    if (!(Number(fuelForm.liters) > 0)) return setError("أدخل عدد اللترات");
     setSaving(true);
     setError(null);
     try {
@@ -457,7 +461,8 @@ function WorkshopPage() {
       await loadAll();
       setAddingFuel(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ سجل السولار");
+      console.error(e);
+      setError(dbErrorMessage(e, "تعذر حفظ سجل السولار"));
     } finally {
       setSaving(false);
     }
@@ -1130,6 +1135,7 @@ function WorkshopPage() {
               </div>
             ))}
           </div>
+          {error && <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitFuel} disabled={saving}>
               {saving ? "جارِ الحفظ..." : fuelForm.id ? "حفظ التعديلات" : "حفظ السجل"}

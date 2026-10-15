@@ -472,6 +472,16 @@ export interface FuelLogInput {
   station: string;
 }
 
+/** Readable Arabic message that keeps the exact database text (PostgREST errors are not `Error` instances). */
+export function dbErrorMessage(e: unknown, fallback: string) {
+  const o = e as { code?: string; message?: string; details?: string; hint?: string } | null;
+  if (!o) return fallback;
+  if (o.code === "23505") return `${fallback}: القيمة مكررة (${o.details ?? o.message ?? ""})`;
+  if (o.code === "42501" || /row-level security/i.test(o.message ?? "")) return `${fallback}: ليس لديك صلاحية تنفيذ هذا الإجراء`;
+  const parts = [o.message, o.details, o.hint].filter(Boolean).join(" — ");
+  return parts ? `${fallback}: ${parts}` : fallback;
+}
+
 async function resolveFuelPayload(input: FuelLogInput) {
   const [{ data: bus }, { data: driver }] = await Promise.all([
     supabase.from("buses").select("id").eq("bus_code", input.busCode).maybeSingle(),
@@ -490,9 +500,18 @@ async function resolveFuelPayload(input: FuelLogInput) {
   };
 }
 
-export async function addFuelLog(input: FuelLogInput) {
-  const { error } = await supabase.from("fuel_logs").insert(await resolveFuelPayload(input));
+/** The bus odometer only moves forward: it takes the new reading when it is higher than the stored one. */
+async function syncBusOdometer(busId: string | null, reading: number) {
+  if (!busId || !(reading > 0)) return;
+  const { error } = await supabase.from("buses").update({ odometer: reading }).eq("id", busId).lt("odometer", reading);
   if (error) throw error;
+}
+
+export async function addFuelLog(input: FuelLogInput) {
+  const payload = await resolveFuelPayload(input);
+  const { error } = await supabase.from("fuel_logs").insert(payload);
+  if (error) throw error;
+  await syncBusOdometer(payload.bus_id, input.currentOdometer);
 }
 
 export interface BusFuelSummary {
@@ -1578,8 +1597,10 @@ export async function deleteInventoryItem(id: string) {
 }
 
 export async function updateFuelLog(id: string, input: FuelLogInput) {
-  const { error } = await supabase.from("fuel_logs").update(await resolveFuelPayload(input)).eq("id", id);
+  const payload = await resolveFuelPayload(input);
+  const { error } = await supabase.from("fuel_logs").update(payload).eq("id", id);
   if (error) throw error;
+  await syncBusOdometer(payload.bus_id, input.currentOdometer);
 }
 export async function deleteFuelLog(id: string) {
   const { error } = await supabase.from("fuel_logs").delete().eq("id", id);

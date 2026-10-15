@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Banknote, Bus, Pencil, Plus, Printer, Trash2, Users } from "lucide-react";
+import { BusPicker } from "@/components/bus-picker";
+import type { Bus as BusRecord } from "@/lib/fleet-data";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatCard, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -64,7 +66,7 @@ const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", cl
 function DispatchPage() {
   const [date, setDate] = useState(today());
   const [shifts, setShifts] = useState<DispatchShift[]>([]);
-  const [busCodes, setBusCodes] = useState<string[]>([]);
+  const [buses, setBuses] = useState<BusRecord[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
   const [clientNames, setClientNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,7 +91,7 @@ function DispatchPage() {
         fetchClients(),
       ]);
       setShifts(o);
-      setBusCodes(buses.map((b) => b.code));
+      setBuses(buses);
       setDriverNames(drivers.map((d) => d.name));
       setClientNames(clients.map((c) => c.name));
     } catch (e) {
@@ -259,7 +261,7 @@ function DispatchPage() {
             onClick={() =>
               exportToExcel(
                 `تقرير-${date}`,
-                shifts.map((o) => ({ التاريخ: o.date, الأتوبيس: o.bus, السائق: o.driver, الشركة: o.client, الخط: o.route, "قيمة الأتوبيس": o.busValue, "قيمة السواقة": o.driverValue })),
+                shifts.map((o) => ({ التاريخ: o.date, الأتوبيس: o.busPlate, السائق: o.driver, الشركة: o.client, الخط: o.route, "قيمة الأتوبيس": o.busValue, "قيمة السواقة": o.driverValue })),
               )
             }
           >
@@ -275,7 +277,7 @@ function DispatchPage() {
             shifts.map((o, i) => (
               <tr key={o.id} className="transition-colors hover:bg-secondary/30">
                 <td className="px-4 py-3">{i + 1}</td>
-                <td className="px-4 py-3 font-bold text-primary">{o.bus}</td>
+                <td className="px-4 py-3 font-bold text-primary">{o.busPlate}</td>
                 <td className="px-4 py-3 text-xs">{o.busType}</td>
                 <td className="px-4 py-3">{o.driver}</td>
                 <td className="px-4 py-3">{o.client}</td>
@@ -325,10 +327,7 @@ function DispatchPage() {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الأتوبيس</Label>
-                    <Select value={r.busCode} onValueChange={(v) => updateRow(r.key, { busCode: v })}>
-                      <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
-                      <SelectContent>{busCodes.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                    </Select>
+                    <BusPicker value={r.busCode} buses={buses} onChange={(v) => updateRow(r.key, { busCode: v })} />
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">السائق</Label>
@@ -384,7 +383,7 @@ function DispatchPage() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-destructive">تأكيد الحذف</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              سيتم حذف وردية {deleteTarget?.bus} ({deleteTarget?.client}) بتاريخ {deleteTarget?.date} نهائيًا، وسيتم خصم قيمتها من حساب الشركة ومرتب السائق.
+              سيتم حذف وردية {deleteTarget?.busPlate} ({deleteTarget?.client}) بتاريخ {deleteTarget?.date} نهائيًا، وسيتم خصم قيمتها من حساب الشركة ومرتب السائق.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

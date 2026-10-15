@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
+import { BusPicker } from "@/components/bus-picker";
 import { AccountPicker } from "@/components/account-picker";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { DataTable, Panel, StatusPill, exportToExcel } from "@/components/ui-kit";
@@ -135,7 +136,7 @@ export function MissionsPanel() {
   };
 
   const driverName = (m: Mission) => drivers.find((d) => d.id === m.driverId)?.name ?? (m.externalDriver || "—");
-  const vehicleLabel = (m: Mission) => (m.source === "rented" ? `${m.busLabel} (${m.owner})` : buses.find((b) => b.id === m.busId)?.code ?? "—");
+  const vehicleLabel = (m: Mission) => (m.source === "rented" ? `${m.busLabel} (${m.owner})` : buses.find((b) => b.id === m.busId)?.plate ?? "—");
 
   return (
     <>
@@ -232,13 +233,7 @@ export function MissionsPanel() {
             {form.source === "internal" ? (
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">الأتوبيس / السيارة من الأسطول</Label>
-                <Select value={form.busId || NONE} onValueChange={(v) => setForm({ ...form, busId: v === NONE ? "" : v })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>بدون تحديد</SelectItem>
-                    {buses.map((b) => <SelectItem key={b.id} value={b.id}>{b.code} — {b.plate}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <BusPicker by="id" value={form.busId} buses={buses} allowNone placeholder="بدون تحديد" onChange={(v) => setForm({ ...form, busId: v })} />
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

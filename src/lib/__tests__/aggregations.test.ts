@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -458,5 +458,12 @@ describe("fuel waste per km", () => {
     expect(r.wastedLiters).toBeCloseTo(50);
     expect(r.excessCost).toBeCloseTo(500);
     expect(computeFuelAnalysis({ liters: 240, cost: 2400, km: 1000, shifts: 10, target: 0.25, basis: "km" }).status).toBe("ok");
+  });
+});
+
+describe("busOptionLabel", () => {
+  it("leads with the plate then type / model", () => {
+    expect(busOptionLabel({ plate: "س أ ج 1234", code: "B1001", busType: "أتوبيس 50", model: "مرسيدس" })).toBe("س أ ج 1234 - أتوبيس 50 / مرسيدس");
+    expect(busOptionLabel({ plate: "—", code: "B1002", busType: "—", model: "—" })).toBe("B1002");
   });
 });

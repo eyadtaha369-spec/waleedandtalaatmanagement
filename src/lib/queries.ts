@@ -18,6 +18,13 @@ import type {
 
 // ---- Fleet ----
 
+/** "[رقم اللوحة] - [النوع / الموديل]" — the plate leads; falls back to the bus code when no plate is set. */
+export function busOptionLabel(b: { plate: string; code: string; busType: string; model: string }) {
+  const plate = b.plate && b.plate !== "—" ? b.plate : b.code;
+  const kind = [b.busType, b.model].filter((x) => x && x !== "—").join(" / ");
+  return kind ? `${plate} - ${kind}` : plate;
+}
+
 export async function fetchBuses(): Promise<Bus[]> {
   const { data, error } = await supabase
     .from("buses")
@@ -1092,6 +1099,7 @@ export interface DailyShift {
   driver: string;
   busId: string | null;
   bus: string;
+  busPlate: string;
   routeId: string | null;
   route: string;
   shiftFrom: string;
@@ -1109,7 +1117,7 @@ export async function fetchDailyShifts(period: Period): Promise<DailyShift[]> {
   const { start, end } = periodBounds(period);
   const { data, error } = await supabase
     .from("attendance")
-    .select("*, drivers(name), buses(bus_code), routes(route_name)")
+    .select("*, drivers(name), buses(bus_code, plate_number), routes(route_name)")
     .gte("date", start)
     .lt("date", end)
     .order("date", { ascending: false });
@@ -1120,6 +1128,7 @@ export async function fetchDailyShifts(period: Period): Promise<DailyShift[]> {
     driver: a.drivers?.name ?? "—",
     busId: a.bus_id,
     bus: a.buses?.bus_code ?? "—",
+    busPlate: a.buses?.plate_number ?? a.buses?.bus_code ?? "—",
     routeId: a.route_id,
     route: a.routes?.route_name ?? "—",
     shiftFrom: a.shift_from ?? "",
@@ -1616,6 +1625,7 @@ export interface DispatchShift {
   date: string;
   busId: string | null;
   bus: string;
+  busPlate: string;
   busType: string;
   driverId: string | null;
   driver: string;
@@ -1628,7 +1638,7 @@ export interface DispatchShift {
   missionId: string; // non-empty when posted automatically from a مأمورية
 }
 
-const SHIFT_SELECT = "*, buses(bus_code, bus_type), drivers(name), clients(client_name)";
+const SHIFT_SELECT = "*, buses(bus_code, bus_type, plate_number), drivers(name), clients(client_name)";
 
 function mapShift(o: any): DispatchShift {
   return {
@@ -1636,6 +1646,7 @@ function mapShift(o: any): DispatchShift {
     date: o.op_date,
     busId: o.bus_id,
     bus: o.buses?.bus_code ?? o.ext_bus_label ?? "—",
+    busPlate: o.buses?.plate_number ?? o.buses?.bus_code ?? o.ext_bus_label ?? "—",
     busType: o.buses?.bus_type ?? o.ext_vehicle_type ?? "—",
     driverId: o.driver_id,
     driver: o.drivers?.name ?? "—",

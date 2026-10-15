@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Lock, Pencil, Plus, Printer, Trash2, Unlock } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
+import { BusPicker } from "@/components/bus-picker";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { currency } from "@/lib/fleet-data";
+import { currency, type Bus } from "@/lib/fleet-data";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { fetchDrivers, fetchBuses, fetchRoutes } from "@/lib/queries";
 import {
@@ -108,7 +109,7 @@ function PayrollPage() {
   const [payroll, setPayroll] = useState<DriverPayrollRow[]>([]);
   const [employeePayroll, setEmployeePayroll] = useState<EmployeePayrollRow[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
-  const [busCodes, setBusCodes] = useState<string[]>([]);
+  const [buses, setBuses] = useState<Bus[]>([]);
   const [routeNames, setRouteNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +158,7 @@ function PayrollPage() {
       setPayroll(p);
       setEmployeePayroll(ep);
       setDriverNames(drivers.map((d) => d.name));
-      setBusCodes(buses.map((b) => b.code));
+      setBuses(buses);
       setRouteNames(routes.map((r) => r.name));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
@@ -351,7 +352,7 @@ function PayrollPage() {
               <tr key={s.id} className="transition-colors hover:bg-secondary/30">
                 <td className="px-4 py-3">{s.date}</td>
                 <td className="px-4 py-3 font-bold">{s.driver}</td>
-                <td className="px-4 py-3">{s.bus}</td>
+                <td className="px-4 py-3">{s.busPlate}</td>
                 <td className="px-4 py-3 text-xs">
                   {s.shiftFrom || s.shiftTo ? `${s.shiftFrom || "—"} ⬅ ${s.shiftTo || "—"}` : "—"}
                 </td>
@@ -495,10 +496,10 @@ function PayrollPage() {
                   <tbody>
                     {myShifts.length + myDispatch.length === 0 && <tr><td colSpan={4} style={td}>لا توجد ورديات مسجلة</td></tr>}
                     {myDispatch.map((x) => (
-                      <tr key={`d${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.bus}</td><td style={td}>{x.route || x.client}</td><td style={td}>{currency(x.driverValue)}</td></tr>
+                      <tr key={`d${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.busPlate}</td><td style={td}>{x.route || x.client}</td><td style={td}>{currency(x.driverValue)}</td></tr>
                     ))}
                     {myShifts.map((x) => (
-                      <tr key={`s${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.bus}</td><td style={td}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td style={td}>{currency(x.overtimeAllowance)}</td></tr>
+                      <tr key={`s${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.busPlate}</td><td style={td}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td style={td}>{currency(x.overtimeAllowance)}</td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -581,10 +582,10 @@ function PayrollPage() {
                         {myShifts.length + myDuty.length === 0 ? empty(4) : (
                           <>
                             {myDuty.map((x) => (
-                              <tr key={`d${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>{x.bus}</td><td className={cell}>{x.route || x.client}</td><td className={`${cell} text-success`}>{currency(x.driverValue)}</td></tr>
+                              <tr key={`d${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>{x.busPlate}</td><td className={cell}>{x.route || x.client}</td><td className={`${cell} text-success`}>{currency(x.driverValue)}</td></tr>
                             ))}
                             {myShifts.map((x) => (
-                              <tr key={`s${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>{x.bus}</td><td className={cell}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td className={`${cell} text-success`}>{currency(x.overtimeAllowance)}</td></tr>
+                              <tr key={`s${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>{x.busPlate}</td><td className={cell}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td className={`${cell} text-success`}>{currency(x.overtimeAllowance)}</td></tr>
                             ))}
                           </>
                         )}
@@ -681,16 +682,7 @@ function PayrollPage() {
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">الأتوبيس (اختياري)</Label>
-                <Select value={form.busCode} onValueChange={(v) => setForm({ ...form, busCode: v })}>
-                  <SelectTrigger className="border-border bg-input/60">
-                    <SelectValue placeholder="بدون تحديد" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {busCodes.map((c) => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <BusPicker value={form.busCode} buses={buses} allowNone placeholder="بدون تحديد" onChange={(v) => setForm({ ...form, busCode: v })} />
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">الخط (اختياري)</Label>

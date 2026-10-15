@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Banknote, Bus, Pencil, Plus, Printer, Trash2, Users } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
@@ -186,6 +186,10 @@ function DispatchPage() {
   return (
     <AppShell>
       <PageHeader title="الحركة والورديات اليومية" subtitle="تسجيل ورديات الأتوبيسات: قيمة الأتوبيس تُحتسب للشركة، وقيمة السواقة تُحتسب لمرتب السائق" />
+      <div className="no-print mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+        <span>أجور السواقة المسجلة هنا تُرحَّل تلقائيًا إلى كشف المرتبات.</span>
+        <Link to="/payroll" className="rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">فتح صفحة المرتبات والأجور ←</Link>
+      </div>
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

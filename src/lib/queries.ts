@@ -3100,3 +3100,56 @@ export async function updateBusFuelTarget(id: string, target: number | null, bas
   const { error } = await supabase.from("buses").update({ fuel_target_ratio: target, fuel_target_basis: basis }).eq("id", id);
   if (error) throw error;
 }
+
+// ---- Payroll detail ledgers (كارت التفاصيل الشامل) ----
+
+export interface PayrollTripRow {
+  id: string;
+  date: string;
+  driver: string;
+  destination: string;
+  client: string;
+  fee: number;
+}
+
+export async function fetchPayrollTrips(period: Period): Promise<PayrollTripRow[]> {
+  const { start, end } = periodBounds(period);
+  const { data, error } = await supabase
+    .from("trips")
+    .select("id, trip_date, client_name, destination, driver_fee, drivers(name)")
+    .neq("status", "ملغاة")
+    .gte("trip_date", start)
+    .lt("trip_date", end)
+    .order("trip_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    date: String(t.trip_date).slice(0, 10),
+    driver: t.drivers?.name ?? "",
+    destination: t.destination ?? "",
+    client: t.client_name ?? "",
+    fee: Number(t.driver_fee ?? 0),
+  }));
+}
+
+export async function fetchEmployeeAttendanceInPeriod(period: Period): Promise<EmployeeAttendanceRow[]> {
+  const { start, end } = periodBounds(period);
+  const { data, error } = await supabase
+    .from("employee_attendance")
+    .select("*, employees(name)")
+    .gte("date", start)
+    .lt("date", end)
+    .order("date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((a: any) => ({
+    id: a.id,
+    employeeId: a.employee_id,
+    employee: a.employees?.name ?? "",
+    date: a.date,
+    status: a.status ?? "",
+    notes: a.notes ?? "",
+    allowance: Number(a.allowance ?? 0),
+    advance: Number(a.advance ?? 0),
+    penalty: Number(a.penalty ?? 0),
+  }));
+}

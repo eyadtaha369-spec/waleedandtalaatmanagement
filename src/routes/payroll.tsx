@@ -27,10 +27,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { currency } from "@/lib/fleet-data";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { fetchDrivers, fetchBuses, fetchRoutes } from "@/lib/queries";
 import {
   fetchDailyShifts,
   periodLabel,
+  fetchPayrollTrips,
+  fetchEmployeeAttendanceInPeriod,
+  type PayrollTripRow,
+  type EmployeeAttendanceRow,
   rangeForPreset,
   type DateRange,
   upsertDailyShift,
@@ -120,13 +125,16 @@ function PayrollPage() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [adjFor, setAdjFor] = useState<PersonRow | null>(null);
   const [adjForm, setAdjForm] = useState({ bonus: "", advances: "", penalties: "", tolls: "", notes: "" });
+  const [payTrips, setPayTrips] = useState<PayrollTripRow[]>([]);
+  const [empRows, setEmpRows] = useState<EmployeeAttendanceRow[]>([]);
+  const [detailFor, setDetailFor] = useState<PersonRow | null>(null);
   const [printing, setPrinting] = useState<PersonRow | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [s, p, ep, drivers, buses, routes, employees, adj, ds] = await Promise.all([
+      const [s, p, ep, drivers, buses, routes, employees, adj, ds, pt, er] = await Promise.all([
         fetchDailyShifts(range),
         fetchDriverPayroll(range),
         fetchEmployeePayroll(range),
@@ -136,7 +144,11 @@ function PayrollPage() {
         fetchEmployees(),
         fetchPayrollAdjustments(range),
         fetchDispatchShifts(range),
+        fetchPayrollTrips(range),
+        fetchEmployeeAttendanceInPeriod(range),
       ]);
+      setPayTrips(pt);
+      setEmpRows(er);
       setDriverIds(new Map(drivers.map((d) => [d.name, d.id])));
       setEmployeeIds(new Map(employees.map((e) => [e.name, e.id])));
       setAdjustments(adj);
@@ -311,7 +323,7 @@ function PayrollPage() {
 
   return (
     <AppShell>
-      <PageHeader title="تسجيل التشغيل اليومي والمرتبات" subtitle="حضور السائقين اليومي، الورديات، الإضافي، السُلف، والجزاءات" />
+      <PageHeader title="صفحة المرتبات والأجور" subtitle="التشغيل اليومي وكشوف المرتبات الحية للسائقين والموظفين — اضغط على أي اسم لعرض كارت التفاصيل الشامل" />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -394,7 +406,7 @@ function PayrollPage() {
               const f = finalOf(p);
               const adj = adjOf(p);
               return (
-                <tr key={p.key} className="transition-colors hover:bg-secondary/30">
+                <tr key={p.key} className="cursor-pointer transition-colors hover:bg-secondary/30" onClick={() => setDetailFor(p)}>
                   <td className="px-4 py-3 font-bold">
                     {p.name}
                     {adj.locked && <Lock className="mr-1 inline h-3 w-3 text-primary" aria-label="مقفل" />}
@@ -408,7 +420,7 @@ function PayrollPage() {
                   <td className="px-4 py-3 text-destructive">{currency(f.tolls)}</td>
                   <td className="px-4 py-3 text-base font-extrabold text-primary">{currency(f.net)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-1">
+                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                       <Button size="sm" className="bg-primary text-primary-foreground" onClick={() => printStatement(p)} title="طباعة كشف حساب فردي">
                         <Printer className="h-4 w-4" />
                       </Button>
@@ -515,6 +527,129 @@ function PayrollPage() {
           </div>
         );
       })()}
+
+
+      <Sheet open={!!detailFor} onOpenChange={(o) => !o && setDetailFor(null)}>
+        <SheetContent side="left" className="glass w-full overflow-y-auto text-foreground sm:max-w-2xl" dir="rtl">
+          {detailFor && (() => {
+            const f = finalOf(detailFor);
+            const adj = adjOf(detailFor);
+            const isDriver = detailFor.type === "driver";
+            const myShifts = shifts.filter((x) => x.driver === detailFor.name);
+            const myDuty = dispatchShifts.filter((x) => x.driver === detailFor.name && !x.missionId);
+            const myMissions = dispatchShifts.filter((x) => x.driver === detailFor.name && x.missionId);
+            const myTrips = payTrips.filter((x) => x.driver === detailFor.name);
+            const myEmp = empRows.filter((x) => x.employee === detailFor.name);
+            const cell = "px-3 py-2 text-sm";
+            const empty = (n: number) => <tr><td colSpan={n} className="px-3 py-3 text-center text-xs text-muted-foreground">لا توجد بيانات</td></tr>;
+            const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+              <section className="mt-5">
+                <h3 className="mb-2 text-sm font-extrabold text-primary">{title}</h3>
+                {children}
+              </section>
+            );
+            return (
+              <>
+                <SheetHeader className="text-right">
+                  <SheetTitle className="text-primary">تفاصيل كشف الحساب والشيفتات</SheetTitle>
+                  <SheetDescription className="text-muted-foreground">
+                    {detailFor.name} — {detailFor.role} — {periodLabel(range)}
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {[
+                    ["المرتب الأساسي", f.baseSalary, ""],
+                    ["إجمالي الإضافات", f.additions, "text-success"],
+                    ["إجمالي الخصومات", f.deductions, "text-destructive"],
+                    ["صافي المرتب", f.net, "text-primary"],
+                  ].map(([l, v, t]) => (
+                    <div key={l as string} className="rounded-lg border border-border bg-secondary/20 p-2">
+                      <p className="text-xs text-muted-foreground">{l}</p>
+                      <p className={`font-extrabold ${t}`}>{currency(v as number)}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <Section title="المرتب الأساسي">
+                  <p className="text-sm">المرتب الشهري المسجَّل: <b>{currency(detailFor.baseSalary)}</b></p>
+                </Section>
+
+                {isDriver ? (
+                  <>
+                    <Section title="سجل الورديات والمشاوير">
+                      <DataTable head={["التاريخ", "الأتوبيس", "الخط / الوردية", "إضافي / قيمة السواقة"]}>
+                        {myShifts.length + myDuty.length === 0 ? empty(4) : (
+                          <>
+                            {myDuty.map((x) => (
+                              <tr key={`d${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>{x.bus}</td><td className={cell}>{x.route || x.client}</td><td className={`${cell} text-success`}>{currency(x.driverValue)}</td></tr>
+                            ))}
+                            {myShifts.map((x) => (
+                              <tr key={`s${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>{x.bus}</td><td className={cell}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td className={`${cell} text-success`}>{currency(x.overtimeAllowance)}</td></tr>
+                            ))}
+                          </>
+                        )}
+                      </DataTable>
+                    </Section>
+                    <Section title="سجل الرحلات والمأموريات">
+                      <DataTable head={["التاريخ", "النوع", "الوجهة / المشوار", "أجر / بونص الرحلة"]}>
+                        {myTrips.length + myMissions.length === 0 ? empty(4) : (
+                          <>
+                            {myTrips.map((x) => (
+                              <tr key={`t${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>رحلة</td><td className={cell}>{x.destination || x.client || "—"}</td><td className={`${cell} text-success`}>{currency(x.fee)}</td></tr>
+                            ))}
+                            {myMissions.map((x) => (
+                              <tr key={`m${x.id}`}><td className={cell}>{x.date}</td><td className={cell}>مأمورية</td><td className={cell}>{x.route}</td><td className={`${cell} text-success`}>{currency(x.driverValue)}</td></tr>
+                            ))}
+                          </>
+                        )}
+                      </DataTable>
+                    </Section>
+                    <Section title="السُلف والجزاءات والكرتات (بالتاريخ)">
+                      <DataTable head={["التاريخ", "السُلفة", "الجزاء", "الكرتة"]}>
+                        {myShifts.filter((x) => x.dailyAdvance || x.penalty || x.tollFee).length === 0 ? empty(4) : myShifts.filter((x) => x.dailyAdvance || x.penalty || x.tollFee).map((x) => (
+                          <tr key={`k${x.id}`}><td className={cell}>{x.date}</td><td className={`${cell} text-warning`}>{currency(x.dailyAdvance)}</td><td className={`${cell} text-destructive`}>{currency(x.penalty)}</td><td className={`${cell} text-destructive`}>{currency(x.tollFee)}</td></tr>
+                        ))}
+                      </DataTable>
+                    </Section>
+                  </>
+                ) : (
+                  <Section title="سجل الحضور والبدلات والسُلف والجزاءات">
+                    <DataTable head={["التاريخ", "الحالة", "البدل", "السُلفة", "الجزاء"]}>
+                      {myEmp.length === 0 ? empty(5) : myEmp.map((x) => (
+                        <tr key={x.id}><td className={cell}>{x.date}</td><td className={cell}>{x.status || "—"}</td><td className={`${cell} text-success`}>{currency(x.allowance)}</td><td className={`${cell} text-warning`}>{currency(x.advance)}</td><td className={`${cell} text-destructive`}>{currency(x.penalty)}</td></tr>
+                      ))}
+                    </DataTable>
+                  </Section>
+                )}
+
+                <Section title="ملخص الحساب">
+                  <dl className="grid grid-cols-2 gap-2 text-sm">
+                    {[
+                      ["المرتب الأساسي", f.baseSalary],
+                      ["إجمالي الورديات (إضافي وقيمة السواقة)", f.shiftAllowances],
+                      ["أجور الرحلات والمأموريات", f.tripFees],
+                      ["مكافآت (تسوية)", f.bonus],
+                      ["السُلف", f.advances],
+                      ["الجزاءات والخصومات", f.penalties],
+                      ["الكرتات", f.tolls],
+                    ].map(([l, v]) => (
+                      <div key={l as string} className="flex justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2"><dt className="text-muted-foreground">{l}</dt><dd className="font-bold">{currency(v as number)}</dd></div>
+                    ))}
+                    <div className="col-span-2 flex justify-between rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-base font-extrabold"><dt>صافي المرتب المستحق</dt><dd>{currency(f.net)}</dd></div>
+                  </dl>
+                  {adj.notes && <p className="mt-2 text-xs text-muted-foreground">ملاحظات التسوية: {adj.notes}</p>}
+                </Section>
+
+                <div className="mt-5 flex gap-2">
+                  <Button className="bg-primary text-primary-foreground" onClick={() => { const p = detailFor; setDetailFor(null); setTimeout(() => printStatement(p), 250); }}>
+                    <Printer className="ml-2 h-4 w-4" /> طباعة كشف حساب فردي
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent className="glass max-h-[85vh] overflow-y-auto text-foreground" dir="rtl">

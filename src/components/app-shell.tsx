@@ -51,7 +51,7 @@ const nav = [
   { to: "/workshop", label: "الورشة والمخزون والسولار", icon: Wrench, roles: null },
   { to: "/finance", label: "المالية والخزينة", icon: Coins, roles: ["admin", "accountant"] },
   { to: "/report", label: "التقرير المالي الشهري", icon: FileBarChart, roles: ["admin", "accountant"] },
-  { to: "/payroll", label: "التشغيل اليومي والمرتبات", icon: Wallet, roles: ["admin", "accountant"] },
+  { to: "/payroll", label: "المرتبات والأجور", icon: Wallet, roles: ["admin", "accountant"] },
   { to: "/audit", label: "سجل التعديلات", icon: ClipboardList, roles: ["admin"] },
   { to: "/team", label: "الفريق والصلاحيات", icon: Users, roles: ["admin"] },
   { to: "/backup", label: "النسخ الاحتياطي", icon: Database, roles: ["admin"] },

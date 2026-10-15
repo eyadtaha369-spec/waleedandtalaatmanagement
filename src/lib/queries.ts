@@ -1244,9 +1244,21 @@ export async function bulkInsertStudents(rows: Record<string, string>[]) {
 
 // ---- Student Excel import ----
 
+/** PostgREST returns at most 1,000 rows per request — fetch every page. */
+async function pageAll(make: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>): Promise<{ data: any[]; error: any }> {
+  const all: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await make(from, from + 999);
+    if (error) return { data: all, error };
+    all.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: all, error: null };
+}
+
 export async function fetchStudentImportContext() {
   const [st, rt] = await Promise.all([
-    supabase.from("students").select("name, phone"),
+    pageAll((f, t) => supabase.from("students").select("name, phone").order("id").range(f, t)),
     supabase.from("routes").select("id, route_name, monthly_price"),
   ]);
   if (st.error) throw st.error;
@@ -2860,7 +2872,7 @@ export async function fetchMonthlyFinancialReport(period: Period): Promise<Month
     { data: generalExpenses },
   ] = await Promise.all([
     fetchDispatchShifts(period),
-    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end),
+    pageAll((f, t) => supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end).order("id").range(f, t)),
     fetchDriverPayroll(period),
     fetchEmployeePayroll(period),
     supabase.from("inventory_transactions").select("quantity, inventory(unit_price)").eq("type", "OUT").gte("created_at", start).lt("created_at", end),

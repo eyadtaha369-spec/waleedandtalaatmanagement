@@ -35,6 +35,7 @@ import {
   bulkInsertStudents,
 } from "@/lib/queries";
 import { CsvImportDialog } from "@/components/csv-import-dialog";
+import { StudentImportDialog } from "@/components/student-import-dialog";
 
 export const Route = createFileRoute("/operations")({
   head: () => ({
@@ -61,6 +62,7 @@ function OperationsPage() {
   const [addingStudent, setAddingStudent] = useState(false);
   const [studentForm, setStudentForm] = useState({ id: "", name: "", guardianPhone: "", routeName: "", monthly: "" });
   const [importingStudents, setImportingStudents] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -169,6 +171,9 @@ function OperationsPage() {
           onExport={() => exportToExcel("الاشتراكات", filteredStudents as unknown as Record<string, string | number>[])}
           extra={
             <>
+              <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setExcelOpen(true)}>
+                استيراد طلاب من شيت إكسيل 📊
+              </Button>
               <Button variant="outline" className="border-border" onClick={() => setImportingStudents(true)}>
                 استيراد CSV
               </Button>
@@ -296,6 +301,7 @@ function OperationsPage() {
         </DialogContent>
       </Dialog>
 
+      <StudentImportDialog open={excelOpen} onOpenChange={setExcelOpen} onDone={loadAll} />
       <CsvImportDialog
         open={importingStudents}
         onOpenChange={setImportingStudents}

@@ -512,3 +512,37 @@ describe("computeItemLedger", () => {
     expect(l.openingBalance).toBe(4);
   });
 });
+
+import { mapColumns, parseStudentRows, reviewStudents, normalizePhone, parseAmount, subscriptionTotal } from "@/lib/student-import";
+describe("student import", () => {
+  const headers = ["Timestamp", "اسم الطالب", "رقم الطالب", "واتس اب ولي الأمر", "الخط", "برجاء كتابة نقطة الركوب", "برجاء الاختيار من الآتي", "المبلغ المدفوع", "ملاحظات"];
+  it("maps columns", () => {
+    const m = mapColumns(headers);
+    expect(m.name).toEqual(["اسم الطالب"]);
+    expect(m.studentPhone).toEqual(["رقم الطالب"]);
+    expect(m.parentPhone).toEqual(["واتس اب ولي الأمر"]);
+    expect(m.route).toEqual(["الخط"]);
+    expect(m.pickup).toEqual(["برجاء كتابة نقطة الركوب"]);
+    expect(m.subscription).toEqual(["برجاء الاختيار من الآتي"]);
+    expect(m.amount).toEqual(["المبلغ المدفوع"]);
+    expect(m.notes).toEqual(["ملاحظات"]);
+  });
+  it("normalizes phones and amounts", () => {
+    expect(normalizePhone("+20 100 123 4567")).toBe("01001234567");
+    expect(normalizePhone("١٠٠١٢٣٤٥٦٧")).toBe("01001234567");
+    expect(parseAmount("١٬٢٥٠ جنيه")).toBe(1250);
+  });
+  it("reviews duplicates, invalid and new routes", () => {
+    const rows = [
+      { "اسم الطالب": "أحمد علي", "رقم الطالب": "01001234567", "الخط": "السيوف", "برجاء الاختيار من الآتي": "سداد كامل", "المبلغ المدفوع": "3000" },
+      { "اسم الطالب": "احمد علي", "رقم الطالب": "01001234567", "الخط": "سموحة" },
+      { "اسم الطالب": "", "رقم الطالب": "01111111111", "الخط": "سموحة" },
+      { "اسم الطالب": "منى", "الخط": "المحمودية" },
+    ];
+    const rev = reviewStudents(parseStudentRows(rows, mapColumns(headers)), [{ name: "منى", phone: null }], [{ id: "r1", name: "السيوف" }]);
+    expect(rev.map((r) => r.status)).toEqual(["valid", "duplicate", "invalid", "duplicate"]);
+    expect(rev[0]?.routeId).toBe("r1");
+    expect(rev[3]?.newRoute).toBe(true);
+    expect(subscriptionTotal({ subscriptionType: "سداد كامل", amountPaid: 3000 }, 0)).toBe(3000);
+  });
+});

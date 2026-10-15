@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { normalizeText, subscriptionTotal, type ReviewedStudent } from "@/lib/student-import";
 import type {
   Bus,
   Driver,
@@ -1140,6 +1141,99 @@ export async function bulkInsertStudents(rows: Record<string, string>[]) {
   const { error } = await supabase.from("students").insert(payload);
   if (error) throw error;
   return payload.length;
+}
+
+// ---- Student Excel import ----
+
+export async function fetchStudentImportContext() {
+  const [st, rt] = await Promise.all([
+    supabase.from("students").select("name, phone"),
+    supabase.from("routes").select("id, route_name, monthly_price"),
+  ]);
+  if (st.error) throw st.error;
+  if (rt.error) throw rt.error;
+  return {
+    students: (st.data ?? []).map((s: any) => ({ name: s.name as string, phone: (s.phone ?? null) as string | null })),
+    routes: (rt.data ?? []).map((r: any) => ({ id: r.id as string, name: r.route_name as string, price: Number(r.monthly_price ?? 0) })),
+  };
+}
+
+const IMPORT_CHUNK = 100;
+const chunked = <T,>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
+
+export interface StudentImportResult {
+  students: number;
+  routesCreated: number;
+  payments: number;
+}
+
+/** Creates missing routes, inserts students and their initial payments in chunks, then refreshes route occupancy. */
+export async function importStudents(
+  rows: ReviewedStudent[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<StudentImportResult> {
+  const ready = rows.filter((r) => r.status === "valid");
+  if (ready.length === 0) return { students: 0, routesCreated: 0, payments: 0 };
+  const ctx = await fetchStudentImportContext();
+  const routeIds = new Map(ctx.routes.map((r) => [normalizeText(r.name), r.id]));
+  const prices = new Map(ctx.routes.map((r) => [r.id, r.price]));
+
+  const missing = [...new Map(ready.filter((r) => r.routeName && !routeIds.has(normalizeText(r.routeName))).map((r) => [normalizeText(r.routeName), r.routeName])).entries()];
+  let routesCreated = 0;
+  if (missing.length > 0) {
+    const stamp = Date.now().toString(36).toUpperCase();
+    const { data, error } = await supabase
+      .from("routes")
+      .insert(missing.map(([, name], i) => ({ route_code: `RT-${stamp}-${i}`, route_name: name, seats: 0, booked: 0 })))
+      .select("id, route_name");
+    if (error) throw new Error(dbErrorMessage(error, "تعذر إنشاء الخطوط الجديدة"));
+    for (const r of data ?? []) routeIds.set(normalizeText((r as any).route_name), (r as any).id);
+    routesCreated = data?.length ?? 0;
+  }
+
+  const stamp = Date.now().toString(36).toUpperCase();
+  let done = 0;
+  let payments = 0;
+  const touched = new Set<string>();
+  for (const [ci, chunk] of chunked(ready, IMPORT_CHUNK).entries()) {
+    const payload = chunk.map((r, i) => {
+      const routeId = r.routeName ? routeIds.get(normalizeText(r.routeName)) ?? null : null;
+      if (routeId) touched.add(routeId);
+      return {
+        sub_code: `STU-${stamp}-${ci * IMPORT_CHUNK + i}`,
+        name: r.name,
+        phone: r.studentPhone || null,
+        parent_phone: r.parentPhone || null,
+        route_id: routeId,
+        pickup_point: r.pickupPoint || null,
+        subscription_type: r.subscriptionType || null,
+        notes: r.notes || null,
+        total_amount: subscriptionTotal(r, routeId ? prices.get(routeId) ?? 0 : 0),
+        paid_amount: 0,
+      };
+    });
+    const { data, error } = await supabase.from("students").insert(payload).select("id, sub_code");
+    if (error) throw new Error(`${dbErrorMessage(error, "تعذر حفظ الطلاب")} (تم حفظ ${done} طالب قبل التوقف)`);
+    const idByCode = new Map((data ?? []).map((d: any) => [d.sub_code as string, d.id as string]));
+    const pays = chunk
+      .map((r, i) => ({ r, id: idByCode.get(payload[i]!.sub_code) }))
+      .filter((x) => x.id && x.r.amountPaid > 0)
+      .map((x) => ({ student_id: x.id!, amount: x.r.amountPaid, method: "استيراد إكسيل", notes: x.r.subscriptionType || null }));
+    if (pays.length > 0) {
+      const { error: pe } = await supabase.from("payments").insert(pays);
+      if (pe) throw new Error(`${dbErrorMessage(pe, "تعذر تسجيل المدفوعات")} (تم حفظ الطلاب حتى هذه الدفعة)`);
+      payments += pays.length;
+    }
+    done += chunk.length;
+    onProgress?.(done, ready.length);
+  }
+
+  // route occupancy ("booked") = number of linked students
+  for (const id of touched) {
+    const { count } = await supabase.from("students").select("id", { count: "exact", head: true }).eq("route_id", id);
+    await supabase.from("routes").update({ booked: count ?? 0 }).eq("id", id);
+  }
+  return { students: done, routesCreated, payments };
 }
 
 export async function bulkInsertRoutes(rows: Record<string, string>[]) {

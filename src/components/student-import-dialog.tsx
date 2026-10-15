@@ -3,12 +3,14 @@ import { FileSpreadsheet, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { dbErrorMessage, fetchStudentImportContext, importStudents } from "@/lib/queries";
-import { IMPORT_FIELD_LABEL, mapColumns, parseStudentRows, reviewStudents, type ImportField, type ReviewedStudent } from "@/lib/student-import";
+import { IMPORT_FIELD_LABEL, mapColumns, parseStudentRows, reviewStudents, summarizeImport, type ImportField, type ReviewedStudent } from "@/lib/student-import";
 import { currency } from "@/lib/fleet-data";
 
 const BADGE = {
   valid: { label: "جاهز للاستيراد", cls: "border-emerald-500/40 bg-emerald-500/15 text-emerald-500" },
-  duplicate: { label: "مكرر", cls: "border-amber-500/40 bg-amber-500/15 text-amber-500" },
+  duplicate: { label: "مسجل مسبقًا", cls: "border-amber-500/40 bg-amber-500/15 text-amber-500" },
+  superseded: { label: "مكرر — استُبدل بأحدث", cls: "border-amber-500/40 bg-amber-500/15 text-amber-500" },
+  refund: { label: "استرداد — مستبعد", cls: "border-destructive/40 bg-destructive/15 text-destructive" },
   invalid: { label: "بيانات ناقصة", cls: "border-destructive/40 bg-destructive/15 text-destructive" },
 } as const;
 
@@ -58,7 +60,10 @@ export function StudentImportDialog({ open, onOpenChange, onDone }: { open: bool
   }, []);
 
   const valid = rows.filter((r) => r.status === "valid");
-  const dup = rows.filter((r) => r.status === "duplicate").length;
+  const sum = summarizeImport(rows);
+  const nf = (n: number) => n.toLocaleString("en-US");
+  const dup = rows.filter((r) => r.status === "duplicate" || r.status === "superseded").length;
+  const refunds = rows.filter((r) => r.status === "refund").length;
   const invalid = rows.filter((r) => r.status === "invalid").length;
   const newRoutes = [...new Set(valid.filter((r) => r.newRoute).map((r) => r.routeName))];
 
@@ -115,16 +120,28 @@ export function StudentImportDialog({ open, onOpenChange, onDone }: { open: bool
             <p className="text-xs text-muted-foreground">
               الأعمدة المطابقة: {mapped.map((m) => IMPORT_FIELD_LABEL[m]).join(" • ")}
             </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {[
+                { label: "عدد الطلاب المعتمدين", value: nf(sum.approved), tone: "text-primary" },
+                { label: "إجمالي المحصل (EGP)", value: nf(sum.collected), tone: "text-emerald-500" },
+                { label: "إجمالي المتبقي / الأقساط (EGP)", value: nf(sum.remaining), tone: "text-amber-500" },
+              ].map((c) => (
+                <div key={c.label} className="rounded-xl border border-primary/30 bg-secondary/40 p-3">
+                  <div className="text-xs text-muted-foreground">{c.label}</div>
+                  <div className={`mt-1 text-2xl font-extrabold ${c.tone}`}>{c.value}</div>
+                </div>
+              ))}
+            </div>
             <div className="flex flex-wrap gap-2 text-xs font-bold">
-              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-emerald-500">جاهز: {valid.length}</span>
-              <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-amber-500">مكرر (سيتم تخطيه): {dup}</span>
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-amber-500">مكرر / مسجل (سيتم تخطيه): {dup}</span>
+              {refunds > 0 && <span className="rounded-full border border-destructive/40 bg-destructive/15 px-3 py-1 text-destructive">حالات استرداد مستبعدة: {refunds}</span>}
               {invalid > 0 && <span className="rounded-full border border-destructive/40 bg-destructive/15 px-3 py-1 text-destructive">ناقص: {invalid}</span>}
               {newRoutes.length > 0 && <span className="rounded-full border border-primary/40 bg-primary/15 px-3 py-1 text-primary">خطوط جديدة ستُنشأ: {newRoutes.join("، ")}</span>}
             </div>
             <div className="max-h-[40vh] overflow-auto rounded-xl border border-border">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-secondary text-xs text-muted-foreground">
-                  <tr>{["#", "الطالب", "هاتف الطالب", "هاتف ولي الأمر", "الخط", "نقطة الركوب", "نوع الاشتراك", "المدفوع", "الحالة"].map((h) => <th key={h} className="px-3 py-2 text-right font-bold">{h}</th>)}</tr>
+                  <tr>{["#", "الطالب", "هاتف الطالب", "هاتف ولي الأمر", "الخط", "نقطة الركوب", "نوع الاشتراك", "المستحق", "المدفوع", "المتبقي", "الحالة"].map((h) => <th key={h} className="px-3 py-2 text-right font-bold">{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
@@ -136,7 +153,9 @@ export function StudentImportDialog({ open, onOpenChange, onDone }: { open: bool
                       <td className="px-3 py-2">{r.routeName || "—"}{r.newRoute && <span className="mr-1 text-[10px] text-primary">(جديد)</span>}</td>
                       <td className="px-3 py-2">{r.pickupPoint || "—"}</td>
                       <td className="px-3 py-2">{r.subscriptionType || "—"}</td>
+                      <td className="px-3 py-2">{r.target ? currency(r.target) : "—"}</td>
                       <td className="px-3 py-2">{r.amountPaid ? currency(r.amountPaid) : "—"}</td>
+                      <td className="px-3 py-2 text-amber-500">{r.remaining ? currency(r.remaining) : "—"}</td>
                       <td className="px-3 py-2">
                         <span className={`inline-block rounded-full border px-2 py-0.5 text-xs font-bold ${BADGE[r.status].cls}`}>{BADGE[r.status].label}</span>
                         {r.reason && <div className="text-[10px] text-muted-foreground">{r.reason}</div>}

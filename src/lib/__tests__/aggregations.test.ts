@@ -513,7 +513,7 @@ describe("computeItemLedger", () => {
   });
 });
 
-import { mapColumns, parseStudentRows, reviewStudents, normalizePhone, parseAmount, subscriptionTotal } from "@/lib/student-import";
+import { summarizeImport, mapColumns, parseStudentRows, reviewStudents, normalizePhone, parseAmount, subscriptionTotal } from "@/lib/student-import";
 describe("student import", () => {
   const headers = ["Timestamp", "اسم الطالب", "رقم الطالب", "واتس اب ولي الأمر", "الخط", "برجاء كتابة نقطة الركوب", "برجاء الاختيار من الآتي", "المبلغ المدفوع", "ملاحظات"];
   it("maps columns", () => {
@@ -540,9 +540,33 @@ describe("student import", () => {
       { "اسم الطالب": "منى", "الخط": "المحمودية" },
     ];
     const rev = reviewStudents(parseStudentRows(rows, mapColumns(headers)), [{ name: "منى", phone: null }], [{ id: "r1", name: "السيوف" }]);
-    expect(rev.map((r) => r.status)).toEqual(["valid", "duplicate", "invalid", "duplicate"]);
+    expect(rev.map((r) => r.status)).toEqual(["superseded", "valid", "invalid", "duplicate"]);
+    expect(rev[1]?.newRoute).toBe(true);
     expect(rev[0]?.routeId).toBe("r1");
-    expect(rev[3]?.newRoute).toBe(true);
-    expect(subscriptionTotal({ subscriptionType: "سداد كامل", amountPaid: 3000 }, 0)).toBe(3000);
+    expect(subscriptionTotal({ subscriptionType: "سداد كامل", amountPaid: 3000 }, 0)).toBe(13500);
+  });
+});
+
+describe("student import pricing, refunds and dedup", () => {
+  const H = ["Timestamp", "اسم الطالب", "رقم الطالب", "الخط", "برجاء الاختيار من الآتي", "المبلغ المدفوع", "ملاحظات"];
+  const run = (rows: Record<string, string>[]) => reviewStudents(parseStudentRows(rows, mapColumns(H)), [], []);
+  it("drops refunds and keeps the latest submission per student", () => {
+    const rev = run([
+      { Timestamp: "1/9/2026 10:00:00", "اسم الطالب": "سارة", "رقم الطالب": "01011111111", "برجاء الاختيار من الآتي": "قسطين", "المبلغ المدفوع": "5000" },
+      { Timestamp: "5/9/2026 10:00:00", "اسم الطالب": "سارة", "رقم الطالب": "01011111111", "برجاء الاختيار من الآتي": "سداد كامل", "المبلغ المدفوع": "13500" },
+      { Timestamp: "2/9/2026 10:00:00", "اسم الطالب": "كريم", "رقم الطالب": "01022222222", "ملاحظات": "طلب استرداد المبلغ" },
+    ]);
+    expect(rev.map((r) => r.status)).toEqual(["superseded", "valid", "refund"]);
+    expect(summarizeImport(rev)).toEqual({ approved: 1, collected: 13500, remaining: 0 });
+  });
+  it("applies fee rules and remaining balance", () => {
+    const rev = run([
+      { "اسم الطالب": "أ", "برجاء الاختيار من الآتي": "قسطين", "المبلغ المدفوع": "7000" },
+      { "اسم الطالب": "ب", "برجاء الاختيار من الآتي": "70 رحلة", "المبلغ المدفوع": "9500" },
+      { "اسم الطالب": "ج", "برجاء الاختيار من الآتي": "عرض الدحيحة", "المبلغ المدفوع": "4000" },
+      { "اسم الطالب": "د", "برجاء الاختيار من الآتي": "سداد كامل", "المبلغ المدفوع": "15000" },
+    ]);
+    expect(rev.map((r) => [r.target, r.remaining])).toEqual([[13500, 6500], [9500, 0], [4000, 0], [13500, 0]]);
+    expect(summarizeImport(rev)).toEqual({ approved: 4, collected: 35500, remaining: 6500 });
   });
 });

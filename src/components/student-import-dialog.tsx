@@ -41,12 +41,22 @@ export function StudentImportDialog({ open, onOpenChange, onDone }: { open: bool
     try {
       if (!/\.(xlsx|xls|csv)$/i.test(file.name)) throw new Error("صيغة الملف غير مدعومة — استخدم .xlsx أو .xls أو .csv");
       const XLSX = await import("xlsx");
-      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
       const sheet = wb.Sheets[wb.SheetNames[0] ?? ""];
       if (!sheet) throw new Error("الملف لا يحتوي على أي ورقة بيانات");
       const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
       if (raw.length === 0) throw new Error("الملف فارغ");
       const map = mapColumns(Object.keys(raw[0] ?? {}));
+      // Formatted timestamps ("10/4/26") are ambiguous (d/m vs m/d) and break "keep the latest submission":
+      // take the real date value of the timestamp column instead.
+      const stampHeader = map.timestamp?.[0];
+      if (stampHeader) {
+        const typed = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: true });
+        raw.forEach((r, i) => {
+          const v = typed[i]?.[stampHeader];
+          if (v instanceof Date && !Number.isNaN(v.getTime())) r[stampHeader] = v.toISOString();
+        });
+      }
       if (!map.name) throw new Error("لم أجد عمود «اسم الطالب» في الملف — راجع عناوين الأعمدة");
       const parsed = parseStudentRows(raw, map);
       const ctx = await fetchStudentImportContext();

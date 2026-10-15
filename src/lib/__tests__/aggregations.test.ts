@@ -416,3 +416,18 @@ describe("missions", () => {
     expect(missionNet({ clientPrice: 1000, vehicleCost: 600, driverFee: 150 })).toBe(250);
   });
 });
+
+describe("live payroll", () => {
+  it("sums daily tolls and mission fees into the net", () => {
+    const rows = computeDriverPayroll(
+      [{ name: "س", base_salary: 5000 }],
+      [{ driver: "س", overtimeAllowance: 100, dailyAdvance: 200, penalty: 50, toll: 30 }],
+      [{ driver: "س", fee: 400 }],
+      [{ driver: "س", value: 150 }],
+    );
+    expect(rows[0]?.totalTolls).toBe(30);
+    expect(rows[0]?.netSalary).toBe(5000 + 100 + 400 + 150 - (200 + 50 + 30));
+    const f = computeFinalPayroll({ baseSalary: 5000, shiftAllowances: 250, tripFees: 400, advances: 200, penalties: 50, tolls: 30 });
+    expect(f.net).toBe(5000 + 250 + 400 - 280);
+  });
+});

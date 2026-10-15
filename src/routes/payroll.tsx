@@ -71,6 +71,7 @@ const emptyForm = {
   overtimeAllowance: "",
   dailyAdvance: "",
   penalty: "",
+  tollFee: "",
   notes: "",
 };
 
@@ -85,7 +86,14 @@ interface PersonRow {
   tripFees: number;
   dailyAdvances: number;
   dailyPenalties: number;
+  dailyTolls: number;
 }
+
+const monthRange = (m: string): DateRange => {
+  const [y, mo] = m.split("-").map(Number);
+  const last = new Date(Date.UTC(y ?? 2000, mo ?? 1, 0)).toISOString().slice(0, 10);
+  return { from: `${m}-01`, to: last };
+};
 
 function PayrollPage() {
   const [range, setRange] = useState<DateRange>(rangeForPreset("current"));
@@ -169,6 +177,7 @@ function PayrollPage() {
       overtimeAllowance: s.overtimeAllowance ? String(s.overtimeAllowance) : "",
       dailyAdvance: s.dailyAdvance ? String(s.dailyAdvance) : "",
       penalty: s.penalty ? String(s.penalty) : "",
+      tollFee: s.tollFee ? String(s.tollFee) : "",
       notes: s.notes,
     });
     setAdding(true);
@@ -190,6 +199,7 @@ function PayrollPage() {
         overtimeAllowance: Number(form.overtimeAllowance) || 0,
         dailyAdvance: Number(form.dailyAdvance) || 0,
         penalty: Number(form.penalty) || 0,
+        tollFee: Number(form.tollFee) || 0,
         notes: form.notes,
       });
       await loadAll();
@@ -228,6 +238,7 @@ function PayrollPage() {
       tripFees: p.tripFees,
       dailyAdvances: p.totalAdvances,
       dailyPenalties: p.totalPenalties,
+      dailyTolls: p.totalTolls,
     }));
     const employees: PersonRow[] = employeePayroll.map((p) => ({
       key: adjustmentKey("employee", employeeIds.get(p.employee) ?? p.employee),
@@ -240,13 +251,14 @@ function PayrollPage() {
       tripFees: 0,
       dailyAdvances: p.totalAdvances,
       dailyPenalties: p.totalPenalties,
+      dailyTolls: 0,
     }));
     return [...drivers, ...employees].filter((p) => p.name.includes(query) || p.role.includes(query) || query === "");
   }, [payroll, employeePayroll, driverIds, employeeIds, query]);
 
   const adjOf = (p: PersonRow): PayrollAdjustment => adjustments.get(p.key) ?? EMPTY_ADJUSTMENT;
   const finalOf = (p: PersonRow) =>
-    computeFinalPayroll({ baseSalary: p.baseSalary, shiftAllowances: p.shiftAllowances, tripFees: p.tripFees, advances: p.dailyAdvances, penalties: p.dailyPenalties }, adjOf(p));
+    computeFinalPayroll({ baseSalary: p.baseSalary, shiftAllowances: p.shiftAllowances, tripFees: p.tripFees, advances: p.dailyAdvances, penalties: p.dailyPenalties, tolls: p.dailyTolls }, adjOf(p));
   const grandTotal = people.reduce((a, p) => a + finalOf(p).net, 0);
 
   const openAdjust = (p: PersonRow) => {
@@ -313,14 +325,14 @@ function PayrollPage() {
             <Plus className="ml-2 h-4 w-4" /> تسجيل وردية
           </Button>
         </div>
-        <DataTable head={["التاريخ", "اسم السائق", "الأتوبيس", "الوردية (من ⬅ إلى)", "الحالة", "إضافي", "السُلفة", "الجزاءات", "الملاحظات", "الإجراءات"]}>
+        <DataTable head={["التاريخ", "اسم السائق", "الأتوبيس", "الوردية (من ⬅ إلى)", "الحالة", "إضافي", "السُلفة", "الجزاءات", "الكرتة", "الملاحظات", "الإجراءات"]}>
           {loading ? (
             <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
+              <td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
             </tr>
           ) : shifts.length === 0 ? (
             <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">لا توجد تسجيلات لهذا الشهر بعد.</td>
+              <td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">لا توجد تسجيلات لهذا الشهر بعد.</td>
             </tr>
           ) : (
             shifts.map((s) => (
@@ -335,6 +347,7 @@ function PayrollPage() {
                 <td className="px-4 py-3 text-success">{currency(s.overtimeAllowance)}</td>
                 <td className="px-4 py-3 text-warning">{currency(s.dailyAdvance)}</td>
                 <td className="px-4 py-3 text-destructive">{currency(s.penalty)}</td>
+                <td className="px-4 py-3 text-destructive">{currency(s.tollFee)}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{s.notes || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
@@ -358,100 +371,60 @@ function PayrollPage() {
           onQuery={setQuery}
           placeholder="ابحث باسم السائق أو الموظف..."
           onExport={() => exportToExcel("ملخص المرتبات", people.map((p) => { const f = finalOf(p); return { الفئة: p.type === "driver" ? "سائق" : "موظف", الاسم: p.name, الوظيفة: p.role, "المرتب الأساسي": f.baseSalary, "إضافي الورديات": f.shiftAllowances, "أجر الرحلات": f.tripFees, مكافآت: f.bonus, السُلف: f.advances, الجزاءات: f.penalties, الكرتات: f.tolls, الصافي: f.net, مقفل: adjOf(p).locked ? "نعم" : "لا" }; }) as Record<string, string | number>[])}
-          extra={<DateRangeFilter value={range} onChange={setRange} />}
+          extra={
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="grid gap-1">
+                <Label className="text-xs text-muted-foreground">الشهر / السنة</Label>
+                <Input type="month" value={canEdit ? month : ""} onChange={(e) => e.target.value && setRange(monthRange(e.target.value))} className="h-9 w-40 border-border bg-input/60" />
+              </div>
+              <DateRangeFilter value={range} onChange={setRange} />
+            </div>
+          }
         />
         <p className="mb-3 rounded-lg border border-border bg-secondary/30 p-2 text-xs text-muted-foreground">
-          الصافي = المرتب الأساسي + إضافي الورديات + أجر الرحلات (+ مكافآت) − (السُلف + الجزاءات + الكرتات)
+          كل القيم تُحسب آليًا من التشغيل اليومي والرحلات والمأموريات. الصافي = (المرتب الأساسي + الورديات + أجور الرحلات والمأموريات) − (السُلف + الجزاءات + الكرتات)
         </p>
-        <div className="space-y-3">
+        <DataTable head={["اسم السائق / الموظف", "الوظيفة", "المرتب الأساسي", "إجمالي الورديات", "بدل الرحلات", "السُلف", "الجزاءات", "الكرتات", "صافي المرتب المستحق", "الإجراءات"]}>
           {loading ? (
-            <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
+            <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
           ) : people.length === 0 ? (
-            <p className="py-6 text-center text-muted-foreground">لا يوجد سائقون أو موظفون نشطون بعد.</p>
+            <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">لا يوجد سائقون أو موظفون نشطون بعد.</td></tr>
           ) : (
             people.map((p) => {
               const f = finalOf(p);
               const adj = adjOf(p);
-              const open = expandedKey === p.key;
               return (
-                <div key={p.key} className={`panel overflow-hidden transition-colors ${open ? "border-primary/60" : ""}`}>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    aria-expanded={open}
-                    onClick={() => setExpandedKey(open ? null : p.key)}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setExpandedKey(open ? null : p.key))}
-                    className="flex cursor-pointer flex-wrap items-center gap-x-6 gap-y-3 p-4 hover:bg-secondary/20"
-                  >
-                    <div className="min-w-[10rem] flex-1">
-                      <p className="text-lg font-extrabold">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">{p.role}</p>
+                <tr key={p.key} className="transition-colors hover:bg-secondary/30">
+                  <td className="px-4 py-3 font-bold">
+                    {p.name}
+                    {adj.locked && <Lock className="mr-1 inline h-3 w-3 text-primary" aria-label="مقفل" />}
+                  </td>
+                  <td className="px-4 py-3 text-xs">{p.role}</td>
+                  <td className="px-4 py-3">{currency(f.baseSalary)}</td>
+                  <td className="px-4 py-3 text-success">{currency(f.shiftAllowances + f.bonus)}</td>
+                  <td className="px-4 py-3 text-success">{currency(f.tripFees)}</td>
+                  <td className="px-4 py-3 text-warning">{currency(f.advances)}</td>
+                  <td className="px-4 py-3 text-destructive">{currency(f.penalties)}</td>
+                  <td className="px-4 py-3 text-destructive">{currency(f.tolls)}</td>
+                  <td className="px-4 py-3 text-base font-extrabold text-primary">{currency(f.net)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      <Button size="sm" className="bg-primary text-primary-foreground" onClick={() => printStatement(p)} title="طباعة كشف حساب فردي">
+                        <Printer className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" disabled={adj.locked || !canEdit} onClick={() => openAdjust(p)} title="تسوية: مكافآت / جزاءات / سُلف / كرتات إضافية">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="hover:bg-primary/10" disabled={!canEdit} onClick={() => toggleLock(p)} title={adj.locked ? "فتح القفل" : "قفل نهائي"}>
+                        {adj.locked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                      </Button>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">المرتب الأساسي</p>
-                      <p className="font-bold">{currency(f.baseSalary)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">إجمالي الإضافات</p>
-                      <p className="font-bold text-success">{currency(f.additions)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">إجمالي الخصومات</p>
-                      <p className="font-bold text-destructive">{currency(f.deductions)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">صافي المرتب</p>
-                      <p className="text-lg font-extrabold text-primary">{currency(f.net)}</p>
-                    </div>
-                    {adj.locked && (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs text-primary">
-                        <Lock className="h-3 w-3" /> مقفل
-                      </span>
-                    )}
-                    <ChevronDown className={`h-5 w-5 text-primary transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
-                  </div>
-
-                  <div className={`grid transition-all duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
-                    <div className="overflow-hidden">
-                      <div className="border-t border-border p-4">
-                        <div className="mb-3 flex flex-wrap items-center gap-2">
-                          <Button size="sm" variant="outline" className="border-border" disabled={adj.locked} onClick={() => openAdjust(p)}>
-                            <Pencil className="ml-1 h-4 w-4" /> تعديل (مكافآت / جزاءات / سُلف / كرتات)
-                          </Button>
-                          <Button size="sm" variant="outline" className="border-border" onClick={() => toggleLock(p)}>
-                            {adj.locked ? <Unlock className="ml-1 h-4 w-4" /> : <Lock className="ml-1 h-4 w-4" />}
-                            {adj.locked ? "فتح القفل" : "قفل نهائي"}
-                          </Button>
-                          <Button size="sm" className="bg-primary text-primary-foreground" onClick={() => printStatement(p)}>
-                            <Printer className="ml-1 h-4 w-4" /> طباعة كشف حساب {p.type === "driver" ? "سائق" : "موظف"}
-                          </Button>
-                        </div>
-                        <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                          {[
-                            ["المرتب الأساسي", f.baseSalary, ""],
-                            ["إضافي الورديات", f.shiftAllowances, "text-success"],
-                            ["أجر الرحلات", f.tripFees, "text-success"],
-                            ["مكافآت", f.bonus, "text-success"],
-                            ["السُلف", f.advances, "text-warning"],
-                            ["الجزاءات", f.penalties, "text-destructive"],
-                            ["الكرتات", f.tolls, "text-destructive"],
-                            ["الصافي النهائي", f.net, "text-primary"],
-                          ].map(([label, value, tone]) => (
-                            <div key={label as string} className="rounded-lg border border-border bg-secondary/20 p-2">
-                              <dt className="text-xs text-muted-foreground">{label}</dt>
-                              <dd className={`font-bold ${tone}`}>{currency(value as number)}</dd>
-                            </div>
-                          ))}
-                        </dl>
-                        {adj.notes && <p className="mt-2 text-xs text-muted-foreground">ملاحظات: {adj.notes}</p>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                  </td>
+                </tr>
               );
             })
           )}
-        </div>
+        </DataTable>
         <p className="mt-3 text-sm font-bold text-primary">إجمالي المرتبات الشهرية (سائقين + موظفين): {currency(grandTotal)}</p>
       </Panel>
 
@@ -637,6 +610,10 @@ function PayrollPage() {
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">الجزاء</Label>
                 <Input value={form.penalty} onChange={(e) => setForm({ ...form, penalty: e.target.value })} type="number" className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">الكرتة / مصاريف الطريق</Label>
+                <Input value={form.tollFee} onChange={(e) => setForm({ ...form, tollFee: e.target.value })} type="number" className="border-border bg-input/60" />
               </div>
             </div>
 

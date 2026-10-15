@@ -1099,6 +1099,7 @@ export interface DailyShift {
   overtimeAllowance: number;
   dailyAdvance: number;
   penalty: number;
+  tollFee: number; // الكرتة
   notes: string;
 }
 
@@ -1126,6 +1127,7 @@ export async function fetchDailyShifts(period: Period): Promise<DailyShift[]> {
     overtimeAllowance: Number(a.overtime_allowance ?? 0),
     dailyAdvance: Number(a.daily_advance ?? 0),
     penalty: Number(a.penalty ?? 0),
+    tollFee: Number(a.toll_fee ?? 0),
     notes: a.notes ?? "",
   }));
 }
@@ -1142,6 +1144,7 @@ export async function upsertDailyShift(input: {
   overtimeAllowance: number;
   dailyAdvance: number;
   penalty: number;
+  tollFee?: number;
   notes: string;
 }) {
   const { data: driver } = await supabase.from("drivers").select("id").eq("name", input.driverName).maybeSingle();
@@ -1169,6 +1172,7 @@ export async function upsertDailyShift(input: {
     overtime_allowance: input.overtimeAllowance,
     daily_advance: input.dailyAdvance,
     penalty: input.penalty,
+    toll_fee: input.tollFee ?? 0,
     notes: input.notes,
   };
 
@@ -1204,6 +1208,7 @@ export interface DriverPayrollRow {
   totalOvertime: number;
   totalAdvances: number;
   totalPenalties: number;
+  totalTolls: number;
   tripFees: number;
   shiftEarnings: number;
   netSalary: number;
@@ -1211,7 +1216,7 @@ export interface DriverPayrollRow {
 
 export function computeDriverPayroll(
   drivers: { name: string; base_salary: number }[],
-  shifts: { driver: string; overtimeAllowance: number; dailyAdvance: number; penalty: number }[],
+  shifts: { driver: string; overtimeAllowance: number; dailyAdvance: number; penalty: number; toll?: number }[],
   tripFees: { driver: string; fee: number }[] = [],
   shiftEarnings: { driver: string; value: number }[] = [],
 ): DriverPayrollRow[] {
@@ -1220,6 +1225,7 @@ export function computeDriverPayroll(
     const totalOvertime = rows.reduce((sum, r) => sum + r.overtimeAllowance, 0);
     const totalAdvances = rows.reduce((sum, r) => sum + r.dailyAdvance, 0);
     const totalPenalties = rows.reduce((sum, r) => sum + r.penalty, 0);
+    const totalTolls = rows.reduce((sum, r) => sum + (r.toll ?? 0), 0);
     const driverTripFees = tripFees.filter((t) => t.driver === d.name).reduce((sum, t) => sum + t.fee, 0);
     const driverShiftEarnings = shiftEarnings.filter((t) => t.driver === d.name).reduce((sum, t) => sum + t.value, 0);
     const baseSalary = Number(d.base_salary ?? 0);
@@ -1229,9 +1235,10 @@ export function computeDriverPayroll(
       totalOvertime,
       totalAdvances,
       totalPenalties,
+      totalTolls,
       tripFees: driverTripFees,
       shiftEarnings: driverShiftEarnings,
-      netSalary: baseSalary + totalOvertime + driverTripFees + driverShiftEarnings - (totalAdvances + totalPenalties),
+      netSalary: baseSalary + totalOvertime + driverTripFees + driverShiftEarnings - (totalAdvances + totalPenalties + totalTolls),
     };
   });
 }
@@ -1247,9 +1254,13 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
   if (dErr) throw dErr;
   return computeDriverPayroll(
     (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) * periodMonths(period).length })),
-    shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty })),
-    (tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
-    dispatchShifts.map((o) => ({ driver: o.driver, value: o.driverValue })),
+    shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty, toll: s.tollFee })),
+    [
+      ...(tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
+      // أجور المأموريات (مرحَّلة تلقائيًا في ورديات الحركة)
+      ...dispatchShifts.filter((o) => o.missionId).map((o) => ({ driver: o.driver, fee: o.driverValue })),
+    ],
+    dispatchShifts.filter((o) => !o.missionId).map((o) => ({ driver: o.driver, value: o.driverValue })),
   );
 }
 
@@ -1273,13 +1284,13 @@ export const EMPTY_ADJUSTMENT: PayrollAdjustment = { bonus: 0, advances: 0, pena
  * `advances`/`penalties` combine the daily records with the month adjustment.
  */
 export function computeFinalPayroll(
-  row: { baseSalary: number; shiftAllowances: number; tripFees: number; advances: number; penalties: number },
+  row: { baseSalary: number; shiftAllowances: number; tripFees: number; advances: number; penalties: number; tolls?: number },
   adj: PayrollAdjustment = EMPTY_ADJUSTMENT,
 ) {
   const additions = row.shiftAllowances + row.tripFees + adj.bonus;
   const advances = row.advances + adj.advances;
   const penalties = row.penalties + adj.penalties;
-  const tolls = adj.tolls;
+  const tolls = (row.tolls ?? 0) + adj.tolls;
   const deductions = advances + penalties + tolls;
   return { baseSalary: row.baseSalary, shiftAllowances: row.shiftAllowances, tripFees: row.tripFees, bonus: adj.bonus, advances, penalties, tolls, additions, deductions, net: row.baseSalary + additions - deductions };
 }
@@ -1612,6 +1623,7 @@ export interface DispatchShift {
   busValue: number; // قيمة الأتوبيس — credited to the company account
   driverValue: number; // قيمة السواقة — credited to the driver's salary
   notes: string;
+  missionId: string; // non-empty when posted automatically from a مأمورية
 }
 
 const SHIFT_SELECT = "*, buses(bus_code, bus_type), drivers(name), clients(client_name)";
@@ -1631,6 +1643,7 @@ function mapShift(o: any): DispatchShift {
     busValue: Number(o.bus_value ?? 0),
     driverValue: Number(o.driver_value ?? 0),
     notes: o.notes ?? "",
+    missionId: o.mission_id ?? "",
   };
 }
 

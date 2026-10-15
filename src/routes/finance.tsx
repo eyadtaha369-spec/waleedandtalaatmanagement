@@ -26,12 +26,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { currency, type TreasuryEntry, type Expense, type Loan, type Payslip } from "@/lib/fleet-data";
+import { currency, type TreasuryEntry, type Expense, type Loan } from "@/lib/fleet-data";
 import {
   fetchTreasury,
   fetchExpenses,
   fetchLoans,
-  fetchPayroll,
   addTreasuryEntry,
   updateTreasuryEntry,
   deleteTreasuryEntry,
@@ -41,10 +40,6 @@ import {
   addLoan,
   updateLoan,
   deleteLoan,
-  addPayslip,
-  updatePayslip,
-  deletePayslip,
-  fetchAttendanceSummary,
   fetchClients,
   fetchSuppliers,
   PAY_FROM_OPTIONS,
@@ -57,9 +52,9 @@ export const Route = createFileRoute("/finance")({
   head: () => ({
     meta: [
       { title: "المالية والخزينة | وليد وطلعت" },
-      { name: "description", content: "الخزينة والحسابات البنكية والمصروفات والموردين والقروض والمرتبات." },
+      { name: "description", content: "الخزينة والحسابات البنكية والمصروفات والموردين والقروض." },
       { property: "og:title", content: "المالية والخزينة | وليد وطلعت" },
-      { property: "og:description", content: "متابعة الأرصدة اليومية والمصروفات والأقساط وكشوف المرتبات." },
+      { property: "og:description", content: "متابعة الأرصدة اليومية والمصروفات والأقساط." },
     ],
   }),
   component: FinancePage,
@@ -67,13 +62,12 @@ export const Route = createFileRoute("/finance")({
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-type DeleteTarget = { kind: "treasury" | "expense" | "loan" | "payslip"; id: string; label: string } | null;
+type DeleteTarget = { kind: "treasury" | "expense" | "loan"; id: string; label: string } | null;
 
 function FinancePage() {
   const [treasury, setTreasury] = useState<TreasuryEntry[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
-  const [payroll, setPayroll] = useState<Payslip[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -90,10 +84,6 @@ function FinancePage() {
   const [addingLoan, setAddingLoan] = useState(false);
   const emptyLoan = () => ({ id: "", lender: "", total: "", installments: [{ amount: "", dueDate: "" }] as { amount: string; dueDate: string }[] });
   const [loanForm, setLoanForm] = useState(emptyLoan);
-  const [addingPayslip, setAddingPayslip] = useState(false);
-  const [payslipForm, setPayslipForm] = useState({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
-  const [payslipMonth, setPayslipMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [attendanceSummary, setAttendanceSummary] = useState<{ present: number; late: number; absent: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -101,13 +91,12 @@ function FinancePage() {
     setLoading(true);
     setError(null);
     try {
-      const [t, e, l, p, c, sp] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchPayroll(), fetchClients(), fetchSuppliers()]);
+      const [t, e, l, c, sp] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers()]);
       setClients(c);
       setSuppliers(sp);
       setTreasury(t);
       setExpenses(e);
       setLoans(l);
-      setPayroll(p);
     } catch (err) {
       setError(err instanceof Error ? err.message : "تعذر تحميل البيانات");
     } finally {
@@ -221,51 +210,13 @@ function FinancePage() {
     }
   };
 
-  const loadAttendanceSummary = async () => {
-    if (!payslipForm.employeeName.trim()) return;
-    try {
-      setAttendanceSummary(await fetchAttendanceSummary(payslipForm.employeeName, payslipMonth));
-    } catch {
-      setAttendanceSummary(null);
-    }
-  };
-
-  const openAddPayslip = () => {
-    setPayslipForm({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
-    setAttendanceSummary(null);
-    setAddingPayslip(true);
-  };
-  const openEditPayslip = (p: Payslip) => {
-    setPayslipForm({ id: p.id, employeeName: p.employee, role: p.role === "—" ? "" : p.role, baseSalary: String(p.base), overtime: String(p.overtime), advances: String(p.advances), penalties: String(p.penalties) });
-    setAttendanceSummary(null);
-    setAddingPayslip(true);
-  };
-  const submitPayslip = async () => {
-    if (!payslipForm.employeeName.trim()) return;
-    setSaving(true);
-    try {
-      const payload = { employeeName: payslipForm.employeeName, role: payslipForm.role, baseSalary: Number(payslipForm.baseSalary) || 0, overtime: Number(payslipForm.overtime) || 0, advances: Number(payslipForm.advances) || 0, penalties: Number(payslipForm.penalties) || 0 };
-      if (payslipForm.id) await updatePayslip(payslipForm.id, payload);
-      else await addPayslip(payload);
-      await loadAll();
-      setPayslipForm({ id: "", employeeName: "", role: "", baseSalary: "", overtime: "", advances: "", penalties: "" });
-      setAttendanceSummary(null);
-      setAddingPayslip(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر حفظ كشف المرتب");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
       if (deleteTarget.kind === "treasury") await deleteTreasuryEntry(deleteTarget.id);
       else if (deleteTarget.kind === "expense") await deleteExpense(deleteTarget.id);
-      else if (deleteTarget.kind === "loan") await deleteLoan(deleteTarget.id);
-      else await deletePayslip(deleteTarget.id);
+      else await deleteLoan(deleteTarget.id);
       await loadAll();
       setDeleteTarget(null);
     } catch (e) {
@@ -277,7 +228,7 @@ function FinancePage() {
 
   return (
     <AppShell>
-      <PageHeader title="المالية والخزينة" subtitle="الخزينة، المصروفات والموردون، القروض، والمرتبات" />
+      <PageHeader title="المالية والخزينة" subtitle="الخزينة، المصروفات والموردون، والقروض" />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -290,7 +241,6 @@ function FinancePage() {
           <TabsTrigger value="treasury">الخزينة والحسابات البنكية</TabsTrigger>
           <TabsTrigger value="expenses">المصروفات والموردون</TabsTrigger>
           <TabsTrigger value="loans">أقساط والتزامات وقروض</TabsTrigger>
-          <TabsTrigger value="payroll">المرتبات</TabsTrigger>
         </TabsList>
 
         <TabsContent value="treasury">
@@ -454,54 +404,6 @@ function FinancePage() {
             </div>
           </Panel>
         </TabsContent>
-
-        <TabsContent value="payroll">
-          <Panel title="كشف المرتبات الشهري">
-            <Toolbar
-              query={query}
-              onQuery={setQuery}
-              placeholder="ابحث باسم الموظف..."
-              onExport={() => exportToExcel("المرتبات", payroll as unknown as Record<string, string | number>[])}
-              extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddPayslip}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة كشف مرتب
-                </Button>
-              }
-            />
-            <DataTable head={["الموظف", "الوظيفة", "الأساسي", "الإضافي", "السُلف", "الجزاءات", "الصافي", "الإجراءات"]}>
-              {payroll
-                .filter((p) => p.employee.includes(query) || query === "")
-                .map((p) => (
-                  <tr key={p.id} className="transition-colors hover:bg-secondary/30">
-                    <td className="px-4 py-3 font-bold">{p.employee}</td>
-                    <td className="px-4 py-3">{p.role}</td>
-                    <td className="px-4 py-3">{currency(p.base)}</td>
-                    <td className="px-4 py-3 text-success">{currency(p.overtime)}</td>
-                    <td className="px-4 py-3 text-warning">{currency(p.advances)}</td>
-                    <td className="px-4 py-3 text-destructive">{currency(p.penalties)}</td>
-                    <td className="px-4 py-3 font-bold text-primary">
-                      {currency(p.base + p.overtime - p.advances - p.penalties)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditPayslip(p)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive hover:bg-destructive/10"
-                          onClick={() => setDeleteTarget({ kind: "payslip", id: p.id, label: `كشف مرتب ${p.employee}` })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-            </DataTable>
-          </Panel>
-        </TabsContent>
       </Tabs>
 
       <Dialog open={addingTreasury} onOpenChange={setAddingTreasury}>
@@ -663,68 +565,6 @@ function FinancePage() {
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitLoan} disabled={saving}>
               {saving ? "جارِ الحفظ..." : loanForm.id ? "حفظ التعديلات" : "حفظ"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={addingPayslip} onOpenChange={setAddingPayslip}>
-        <DialogContent className="glass text-foreground" dir="rtl">
-          <DialogHeader>
-            <DialogTitle className="text-primary">{payslipForm.id ? "تعديل كشف المرتب" : "إضافة كشف مرتب"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">أدخل بيانات الموظف والمرتب لهذا الشهر</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-3">
-            {[
-              ["employeeName", "اسم الموظف"],
-              ["role", "الوظيفة"],
-            ].map(([key, label, type]) => (
-              <div key={key} className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">{label}</Label>
-                <Input
-                  value={payslipForm[key as keyof typeof payslipForm]}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, [key]: e.target.value })}
-                  type={type || "text"}
-                  className="border-border bg-input/60"
-                />
-              </div>
-            ))}
-            <div className="grid grid-cols-[1fr_auto] items-end gap-2">
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">شهر الحضور (YYYY-MM)</Label>
-                <Input value={payslipMonth} onChange={(e) => setPayslipMonth(e.target.value)} className="border-border bg-input/60" />
-              </div>
-              <Button type="button" variant="outline" className="border-border" onClick={loadAttendanceSummary}>
-                عرض الحضور
-              </Button>
-            </div>
-            {attendanceSummary && (
-              <p className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground">
-                حاضر: <b className="text-success">{attendanceSummary.present}</b> يوم • متأخر:{" "}
-                <b className="text-warning">{attendanceSummary.late}</b> يوم • غائب:{" "}
-                <b className="text-destructive">{attendanceSummary.absent}</b> يوم — استخدم هذه البيانات لتحديد الجزاءات
-              </p>
-            )}
-            {[
-              ["baseSalary", "الأساسي", "number"],
-              ["overtime", "الإضافي", "number"],
-              ["advances", "السُلف", "number"],
-              ["penalties", "الجزاءات", "number"],
-            ].map(([key, label, type]) => (
-              <div key={key} className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">{label}</Label>
-                <Input
-                  value={payslipForm[key as keyof typeof payslipForm]}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, [key]: e.target.value })}
-                  type={type || "text"}
-                  className="border-border bg-input/60"
-                />
-              </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={submitPayslip} disabled={saving}>
-              {saving ? "جارِ الحفظ..." : payslipForm.id ? "حفظ التعديلات" : "حفظ الكشف"}
             </Button>
           </DialogFooter>
         </DialogContent>

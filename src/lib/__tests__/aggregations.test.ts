@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -465,5 +465,31 @@ describe("busOptionLabel", () => {
   it("leads with the plate then type / model", () => {
     expect(busOptionLabel({ plate: "س أ ج 1234", code: "B1001", busType: "أتوبيس 50", model: "مرسيدس" })).toBe("س أ ج 1234 - أتوبيس 50 / مرسيدس");
     expect(busOptionLabel({ plate: "—", code: "B1002", busType: "—", model: "—" })).toBe("B1002");
+  });
+});
+
+describe("odometer deltas between fills", () => {
+  it("distance = current - previous odometer, ratio = liters / distance", () => {
+    const f = computeFuelFills([
+      { id: "a", bus: "B", date: "2026-10-01", liters: 100, cost: 1000, currentOdometer: 10000 },
+      { id: "b", bus: "B", date: "2026-10-05", liters: 90, cost: 900, currentOdometer: 10300 },
+      { id: "c", bus: "B", date: "2026-10-09", liters: 60, cost: 600, currentOdometer: 10500 },
+      { id: "x", bus: "Z", date: "2026-10-02", liters: 50, cost: 500, currentOdometer: 500 },
+    ]);
+    expect(f.get("a")?.distance).toBeNull();
+    expect(f.get("b")).toMatchObject({ previous: 10000, distance: 300 });
+    expect(f.get("b")?.ratio).toBeCloseTo(0.3);
+    expect(f.get("c")?.distance).toBe(200);
+    expect(f.get("x")?.distance).toBeNull(); // other bus is independent
+  });
+  it("keeps legacy start/end rows and ignores out-of-order readings", () => {
+    const f = computeFuelFills([
+      { id: "l", bus: "B", date: "2026-09-01", liters: 20, cost: 200, odoStart: 1000, odoEnd: 1200 },
+      { id: "n", bus: "B", date: "2026-09-10", liters: 30, cost: 300, currentOdometer: 1500 },
+      { id: "bad", bus: "B", date: "2026-09-11", liters: 10, cost: 100, currentOdometer: 1400 },
+    ]);
+    expect(f.get("l")?.distance).toBe(200);
+    expect(f.get("n")?.distance).toBe(300);
+    expect(f.get("bad")?.distance).toBeNull();
   });
 });

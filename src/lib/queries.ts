@@ -454,6 +454,8 @@ export async function fetchFuelLogs(): Promise<FuelLog[]> {
     driver: f.drivers?.name ?? "—",
     odoStart: f.odo_start ?? 0,
     odoEnd: f.odo_end ?? 0,
+    currentOdometer: f.current_odometer ?? null,
+    createdAt: f.created_at ?? "",
     liters: Number(f.liters ?? 0),
     cost: Number(f.cost ?? 0),
     station: f.station ?? "—",
@@ -463,8 +465,8 @@ export async function fetchFuelLogs(): Promise<FuelLog[]> {
 export interface FuelLogInput {
   busCode: string;
   driverName: string;
-  odoStart: number;
-  odoEnd: number;
+  date: string;
+  currentOdometer: number;
   liters: number;
   cost: number;
   station: string;
@@ -478,8 +480,10 @@ async function resolveFuelPayload(input: FuelLogInput) {
   return {
     bus_id: bus?.id ?? null,
     driver_id: driver?.id ?? null,
-    odo_start: input.odoStart,
-    odo_end: input.odoEnd,
+    date: input.date,
+    current_odometer: input.currentOdometer,
+    odo_start: null,
+    odo_end: input.currentOdometer, // kept in sync so older reports still read a value
     liters: input.liters,
     cost: input.cost,
     station: input.station,
@@ -501,23 +505,86 @@ export interface BusFuelSummary {
   costPerKm: number;
 }
 
+export interface FuelFillInput {
+  id: string;
+  bus: string;
+  date: string;
+  order?: string; // tie-breaker for same-day fills (created_at)
+  liters: number;
+  cost: number;
+  currentOdometer?: number | null;
+  odoStart?: number;
+  odoEnd?: number;
+}
+
+export interface FuelFill {
+  id: string;
+  bus: string;
+  date: string;
+  liters: number;
+  cost: number;
+  odometer: number | null; // العداد الحالي
+  previous: number | null; // العداد السابق
+  distance: number | null; // المسافة المقطوعة = الحالي − السابق
+  ratio: number | null; // لتر لكل كم = اللترات ÷ المسافة
+}
+
+/**
+ * Distance between consecutive fills of the same bus: current odometer − previous fill's odometer.
+ * Older logs that carry an explicit start/end pair keep using it.
+ */
+export function computeFuelFills(logs: FuelFillInput[]): Map<string, FuelFill> {
+  const out = new Map<string, FuelFill>();
+  const byBus = new Map<string, FuelFillInput[]>();
+  for (const l of logs) byBus.set(l.bus, [...(byBus.get(l.bus) ?? []), l]);
+  for (const list of byBus.values()) {
+    list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.order ?? "") < (b.order ?? "") ? -1 : (a.order ?? "") > (b.order ?? "") ? 1 : 0));
+    let last: number | null = null;
+    for (const l of list) {
+      const start = l.odoStart ?? 0;
+      const end = l.odoEnd ?? 0;
+      let odometer: number | null;
+      let previous: number | null;
+      if (l.currentOdometer == null && end > start) {
+        odometer = end;
+        previous = start;
+      } else {
+        odometer = l.currentOdometer ?? (end > 0 ? end : null);
+        previous = last;
+      }
+      const distance = odometer != null && previous != null && odometer > previous ? odometer - previous : null;
+      if (odometer != null) last = odometer;
+      out.set(l.id, { id: l.id, bus: l.bus, date: l.date, liters: l.liters, cost: l.cost, odometer, previous, distance, ratio: distance && l.liters > 0 ? l.liters / distance : null });
+    }
+  }
+  return out;
+}
+
 /** Fuel consumption per vehicle: litres, cost, distance and efficiency. */
-export function computeFuelByBus(logs: { bus: string; liters: number; cost: number; odoStart: number; odoEnd: number }[]): BusFuelSummary[] {
-  const m = new Map<string, { fills: number; liters: number; cost: number; km: number }>();
-  for (const l of logs) {
-    const cur = m.get(l.bus) ?? { fills: 0, liters: 0, cost: 0, km: 0 };
+export function computeFuelByBus(logs: { id?: string; bus: string; date?: string; createdAt?: string; liters: number; cost: number; odoStart?: number; odoEnd?: number; currentOdometer?: number | null }[]): BusFuelSummary[] {
+  const fills = computeFuelFills(logs.map((l, i) => ({ id: l.id ?? String(i), bus: l.bus, date: l.date ?? "", order: l.createdAt ?? String(i).padStart(8, "0"), liters: l.liters, cost: l.cost, currentOdometer: l.currentOdometer ?? null, odoStart: l.odoStart ?? 0, odoEnd: l.odoEnd ?? 0 })));
+  const m = new Map<string, { fills: number; liters: number; cost: number; km: number; coveredLiters: number; coveredCost: number }>();
+  for (const f of fills.values()) {
+    const cur = m.get(f.bus) ?? { fills: 0, liters: 0, cost: 0, km: 0, coveredLiters: 0, coveredCost: 0 };
     cur.fills += 1;
-    cur.liters += l.liters;
-    cur.cost += l.cost;
-    cur.km += Math.max(l.odoEnd - l.odoStart, 0);
-    m.set(l.bus, cur);
+    cur.liters += f.liters;
+    cur.cost += f.cost;
+    if (f.distance) {
+      cur.km += f.distance;
+      cur.coveredLiters += f.liters;
+      cur.coveredCost += f.cost;
+    }
+    m.set(f.bus, cur);
   }
   return [...m.entries()]
     .map(([bus, t]) => ({
       bus,
-      ...t,
-      kmPerLiter: t.liters > 0 && t.km > 0 ? Math.round((t.km / t.liters) * 100) / 100 : 0,
-      costPerKm: t.km > 0 ? Math.round((t.cost / t.km) * 100) / 100 : 0,
+      fills: t.fills,
+      liters: t.liters,
+      cost: t.cost,
+      km: t.km,
+      kmPerLiter: t.coveredLiters > 0 && t.km > 0 ? Math.round((t.km / t.coveredLiters) * 100) / 100 : 0,
+      costPerKm: t.km > 0 ? Math.round((t.coveredCost / t.km) * 100) / 100 : 0,
     }))
     .sort((a, b) => b.cost - a.cost);
 }
@@ -768,14 +835,12 @@ export function computeFuelEfficiency(
 }
 
 export async function fetchFuelChart(): Promise<{ bus: string; "لتر/100كم": number }[]> {
-  const { data, error } = await supabase.from("fuel_logs").select("liters, odo_start, odo_end, buses(bus_code)");
+  const { data, error } = await supabase.from("fuel_logs").select("id, date, created_at, liters, cost, odo_start, odo_end, current_odometer, buses(bus_code)");
   if (error) throw error;
-  const rows = (data ?? []).map((row: any) => ({
-    liters: row.liters,
-    odo_start: row.odo_start,
-    odo_end: row.odo_end,
-    bus_code: row.buses?.bus_code ?? "—",
-  }));
+  const fills = computeFuelFills(
+    (data ?? []).map((r: any) => ({ id: r.id, bus: r.buses?.bus_code ?? "—", date: r.date, order: r.created_at ?? "", liters: Number(r.liters ?? 0), cost: Number(r.cost ?? 0), currentOdometer: r.current_odometer ?? null, odoStart: r.odo_start ?? 0, odoEnd: r.odo_end ?? 0 })),
+  );
+  const rows = [...fills.values()].filter((f) => f.distance).map((f) => ({ liters: f.liters, odo_start: 0, odo_end: f.distance ?? 0, bus_code: f.bus }));
   return computeFuelEfficiency(rows);
 }
 
@@ -3005,7 +3070,10 @@ export interface BusFuelRow {
   driver: string;
   liters: number;
   cost: number;
-  km: number;
+  odometer: number | null;
+  previous: number | null;
+  km: number; // المسافة المقطوعة منذ التموين السابق
+  ratio: number | null; // لتر لكل كم
 }
 
 export interface BusProfileData {
@@ -3021,7 +3089,7 @@ export async function fetchBusProfile(busId: string, range: DateRange): Promise<
     supabase.from("dispatch_shifts").select("id, op_date, route, bus_value, mission_id, rented_op_id, drivers(name), clients(client_name)").eq("bus_id", busId).gte("op_date", start).lt("op_date", end),
     supabase.from("trips").select("id, trip_date, client_name, destination, total_price, status, drivers(name)").eq("bus_id", busId).neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
     supabase.from("maintenance_orders").select("id, order_number, order_date, created_at, issue_description, status, total_cost, maintenance_order_items(quantity, unit_price, inventory(name, unit_type))").eq("bus_id", busId),
-    supabase.from("fuel_logs").select("id, date, odo_start, odo_end, liters, cost, drivers(name)").eq("bus_id", busId).gte("date", start).lt("date", end).order("date", { ascending: false }),
+    supabase.from("fuel_logs").select("id, date, created_at, odo_start, odo_end, current_odometer, liters, cost, drivers(name)").eq("bus_id", busId).lt("date", end),
   ]);
   for (const r of [att, disp, trips, orders, fuel]) if (r.error) throw r.error;
 
@@ -3054,9 +3122,13 @@ export async function fetchBusProfile(busId: string, range: DateRange): Promise<
     }))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
-  const fuelRows: BusFuelRow[] = (fuel.data ?? []).map((f: any) => ({
-    id: f.id, date: f.date, driver: f.drivers?.name ?? "—", liters: Number(f.liters ?? 0), cost: Number(f.cost ?? 0), km: Math.max(Number(f.odo_end ?? 0) - Number(f.odo_start ?? 0), 0),
-  }));
+  // distances need the fill before the range, so every fill up to its end is read and then narrowed to it
+  const fills = computeFuelFills((fuel.data ?? []).map((f: any) => ({ id: f.id, bus: busId, date: f.date, order: f.created_at ?? "", liters: Number(f.liters ?? 0), cost: Number(f.cost ?? 0), currentOdometer: f.current_odometer ?? null, odoStart: f.odo_start ?? 0, odoEnd: f.odo_end ?? 0 })));
+  const driverOf = new Map((fuel.data ?? []).map((f: any) => [f.id, f.drivers?.name ?? "—"]));
+  const fuelRows: BusFuelRow[] = [...fills.values()]
+    .filter((f) => f.date >= start)
+    .sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : 0))
+    .map((f) => ({ id: f.id, date: f.date, driver: driverOf.get(f.id) ?? "—", liters: f.liters, cost: f.cost, odometer: f.odometer, previous: f.previous, km: f.distance ?? 0, ratio: f.ratio }));
   return { activities, maintenance, fuel: fuelRows };
 }
 
@@ -3092,6 +3164,10 @@ export function computeBusProfile(data: BusProfileData, target: number | null, b
   const liters = data.fuel.reduce((s, f) => s + f.liters, 0);
   const fuelCost = data.fuel.reduce((s, f) => s + f.cost, 0);
   const km = data.fuel.reduce((s, f) => s + f.km, 0);
+  // per-km ratios only count fills whose distance since the previous fill is known
+  const covered = data.fuel.filter((f) => f.km > 0);
+  const coveredLiters = covered.reduce((s, f) => s + f.liters, 0);
+  const coveredCost = covered.reduce((s, f) => s + f.cost, 0);
   const shifts = data.activities.length;
   const drivers = new Map<string, number>();
   for (const a of data.activities) if (a.driver !== "—") drivers.set(a.driver, (drivers.get(a.driver) ?? 0) + 1);
@@ -3104,7 +3180,7 @@ export function computeBusProfile(data: BusProfileData, target: number | null, b
     fuelCost,
     km,
     drivers: [...drivers.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
-    fuel: computeFuelAnalysis({ liters, cost: fuelCost, km, shifts, target, basis }),
+    fuel: basis === "shift" ? computeFuelAnalysis({ liters, cost: fuelCost, km, shifts, target, basis }) : computeFuelAnalysis({ liters: coveredLiters, cost: coveredCost, km, shifts, target, basis }),
   };
 }
 

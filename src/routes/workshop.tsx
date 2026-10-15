@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, Check, ChevronsUpDown, FileText, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
+import { BusPicker } from "@/components/bus-picker";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { currency, UNIT_TYPES, type MaintenanceOrder, type MaintenanceStatus, type InventoryItem, type FuelLog, type UnitType } from "@/lib/fleet-data";
+import { currency, UNIT_TYPES, type MaintenanceOrder, type MaintenanceStatus, type InventoryItem, type FuelLog, type UnitType, type Bus } from "@/lib/fleet-data";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -36,6 +37,7 @@ import {
   saveMaintenanceOrder,
   computeOrderTotals,
   computeFuelByBus,
+  computeFuelFills,
   computeBusLedger,
   addInventoryItem,
   fetchBuses,
@@ -93,7 +95,7 @@ const newPart = (): PartRow => ({ key: ++partKey, inventoryId: "", quantity: "1"
 
 const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", status: "بانتظار القطع" as MaintenanceStatus };
 const emptyItemForm = { id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "", unitType: "بالقطعة" as UnitType };
-const emptyFuelForm = { id: "", busCode: "", driverName: "", odoStart: "", odoEnd: "", liters: "", cost: "", station: "" };
+const emptyFuelForm = { id: "", busCode: "", driverName: "", date: new Date().toISOString().slice(0, 10), currentOdometer: "", liters: "", cost: "", station: "" };
 
 /** Searchable dropdown over the inventory (only items currently in stock, plus ones already on this order). */
 function PartPicker({
@@ -150,6 +152,7 @@ function WorkshopPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
   const [busCodes, setBusCodes] = useState<string[]>([]);
+  const [busList, setBusList] = useState<Bus[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -218,6 +221,7 @@ function WorkshopPage() {
       setFuelLogs(f);
       setSuppliers(s);
       setBusCodes(buses.map((b) => b.code));
+      setBusList(buses);
       setDriverNames(drivers.map((d) => d.name));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
@@ -423,8 +427,8 @@ function WorkshopPage() {
       id: f.id,
       busCode: f.bus === "—" ? "" : f.bus,
       driverName: f.driver === "—" ? "" : f.driver,
-      odoStart: String(f.odoStart),
-      odoEnd: String(f.odoEnd),
+      date: f.date,
+      currentOdometer: String(f.currentOdometer ?? (f.odoEnd || "")),
       liters: String(f.liters),
       cost: String(f.cost),
       station: f.station === "—" ? "" : f.station,
@@ -442,8 +446,8 @@ function WorkshopPage() {
       const payload = {
         busCode: fuelForm.busCode,
         driverName: fuelForm.driverName,
-        odoStart: Number(fuelForm.odoStart) || 0,
-        odoEnd: Number(fuelForm.odoEnd) || 0,
+        date: fuelForm.date,
+        currentOdometer: Number(fuelForm.currentOdometer) || 0,
         liters: Number(fuelForm.liters) || 0,
         cost: Number(fuelForm.cost) || 0,
         station: fuelForm.station,
@@ -460,6 +464,8 @@ function WorkshopPage() {
   };
 
   const fuelByBus = useMemo(() => computeFuelByBus(fuelLogs), [fuelLogs]);
+  const fuelFills = useMemo(() => computeFuelFills(fuelLogs.map((f) => ({ id: f.id, bus: f.bus, date: f.date, order: f.createdAt, liters: f.liters, cost: f.cost, currentOdometer: f.currentOdometer, odoStart: f.odoStart, odoEnd: f.odoEnd }))), [fuelLogs]);
+  const plateOf = (code: string) => busList.find((b) => b.code === code)?.plate ?? code;
 
   // ---------- delete ----------
   const confirmDelete = async () => {
@@ -724,18 +730,19 @@ function WorkshopPage() {
                 </Button>
               }
             />
-            <DataTable head={["التاريخ", "رقم العربية", "اسم السائق", "عداد البداية", "عداد النهاية", "المسافة", "الكمية (لتر)", "التكلفة", "المحطة", "الإجراءات"]}>
+            <DataTable head={["التاريخ", "رقم اللوحة", "اسم السائق", "العداد السابق", "العداد الحالي", "المسافة المقطوعة", "الكمية (لتر)", "المعدل (لتر/كم)", "التكلفة", "المحطة", "الإجراءات"]}>
               {fuelLogs
-                .filter((f) => (f.bus + f.driver + f.station).includes(query) || query === "")
+                .filter((f) => (f.bus + plateOf(f.bus) + f.driver + f.station).includes(query) || query === "")
                 .map((f) => (
                   <tr key={f.id} className="transition-colors hover:bg-secondary/30">
                     <td className="px-4 py-3">{f.date}</td>
-                    <td className="px-4 py-3 font-bold text-primary">{f.bus}</td>
+                    <td className="px-4 py-3 font-bold text-primary">{plateOf(f.bus)}</td>
                     <td className="px-4 py-3">{f.driver}</td>
-                    <td className="px-4 py-3">{f.odoStart.toLocaleString("ar-EG")}</td>
-                    <td className="px-4 py-3">{f.odoEnd.toLocaleString("ar-EG")}</td>
-                    <td className="px-4 py-3">{(f.odoEnd - f.odoStart).toLocaleString("ar-EG")} كم</td>
+                    <td className="px-4 py-3">{fuelFills.get(f.id)?.previous?.toLocaleString("ar-EG") ?? "—"}</td>
+                    <td className="px-4 py-3">{fuelFills.get(f.id)?.odometer?.toLocaleString("ar-EG") ?? "—"}</td>
+                    <td className="px-4 py-3">{fuelFills.get(f.id)?.distance ? `${fuelFills.get(f.id)?.distance?.toLocaleString("ar-EG")} كم` : "—"}</td>
                     <td className="px-4 py-3">{f.liters}</td>
+                    <td className="px-4 py-3">{fuelFills.get(f.id)?.ratio != null ? (fuelFills.get(f.id)?.ratio ?? 0).toFixed(3) : "—"}</td>
                     <td className="px-4 py-3 text-warning">{currency(f.cost)}</td>
                     <td className="px-4 py-3">{f.station}</td>
                     <td className="px-4 py-3">
@@ -1094,11 +1101,8 @@ function WorkshopPage() {
           <div className="grid gap-3">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">رقم العربية</Label>
-                <Select value={fuelForm.busCode} onValueChange={(v) => setFuelForm({ ...fuelForm, busCode: v })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
-                  <SelectContent>{busCodes.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
+                <Label className="text-xs text-muted-foreground">رقم اللوحة</Label>
+                <BusPicker value={fuelForm.busCode} buses={busList} onChange={(v) => setFuelForm({ ...fuelForm, busCode: v })} />
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">اسم السائق</Label>
@@ -1109,10 +1113,10 @@ function WorkshopPage() {
               </div>
             </div>
             {[
-              ["odoStart", "عداد البداية", "number"],
-              ["odoEnd", "عداد النهاية", "number"],
-              ["liters", "الكمية (لتر)", "number"],
-              ["cost", "التكلفة", "number"],
+              ["date", "تاريخ التموين", "date"],
+              ["currentOdometer", "العداد الحالي", "number"],
+              ["liters", "عدد اللترات", "number"],
+              ["cost", "إجمالي التكلفة", "number"],
               ["station", "المحطة"],
             ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">

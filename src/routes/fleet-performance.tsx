@@ -267,19 +267,29 @@ function FleetPerformancePage() {
                   </DataTable>
                 </TabsContent>
                 <TabsContent value="fuel">
-                  <DataTable head={["التاريخ", "السائق", "اللترات", "التكلفة", "المسافة (كم)"]}>
+                  <DataTable head={["التاريخ", "السائق", "العداد السابق", "العداد الحالي", "المسافة المقطوعة", "اللترات", "التكلفة", "المعدل الفعلي", "الحالة"]}>
                     {data.fuel.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">لا توجد تعبئات في هذه الفترة.</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">لا توجد تعبئات في هذه الفترة.</td></tr>
                     ) : (
-                      data.fuel.map((f) => (
-                        <tr key={f.id} className="hover:bg-secondary/30">
-                          <td className="px-4 py-3">{f.date}</td>
-                          <td className="px-4 py-3">{f.driver}</td>
-                          <td className="px-4 py-3">{num(f.liters)}</td>
-                          <td className="px-4 py-3">{currency(f.cost)}</td>
-                          <td className="px-4 py-3">{f.km ? num(f.km, 0) : "—"}</td>
-                        </tr>
-                      ))
+                      data.fuel.map((f) => {
+                        const per = f.ratio == null ? null : basis === "km" ? f.ratio : basis === "km100" ? f.ratio * 100 : null;
+                        const over = per != null && target != null && per > target;
+                        return (
+                          <tr key={f.id} className="hover:bg-secondary/30">
+                            <td className="px-4 py-3">{f.date}</td>
+                            <td className="px-4 py-3">{f.driver}</td>
+                            <td className="px-4 py-3">{f.previous != null ? num(f.previous, 0) : "—"}</td>
+                            <td className="px-4 py-3">{f.odometer != null ? num(f.odometer, 0) : "—"}</td>
+                            <td className="px-4 py-3">{f.km ? `${num(f.km, 0)} كم` : "—"}</td>
+                            <td className="px-4 py-3">{num(f.liters)}</td>
+                            <td className="px-4 py-3">{currency(f.cost)}</td>
+                            <td className="px-4 py-3">{f.ratio != null ? `${num(f.ratio, 3)} لتر/كم` : "—"}</td>
+                            <td className="px-4 py-3">
+                              {per == null || target == null ? "—" : over ? <span className="font-bold text-red-600">⚠️ هدر {num(((per - target) / target) * 100)}%</span> : <span className="font-bold text-success">✅ منتظم</span>}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </DataTable>
                 </TabsContent>

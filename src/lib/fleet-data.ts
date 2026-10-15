@@ -109,8 +109,10 @@ export interface FuelLog {
   date: string;
   bus: string;
   driver: string;
-  odoStart: number;
-  odoEnd: number;
+  odoStart: number; // legacy
+  odoEnd: number; // legacy
+  currentOdometer: number | null;
+  createdAt: string;
   liters: number;
   cost: number;
   station: string;

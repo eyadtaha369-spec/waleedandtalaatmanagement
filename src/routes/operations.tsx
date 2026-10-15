@@ -105,6 +105,7 @@ function OperationsPage() {
   );
 
   const finance = useMemo(() => computeSubscriptionFinance(studentsList, subExpenses), [studentsList, subExpenses]);
+  const borgCollected = useMemo(() => studentsList.filter((x) => x.route === "برج العرب").reduce((t, x) => t + x.paid, 0), [studentsList]);
 
   const recordPayment = async () => {
     if (!student || !payAmount.trim()) return;
@@ -177,7 +178,7 @@ function OperationsPage() {
       )}
 
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="إجمالي التحصيل الفعلي (المحصل)" value={currency(finance.collected)} icon={Wallet} />
+        <StatCard label="إجمالي التحصيل الفعلي (المحصل)" value={currency(finance.collected)} hint={`إسكندرية ${currency(finance.collected - borgCollected)} • برج العرب ${currency(borgCollected)}`} icon={Wallet} />
         <StatCard label="إجمالي المتبقي (الأقساط المستحقة)" value={currency(finance.remaining)} icon={Hourglass} />
         <StatCard label="إجمالي المصروفات الخاصة بالاشتراكات" value={currency(finance.expenses)} icon={Receipt} />
         <StatCard label="الصافي المتبقي في الخزينة / الأرباح الصافية" value={currency(finance.net)} hint={finance.net < 0 ? "عجز: المصروفات أعلى من التحصيل" : "التحصيل − المصروفات"} icon={TrendingUp} />

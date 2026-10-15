@@ -77,7 +77,7 @@ function NavList({
   onNavigate?: () => void;
 }) {
   return (
-    <nav className="flex-1 space-y-1 p-3">
+    <nav className="scrollbar-sleek min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">
       {items.map((item) => {
         const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
         return (
@@ -179,7 +179,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen w-full" dir="rtl">
       <aside
         className={cn(
-          "no-print sticky top-0 hidden h-screen shrink-0 flex-col border-l border-sidebar-border bg-sidebar transition-all md:flex",
+          "no-print sticky top-0 hidden h-screen max-h-screen shrink-0 flex-col overflow-hidden border-l border-sidebar-border bg-sidebar transition-all md:flex",
           open ? "w-72" : "w-20",
         )}
       >
@@ -203,7 +203,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-        <SheetContent side="right" className="flex w-72 flex-col border-sidebar-border bg-sidebar p-0">
+        <SheetContent side="right" className="flex w-72 flex-col overflow-hidden border-sidebar-border bg-sidebar p-0">
           <div className="flex items-center gap-3 border-b border-sidebar-border px-4 py-4">
             <LogoCrest size={46} />
             <div className="leading-tight">

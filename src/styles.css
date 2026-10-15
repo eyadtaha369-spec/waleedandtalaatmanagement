@@ -248,3 +248,23 @@
     direction: rtl;
   }
 }
+
+/* sleek scrollbars for the sidebar, dialogs and sheets */
+.scrollbar-sleek {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--primary) 55%, transparent) transparent;
+}
+.scrollbar-sleek::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-sleek::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-sleek::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--primary) 55%, transparent);
+  border-radius: 9999px;
+}
+.scrollbar-sleek::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}

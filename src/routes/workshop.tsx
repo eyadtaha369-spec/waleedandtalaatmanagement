@@ -786,10 +786,7 @@ function WorkshopPage() {
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">رقم العربية</Label>
-                <Select value={form.bus} onValueChange={(v) => setForm({ ...form, bus: v })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
-                  <SelectContent>{busCodes.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
+                <BusPicker value={form.bus} buses={busList} onChange={(v) => setForm({ ...form, bus: v })} />
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">تاريخ الأمر</Label>
@@ -869,10 +866,7 @@ function WorkshopPage() {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">رقم العربية</Label>
-              <Select value={ledgerBus} onValueChange={setLedgerBus}>
-                <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
-                <SelectContent>{busCodes.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
+              <BusPicker value={ledgerBus} buses={busList} onChange={setLedgerBus} />
             </div>
             <DateRangeFilter value={{ from: ledgerFrom, to: ledgerTo }} onChange={(r) => { setLedgerFrom(r.from); setLedgerTo(r.to); }} className="sm:col-span-2" />
           </div>

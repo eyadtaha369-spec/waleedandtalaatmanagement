@@ -212,9 +212,20 @@ export async function addRoute(input: {
 }
 
 export async function fetchStudents(): Promise<Student[]> {
-  const { data, error } = await supabase.from("students").select("*, routes(route_name)").order("name");
-  if (error) throw error;
-  return (data ?? []).map((s: any) => ({
+  // PostgREST caps a response at 1,000 rows — page through so totals cover every student.
+  const data: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error } = await supabase
+      .from("students")
+      .select("*, routes(route_name)")
+      .order("name")
+      .order("id")
+      .range(from, from + 999);
+    if (error) throw error;
+    data.push(...(page ?? []));
+    if (!page || page.length < 1000) break;
+  }
+  return data.map((s: any) => ({
     id: s.id,
     name: s.name,
     route: s.routes?.route_name ?? "—",

@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Trash2, X, TrendingUp, TrendingDown, Wallet } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
-import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
+import { DataTable, PageHeader, Panel, StatCard, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +29,8 @@ import {
 import { currency, type TreasuryEntry, type Expense, type Loan } from "@/lib/fleet-data";
 import {
   fetchTreasury,
+  fetchTreasurySummary,
+  type TreasurySummary,
   fetchExpenses,
   fetchLoans,
   addTreasuryEntry,
@@ -87,11 +89,14 @@ function FinancePage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [summary, setSummary] = useState<TreasurySummary | null>(null);
+
   const loadAll = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [t, e, l, c, sp] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers()]);
+      const [t, e, l, c, sp, sum] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers(), fetchTreasurySummary()]);
+      setSummary(sum);
       setClients(c);
       setSuppliers(sp);
       setTreasury(t);
@@ -249,6 +254,31 @@ function FinancePage() {
         </TabsList>
 
         <TabsContent value="treasury">
+          {summary && (
+            <Panel title="ملخص الخزينة المجمّع (كل الفترات)" className="mb-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <StatCard label="إجمالي الإيرادات والتحصيلات" value={currency(summary.totalRevenue)} icon={TrendingUp} />
+                <StatCard label="إجمالي المصروفات" value={currency(summary.totalExpenses)} icon={TrendingDown} />
+                <StatCard label="صافي رصيد الخزينة" value={currency(summary.netCash)} hint="الإيرادات − المصروفات" icon={Wallet} />
+              </div>
+              <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                {([
+                  ["تحصيل اشتراكات الطلاب", summary.subscriptionCollected, "good"],
+                  ["إيرادات الشركات (ورديات الحركة)", summary.companyRevenue, "good"],
+                  ["إيرادات الرحلات الخارجية", summary.tripRevenue, "good"],
+                  ["مصروفات الاشتراكات والخطوط", summary.subscriptionExpenses, "bad"],
+                  ["المصروفات العامة والموردون", summary.generalExpenses, "bad"],
+                  ["صافي الاشتراكات (التحصيل − مصروفات الاشتراكات)", summary.subscriptionNet, summary.subscriptionNet >= 0 ? "good" : "bad"],
+                ] as const).map(([label, value, tone]) => (
+                  <div key={label} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className={tone === "good" ? "font-bold text-emerald-500" : "font-bold text-destructive"}>{currency(value)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">محسوبة مباشرة من سجلات الطلاب والمدفوعات والورديات والرحلات والمصروفات، وتتحدث تلقائيًا مع كل عملية.</p>
+            </Panel>
+          )}
           <Panel title="الأرصدة اليومية">
             <Toolbar
               query={query}

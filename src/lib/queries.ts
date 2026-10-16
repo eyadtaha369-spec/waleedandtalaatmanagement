@@ -50,7 +50,7 @@ export async function fetchBuses(): Promise<Bus[]> {
   }));
 }
 
-export async function addBus(input: { code: string; plate: string; model: string; busType?: string; capacity: number; odometer: number; status?: string }) {
+export async function addBus(input: { code: string; plate: string; model: string; busType?: string; capacity: number; odometer: number; status?: string; licenseExpiry?: string; insuranceExpiry?: string }) {
   const { error } = await supabase.from("buses").insert({
     bus_code: input.code,
     plate_number: input.plate,
@@ -59,6 +59,8 @@ export async function addBus(input: { code: string; plate: string; model: string
     capacity: input.capacity,
     odometer: input.odometer,
     status: input.status ?? "تعمل",
+    license_expiry: input.licenseExpiry || null,
+    insurance_expiry: input.insuranceExpiry || null,
   });
   if (error) throw error;
 }
@@ -935,6 +937,18 @@ export async function fetchAlerts(): Promise<AlertRow[]> {
   return (data ?? []).map((a: any) => ({ id: a.id, type: a.type, text: a.text, level: a.level ?? "متوسط" }));
 }
 
+/** Marks an alert as read; the daily generator never re-opens it unless a new threshold event occurs. */
+export async function markAlertRead(id: string) {
+  const { error } = await supabase.from("alerts").update({ resolved: true, resolved_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث التنبيه"));
+}
+
+export async function markAllAlertsRead(ids: string[]) {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from("alerts").update({ resolved: true, resolved_at: new Date().toISOString() }).in("id", ids);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث التنبيهات"));
+}
+
 export function computeFuelEfficiency(
   rows: { liters: number; odo_start: number; odo_end: number; bus_code: string }[],
 ): { bus: string; "لتر/100كم": number }[] {
@@ -966,6 +980,10 @@ export async function fetchFuelChart(): Promise<{ bus: string; "لتر/100كم":
 export function computeMonthlyFinance(
   treasuryRows: { date: string; deposits: number }[],
   expenseRows: { date: string; amount: number }[],
+  /** student subscription collections (not posted to the treasury table) */
+  collectionRows: { date: string; amount: number }[] = [],
+  /** subscription expenses (already withdrawn from the treasury through a trigger, so counted once, here) */
+  subscriptionExpenseRows: { date: string; amount: number }[] = [],
 ): { month: string; الإيرادات: number; المصروفات: number }[] {
   const monthKey = (d: string) => new Date(d).toLocaleDateString("ar-EG", { month: "long" });
   const byMonth = new Map<string, { rev: number; exp: number }>();
@@ -975,7 +993,13 @@ export function computeMonthlyFinance(
     e.rev += Number(row.deposits ?? 0);
     byMonth.set(k, e);
   }
-  for (const row of expenseRows) {
+  for (const row of collectionRows) {
+    const k = monthKey(row.date);
+    const e = byMonth.get(k) ?? { rev: 0, exp: 0 };
+    e.rev += Number(row.amount ?? 0);
+    byMonth.set(k, e);
+  }
+  for (const row of [...expenseRows, ...subscriptionExpenseRows]) {
     const k = monthKey(row.date);
     const e = byMonth.get(k) ?? { rev: 0, exp: 0 };
     e.exp += Number(row.amount ?? 0);
@@ -985,13 +1009,14 @@ export function computeMonthlyFinance(
 }
 
 export async function fetchMonthlyFinance(): Promise<{ month: string; الإيرادات: number; المصروفات: number }[]> {
-  const [{ data: treasuryData, error: e1 }, { data: expenseData, error: e2 }] = await Promise.all([
-    supabase.from("treasury").select("date, deposits"),
-    supabase.from("expenses").select("date, amount"),
+  const [t, ex, pay, subEx] = await Promise.all([
+    pageAll((f, to) => supabase.from("treasury").select("date, deposits").order("id").range(f, to)),
+    pageAll((f, to) => supabase.from("expenses").select("date, amount").order("id").range(f, to)),
+    pageAll((f, to) => supabase.from("payments").select("date, amount").eq("type", "دائن").order("id").range(f, to)),
+    pageAll((f, to) => supabase.from("subscription_expenses").select("date, amount").order("id").range(f, to)),
   ]);
-  if (e1) throw e1;
-  if (e2) throw e2;
-  return computeMonthlyFinance((treasuryData ?? []) as any, (expenseData ?? []) as any);
+  for (const r of [t, ex, pay, subEx]) if (r.error) throw r.error;
+  return computeMonthlyFinance(t.data as any, ex.data as any, pay.data as any, subEx.data as any);
 }
 
 export async function fetchPayroll(): Promise<Payslip[]> {
@@ -1714,7 +1739,7 @@ export async function addLedgerTransaction(input: {
 
 // ---- Update / delete: every editable entity ----
 
-export async function updateBus(id: string, input: { code: string; plate: string; model: string; busType?: string; capacity: number; odometer: number; status?: string }) {
+export async function updateBus(id: string, input: { code: string; plate: string; model: string; busType?: string; capacity: number; odometer: number; status?: string; licenseExpiry?: string; insuranceExpiry?: string }) {
   const { error } = await supabase.from("buses").update({
     bus_code: input.code,
     plate_number: input.plate,
@@ -1723,6 +1748,8 @@ export async function updateBus(id: string, input: { code: string; plate: string
     capacity: input.capacity,
     odometer: input.odometer,
     status: input.status ?? "تعمل",
+    license_expiry: input.licenseExpiry || null,
+    insurance_expiry: input.insuranceExpiry || null,
   }).eq("id", id);
   if (error) throw error;
 }
@@ -1953,14 +1980,11 @@ function mapShift(o: any): DispatchShift {
 
 export async function fetchDispatchShifts(period: Period): Promise<DispatchShift[]> {
   const { start, end } = periodBounds(period);
-  const { data, error } = await supabase
-    .from("dispatch_shifts")
-    .select(SHIFT_SELECT)
-    .gte("op_date", start)
-    .lt("op_date", end)
-    .order("op_date", { ascending: false });
+  const { data, error } = await pageAll((f, t) =>
+    supabase.from("dispatch_shifts").select(SHIFT_SELECT).gte("op_date", start).lt("op_date", end).order("op_date", { ascending: false }).order("id").range(f, t),
+  );
   if (error) throw error;
-  return (data ?? []).map(mapShift);
+  return data.map(mapShift);
 }
 
 export async function fetchDispatchShiftsByDate(date: string): Promise<DispatchShift[]> {
@@ -2925,6 +2949,53 @@ export async function fetchSupplierMonthlySummary(period: Period): Promise<Suppl
   return suppliers.map((s) => ({ id: s.id, name: s.name, purchasesThisMonth: bySupplier.get(s.id) ?? 0, balanceDue: s.balanceDue }));
 }
 
+// ---- Consolidated treasury summary ----
+
+export interface TreasurySummary {
+  subscriptionCollected: number;
+  companyRevenue: number;
+  tripRevenue: number;
+  totalRevenue: number;
+  subscriptionExpenses: number;
+  generalExpenses: number;
+  totalExpenses: number;
+  netCash: number;
+  /** collected from students − subscription expenses */
+  subscriptionNet: number;
+}
+
+export function computeTreasurySummary(i: {
+  subscriptionCollected: number;
+  companyRevenue: number;
+  tripRevenue: number;
+  subscriptionExpenses: number;
+  generalExpenses: number;
+}): TreasurySummary {
+  const totalRevenue = i.subscriptionCollected + i.companyRevenue + i.tripRevenue;
+  const totalExpenses = i.subscriptionExpenses + i.generalExpenses;
+  return { ...i, totalRevenue, totalExpenses, netCash: totalRevenue - totalExpenses, subscriptionNet: i.subscriptionCollected - i.subscriptionExpenses };
+}
+
+/** All-time figures taken straight from the source tables (never from a typed-in total). */
+export async function fetchTreasurySummary(): Promise<TreasurySummary> {
+  const sum = (rows: any[], key: string) => rows.reduce((s, r) => s + Number(r[key] ?? 0), 0);
+  const [students, shifts, trips, expenses, subExp] = await Promise.all([
+    pageAll((f, t) => supabase.from("students").select("paid_amount").order("id").range(f, t)),
+    fetchDispatchShifts({ from: "", to: "" }),
+    pageAll((f, t) => supabase.from("trips").select("total_price").neq("status", "ملغاة").order("id").range(f, t)),
+    pageAll((f, t) => supabase.from("expenses").select("amount").order("id").range(f, t)),
+    pageAll((f, t) => supabase.from("subscription_expenses").select("amount").order("id").range(f, t)),
+  ]);
+  for (const r of [students, trips, expenses, subExp]) if (r.error) throw r.error;
+  return computeTreasurySummary({
+    subscriptionCollected: sum(students.data, "paid_amount"),
+    companyRevenue: shifts.reduce((s, o) => s + o.busValue, 0),
+    tripRevenue: sum(trips.data, "total_price"),
+    subscriptionExpenses: sum(subExp.data, "amount"),
+    generalExpenses: sum(expenses.data, "amount"),
+  });
+}
+
 // ---- Executive monthly financial report (Spec #2) ----
 
 export interface MonthlyReportBreakdown {
@@ -2937,6 +3008,8 @@ export interface MonthlyReportBreakdown {
   partsExpense: number;
   fuelExpense: number;
   adminMiscExpense: number;
+  /** مصروفات الاشتراكات والخطوط (subscription_expenses) */
+  subscriptionExpense: number;
   totalExpenses: number;
   netProfit: number;
 }
@@ -2950,10 +3023,12 @@ export function computeMonthlyReport(input: {
   partsExpense: number;
   fuelExpense: number;
   adminMiscExpense: number;
+  subscriptionExpense?: number;
 }): MonthlyReportBreakdown {
+  const subscriptionExpense = input.subscriptionExpense ?? 0;
   const totalRevenue = input.subscriptionRevenue + input.companyRevenue + input.tripRevenue;
-  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.fuelExpense + input.adminMiscExpense;
-  return { ...input, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
+  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.fuelExpense + input.adminMiscExpense + subscriptionExpense;
+  return { ...input, subscriptionExpense, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
 }
 
 export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportBreakdown> {
@@ -2967,8 +3042,9 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     { data: maintOrders },
     { data: outTx },
     { data: allExpenses },
+    { data: subExpenses },
   ] = await Promise.all([
-    supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end),
+    pageAll((f, t) => supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end).order("id").range(f, t)),
     fetchDispatchShifts(period),
     fetchDriverPayroll(period),
     supabase.from("payslips").select("overtime, advances, penalties, staff(base_salary)").gte("month", start).lt("month", end),
@@ -2976,8 +3052,10 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     supabase.from("maintenance_orders").select("total_cost, created_at").gte("created_at", start).lt("created_at", end),
     supabase.from("inventory_transactions").select("total_cost, created_at").eq("type", "OUT").gte("created_at", start).lt("created_at", end),
     supabase.from("expenses").select("category, amount, date").gte("date", start).lt("date", end),
+    pageAll((f, t) => supabase.from("subscription_expenses").select("amount").gte("date", start).lt("date", end).order("id").range(f, t)),
   ]);
 
+  const subscriptionExpense = (subExpenses ?? []).reduce((sum: number, e: any) => sum + Number(e.amount ?? 0), 0);
   const subscriptionRevenue = (subPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
   const companyRevenue = ops.reduce((sum, o) => sum + o.busValue, 0);
   const { data: tripsThisMonth } = await supabase
@@ -3012,6 +3090,7 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     partsExpense,
     fuelExpense,
     adminMiscExpense,
+    subscriptionExpense,
   });
 }
 

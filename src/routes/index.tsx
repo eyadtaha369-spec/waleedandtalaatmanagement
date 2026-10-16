@@ -21,6 +21,7 @@ import {
   fetchBuses,
   fetchStudents,
   fetchAlerts,
+  markAlertRead,
   fetchFuelChart,
   fetchMonthlyFinance,
   fetchTreasury,
@@ -179,7 +180,7 @@ function Dashboard() {
           icon={Bus}
         />
         <StatCard label="الإيرادات والمقبوضات اليومية" value={currency(todayReceipts)} hint="مقبوضات نقدية وتحويلات اليوم" icon={Coins} />
-        <StatCard label="إجمالي الطلاب والمشتركين" value={`${students.length} مشترك`} hint={`${late} حالات سداد متأخرة`} icon={Users} />
+        <StatCard label="إجمالي الطلاب والمشتركين" value={`${students.length} مشترك`} hint={`${late} حالات سداد متأخرة • المحصل ${currency(students.reduce((s, x) => s + x.paid, 0))}`} icon={Users} />
         <StatCard label="التنبيهات العاجلة" value={`${alerts.filter((a) => a.level === "عاجل").length} تنبيهات`} hint="عقود وتراخيص ومخزون" icon={AlertTriangle} />
       </div>
 
@@ -211,6 +212,16 @@ function Dashboard() {
                   <StatusPill label={a.level} tone={a.level === "عاجل" ? "bad" : "warn"} />
                 </div>
                 <p className="mt-2 text-sm text-foreground">{a.text}</p>
+                <button
+                  type="button"
+                  className="mt-2 text-xs font-bold text-primary hover:underline"
+                  onClick={() => {
+                    setAlerts((prev) => prev.filter((x) => x.id !== a.id));
+                    markAlertRead(a.id).catch(() => fetchAlerts().then(setAlerts).catch(() => undefined));
+                  }}
+                >
+                  قراءة ✓
+                </button>
               </li>
             ))}
           </ul>

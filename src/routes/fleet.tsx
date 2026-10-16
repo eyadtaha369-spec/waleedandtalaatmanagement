@@ -96,7 +96,7 @@ function FleetPage() {
   const [importingBuses, setImportingBuses] = useState(false);
   const [importingDrivers, setImportingDrivers] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
+  const [form, setForm] = useState({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل", licenseExpiry: "", insuranceExpiry: "" });
   const [driverForm, setDriverForm] = useState({ id: "", name: "", phone: "", license: "", licenseExpiry: "", baseSalary: "" });
   const [employeeForm, setEmployeeForm] = useState({ id: "", name: "", phone: "", jobTitle: EMPLOYEE_JOB_TITLES[0] as string, baseSalary: "", isActive: true });
   const [attendanceBusy, setAttendanceBusy] = useState<string | null>(null);
@@ -145,12 +145,12 @@ function FleetPage() {
   );
 
   const openAddBus = () => {
-    setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
+    setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل", licenseExpiry: "", insuranceExpiry: "" });
     setAdding(true);
   };
 
   const openEditBus = (b: Bus) => {
-    setForm({ id: b.id, code: b.code, plate: b.plate, model: b.model, busType: b.busType || "أتوبيس 50", capacity: String(b.capacity), odometer: String(b.odometer), status: b.status });
+    setForm({ id: b.id, code: b.code, plate: b.plate, model: b.model, busType: b.busType || "أتوبيس 50", capacity: String(b.capacity), odometer: String(b.odometer), status: b.status, licenseExpiry: b.licenseExpiry === "—" ? "" : b.licenseExpiry, insuranceExpiry: b.insuranceExpiry === "—" ? "" : b.insuranceExpiry });
     setAdding(true);
   };
 
@@ -168,6 +168,8 @@ function FleetPage() {
         capacity: Number(form.capacity) || 0,
         odometer: Number(form.odometer) || 0,
         status: form.status,
+        licenseExpiry: form.licenseExpiry,
+        insuranceExpiry: form.insuranceExpiry,
       };
       if (form.id) {
         await updateBus(form.id, payload);
@@ -175,7 +177,7 @@ function FleetPage() {
         await addBusApi(payload);
       }
       await loadAll();
-      setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل" });
+      setForm({ id: "", code: "", plate: "", model: "", busType: "أتوبيس 50", capacity: "", odometer: "", status: "تعمل", licenseExpiry: "", insuranceExpiry: "" });
       setAdding(false);
     } catch (e) {
       setError(errText(e, "تعذر حفظ الأتوبيس"));
@@ -714,6 +716,8 @@ function FleetPage() {
               ["model", "الموديل"],
               ["capacity", "السعة", "number"],
               ["odometer", "قراءة العداد", "number"],
+              ["licenseExpiry", "تاريخ انتهاء الترخيص", "date"],
+              ["insuranceExpiry", "تاريخ انتهاء التأمين", "date"],
             ].map(([key, label, type]) => (
               <div key={key} className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">{label}</Label>

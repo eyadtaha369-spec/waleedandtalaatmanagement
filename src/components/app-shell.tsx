@@ -34,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth";
-import { fetchMyProfile, fetchAlerts, globalSearch, type Profile, type AlertRow, type SearchResult } from "@/lib/queries";
+import { fetchMyProfile, fetchAlerts, markAlertRead, markAllAlertsRead, globalSearch, type Profile, type AlertRow, type SearchResult } from "@/lib/queries";
 import { LogoCrest } from "@/components/logo-crest";
 import { motion } from "framer-motion";
 
@@ -126,6 +126,16 @@ export function AppShell({ children }: { children: ReactNode }) {
       fetchAlerts().then(setAlerts).catch(() => setAlerts([]));
     }
   }, [session]);
+
+  const dismissAlert = (id: string) => {
+    setAlerts((prev) => prev.filter((x) => x.id !== id));
+    markAlertRead(id).catch(() => fetchAlerts().then(setAlerts).catch(() => undefined));
+  };
+  const dismissAll = () => {
+    const ids = alerts.map((x) => x.id);
+    setAlerts([]);
+    markAllAlertsRead(ids).catch(() => fetchAlerts().then(setAlerts).catch(() => undefined));
+  };
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -276,13 +286,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <p className="px-2 py-3 text-center text-xs text-muted-foreground">لا توجد تنبيهات حالياً</p>
                 ) : (
                   alerts.slice(0, 8).map((a) => (
-                    <DropdownMenuItem key={a.id} className="whitespace-normal text-xs">
+                    <DropdownMenuItem key={a.id} className="whitespace-normal text-xs" onSelect={(e) => { e.preventDefault(); dismissAlert(a.id); }} title="اضغط لتحديده كمقروء">
                       <span className={cn("ml-2 shrink-0 font-bold", a.level === "عاجل" ? "text-destructive" : "text-warning")}>
                         [{a.type}]
                       </span>
                       {a.text}
                     </DropdownMenuItem>
                   ))
+                )}
+                {alerts.length > 0 && (
+                  <DropdownMenuItem className="justify-center text-xs font-bold text-primary" onSelect={(e) => { e.preventDefault(); dismissAll(); }}>
+                    قراءة الكل ✓
+                  </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>

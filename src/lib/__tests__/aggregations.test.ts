@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeTreasurySummary } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -578,5 +578,15 @@ describe("computeSubscriptionFinance", () => {
       [{ amount: 1200 }, { amount: 800 }],
     );
     expect(f).toEqual({ collected: 19000, remaining: 8500, expenses: 2000, net: 17000 });
+  });
+});
+
+describe("computeTreasurySummary", () => {
+  it("adds subscriptions, shifts and trips, subtracts all expenses", () => {
+    const s = computeTreasurySummary({ subscriptionCollected: 12293979, companyRevenue: 100, tripRevenue: 50, subscriptionExpenses: 6434625, generalExpenses: 25 });
+    expect(s.totalRevenue).toBe(12294129);
+    expect(s.totalExpenses).toBe(6434650);
+    expect(s.netCash).toBe(5859479);
+    expect(s.subscriptionNet).toBe(5859354);
   });
 });

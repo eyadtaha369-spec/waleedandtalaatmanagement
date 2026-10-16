@@ -28,7 +28,7 @@ import {
   fetchDispatchShifts,
   fetchExpenses,
   fetchDriverPayroll,
-  computeMonthlyPL,
+  fetchMonthlyReport,
   type AlertRow,
 } from "@/lib/queries";
 
@@ -67,7 +67,7 @@ function Dashboard() {
   const [todayReceipts, setTodayReceipts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [plMonth, setPlMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [pl, setPl] = useState({ totalRevenue: 0, totalExpenses: 0, netProfit: 0 });
+  const [pl, setPl] = useState({ totalRevenue: 0, totalExpenses: 0, fuelExpense: 0, netProfit: 0 });
   const [expenseBreakdown, setExpenseBreakdown] = useState<{ category: string; المبلغ: number }[]>([]);
 
   useEffect(() => {
@@ -105,7 +105,8 @@ function Dashboard() {
         const monthExpenses = allExpenses.filter((e) => e.date.startsWith(plMonth));
         const generalExpenseTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
         const netPayrollTotal = payroll.reduce((sum, p) => sum + p.netSalary, 0);
-        setPl(computeMonthlyPL(ops, generalExpenseTotal, netPayrollTotal));
+        const rep = await fetchMonthlyReport(plMonth);
+        setPl({ totalRevenue: rep.totalRevenue, totalExpenses: rep.totalExpenses, fuelExpense: rep.fuelExpense, netProfit: rep.netProfit });
 
         const byCategory = new Map<string, number>();
         for (const e of monthExpenses) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amount);
@@ -139,16 +140,17 @@ function Dashboard() {
         <div className="mb-4 flex justify-end">
           <Input value={plMonth} onChange={(e) => setPlMonth(e.target.value)} type="month" className="h-9 w-40 border-border bg-input/60" />
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatCard label="إجمالي إيرادات الشركات (دائن)" value={currency(pl.totalRevenue)} icon={TrendingUp} />
-          <StatCard label="إجمالي المصروفات التشغيلية (مدين)" value={currency(pl.totalExpenses)} icon={TrendingDown} />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="إجمالي الإيرادات والتحصيلات" value={currency(pl.totalRevenue)} icon={TrendingUp} />
+          <StatCard label="(-) إجمالي المصروفات والتشغيل" value={currency(pl.totalExpenses)} icon={TrendingDown} />
+          <StatCard label="(-) إجمالي حساب السولار والوقود" value={currency(pl.fuelExpense)} icon={TrendingDown} />
           <div className="panel relative overflow-hidden p-5">
             <div className="absolute -left-8 -top-8 h-24 w-24 rounded-full bg-primary/20 blur-2xl" />
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm text-muted-foreground">صافي الربح الشهري</p>
+                <p className="text-sm text-muted-foreground">(=) الصافي الفعلي المتبقي</p>
                 <p className="mt-2 text-2xl font-extrabold text-gold-gradient">{currency(pl.netProfit)}</p>
-                <p className="mt-2 text-xs text-muted-foreground">إيرادات الشركات - (الوقود + المصروفات العامة + صافي المرتبات)</p>
+                <p className="mt-2 text-xs text-muted-foreground">الإيرادات − المصروفات − السولار</p>
               </div>
               <span className="rounded-xl border border-primary/40 bg-primary/10 p-2.5">
                 <Wallet className="h-5 w-5 text-primary" />

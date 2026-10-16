@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeTreasurySummary } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -220,7 +220,7 @@ describe("computeMonthlyReport", () => {
       adminMiscExpense: 100,
     });
     expect(result.totalRevenue).toBe(3000);
-    expect(result.totalExpenses).toBe(2500);
+    expect(result.totalExpenses).toBe(2100);
     expect(result.netProfit).toBe(500);
   });
 
@@ -581,12 +581,10 @@ describe("computeSubscriptionFinance", () => {
   });
 });
 
-describe("computeTreasurySummary", () => {
-  it("adds subscriptions, shifts and trips, subtracts all expenses", () => {
-    const s = computeTreasurySummary({ subscriptionCollected: 12293979, companyRevenue: 100, tripRevenue: 50, subscriptionExpenses: 6434625, generalExpenses: 25 });
-    expect(s.totalRevenue).toBe(12294129);
-    expect(s.totalExpenses).toBe(6434650);
-    expect(s.netCash).toBe(5859479);
-    expect(s.subscriptionNet).toBe(5859354);
+describe("computeMonthlyReport fuel separation", () => {
+  it("keeps fuel out of totalExpenses and subtracts it separately", () => {
+    const r = computeMonthlyReport({ subscriptionRevenue: 1000, companyRevenue: 500, tripRevenue: 0, payrollExpense: 100, maintenanceExpense: 50, partsExpense: 25, fuelExpense: 200, adminMiscExpense: 25, subscriptionExpense: 100 });
+    expect(r.totalExpenses).toBe(300);
+    expect(r.netProfit).toBe(1000);
   });
 });

@@ -95,7 +95,7 @@ function FinancePage() {
     setLoading(true);
     setError(null);
     try {
-      const [t, e, l, c, sp, sum] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers(), fetchTreasurySummary()]);
+      const [t, e, l, c, sp, sum] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers(), fetchTreasurySummary({ from: "2000-01-01", to: "2100-01-01" })]);
       setSummary(sum);
       setClients(c);
       setSuppliers(sp);
@@ -256,19 +256,23 @@ function FinancePage() {
         <TabsContent value="treasury">
           {summary && (
             <Panel title="ملخص الخزينة المجمّع (كل الفترات)" className="mb-4">
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <StatCard label="إجمالي الإيرادات والتحصيلات" value={currency(summary.totalRevenue)} icon={TrendingUp} />
-                <StatCard label="إجمالي المصروفات" value={currency(summary.totalExpenses)} icon={TrendingDown} />
-                <StatCard label="صافي رصيد الخزينة" value={currency(summary.netCash)} hint="الإيرادات − المصروفات" icon={Wallet} />
+                <StatCard label="(-) إجمالي المصروفات والتشغيل" value={currency(summary.totalExpenses)} hint="شامل المرتبات والصيانة والنثريات وقطع الغيار" icon={TrendingDown} />
+                <StatCard label="(-) إجمالي حساب السولار" value={currency(summary.fuelExpense)} hint="مستقل" icon={TrendingDown} />
+                <StatCard label="(=) الصافي الفعلي المتبقي" value={currency(summary.netProfit)} hint="الإيرادات − المصروفات − السولار" icon={Wallet} />
               </div>
               <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                 {([
-                  ["تحصيل اشتراكات الطلاب", summary.subscriptionCollected, "good"],
+                  ["تحصيل اشتراكات الطلاب", summary.subscriptionRevenue, "good"],
                   ["إيرادات الشركات (ورديات الحركة)", summary.companyRevenue, "good"],
                   ["إيرادات الرحلات الخارجية", summary.tripRevenue, "good"],
-                  ["مصروفات الاشتراكات والخطوط", summary.subscriptionExpenses, "bad"],
-                  ["المصروفات العامة والموردون", summary.generalExpenses, "bad"],
-                  ["صافي الاشتراكات (التحصيل − مصروفات الاشتراكات)", summary.subscriptionNet, summary.subscriptionNet >= 0 ? "good" : "bad"],
+                  ["المرتبات والأجور", summary.payrollExpense, "bad"],
+                  ["الصيانة والورش الخارجية", summary.maintenanceExpense, "bad"],
+                  ["قطع الغيار من المخزن", summary.partsExpense, "bad"],
+                  ["المصاريف الإدارية والنثريات", summary.adminMiscExpense, "bad"],
+                  ["مصروفات الاشتراكات والخطوط", summary.subscriptionExpense, "bad"],
+                  ["إجمالي حساب السولار والوقود", summary.fuelExpense, "bad"],
                 ] as const).map(([label, value, tone]) => (
                   <div key={label} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2">
                     <span className="text-muted-foreground">{label}</span>

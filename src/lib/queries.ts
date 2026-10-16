@@ -2951,49 +2951,11 @@ export async function fetchSupplierMonthlySummary(period: Period): Promise<Suppl
 
 // ---- Consolidated treasury summary ----
 
-export interface TreasurySummary {
-  subscriptionCollected: number;
-  companyRevenue: number;
-  tripRevenue: number;
-  totalRevenue: number;
-  subscriptionExpenses: number;
-  generalExpenses: number;
-  totalExpenses: number;
-  netCash: number;
-  /** collected from students − subscription expenses */
-  subscriptionNet: number;
-}
+export type TreasurySummary = MonthlyReportBreakdown;
 
-export function computeTreasurySummary(i: {
-  subscriptionCollected: number;
-  companyRevenue: number;
-  tripRevenue: number;
-  subscriptionExpenses: number;
-  generalExpenses: number;
-}): TreasurySummary {
-  const totalRevenue = i.subscriptionCollected + i.companyRevenue + i.tripRevenue;
-  const totalExpenses = i.subscriptionExpenses + i.generalExpenses;
-  return { ...i, totalRevenue, totalExpenses, netCash: totalRevenue - totalExpenses, subscriptionNet: i.subscriptionCollected - i.subscriptionExpenses };
-}
-
-/** All-time figures taken straight from the source tables (never from a typed-in total). */
-export async function fetchTreasurySummary(): Promise<TreasurySummary> {
-  const sum = (rows: any[], key: string) => rows.reduce((s, r) => s + Number(r[key] ?? 0), 0);
-  const [students, shifts, trips, expenses, subExp] = await Promise.all([
-    pageAll((f, t) => supabase.from("students").select("paid_amount").order("id").range(f, t)),
-    fetchDispatchShifts({ from: "", to: "" }),
-    pageAll((f, t) => supabase.from("trips").select("total_price").neq("status", "ملغاة").order("id").range(f, t)),
-    pageAll((f, t) => supabase.from("expenses").select("amount").order("id").range(f, t)),
-    pageAll((f, t) => supabase.from("subscription_expenses").select("amount").order("id").range(f, t)),
-  ]);
-  for (const r of [students, trips, expenses, subExp]) if (r.error) throw r.error;
-  return computeTreasurySummary({
-    subscriptionCollected: sum(students.data, "paid_amount"),
-    companyRevenue: shifts.reduce((s, o) => s + o.busValue, 0),
-    tripRevenue: sum(trips.data, "total_price"),
-    subscriptionExpenses: sum(subExp.data, "amount"),
-    generalExpenses: sum(expenses.data, "amount"),
-  });
+/** Treasury summary over a date range — same structure/formula as the monthly report. */
+export async function fetchTreasurySummary(range: DateRange): Promise<TreasurySummary> {
+  return fetchMonthlyReport(range);
 }
 
 // ---- Executive monthly financial report (Spec #2) ----
@@ -3027,8 +2989,9 @@ export function computeMonthlyReport(input: {
 }): MonthlyReportBreakdown {
   const subscriptionExpense = input.subscriptionExpense ?? 0;
   const totalRevenue = input.subscriptionRevenue + input.companyRevenue + input.tripRevenue;
-  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.fuelExpense + input.adminMiscExpense + subscriptionExpense;
-  return { ...input, subscriptionExpense, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses };
+  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.adminMiscExpense + subscriptionExpense;
+  // fuel is reported on its own line and is NOT part of totalExpenses
+  return { ...input, subscriptionExpense, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses - input.fuelExpense };
 }
 
 export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportBreakdown> {
@@ -3043,6 +3006,7 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     { data: outTx },
     { data: allExpenses },
     { data: subExpenses },
+    { data: fuelLogRows },
   ] = await Promise.all([
     pageAll((f, t) => supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end).order("id").range(f, t)),
     fetchDispatchShifts(period),
@@ -3053,6 +3017,7 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     supabase.from("inventory_transactions").select("total_cost, created_at").eq("type", "OUT").gte("created_at", start).lt("created_at", end),
     supabase.from("expenses").select("category, amount, date").gte("date", start).lt("date", end),
     pageAll((f, t) => supabase.from("subscription_expenses").select("amount").gte("date", start).lt("date", end).order("id").range(f, t)),
+    pageAll((f, t) => supabase.from("fuel_logs").select("cost").gte("date", start).lt("date", end).order("id").range(f, t)),
   ]);
 
   const subscriptionExpense = (subExpenses ?? []).reduce((sum: number, e: any) => sum + Number(e.amount ?? 0), 0);
@@ -3078,7 +3043,7 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
 
   const maintenanceExpense = (maintOrders ?? []).reduce((sum: number, o: any) => sum + Number(o.total_cost ?? 0), 0);
   const partsExpense = (outTx ?? []).reduce((sum: number, t: any) => sum + Number(t.total_cost ?? 0), 0) + expenseByCategory(["قطع غيار"]);
-  const fuelExpense = expenseByCategory(["غاز"]);
+  const fuelExpense = (fuelLogRows ?? []).reduce((sum: number, f: any) => sum + Number(f.cost ?? 0), 0) + expenseByCategory(["غاز"]);
   const adminMiscExpense = expenseByCategory(["إداريات", "مصاريف خارجية", "موردين"]);
 
   return computeMonthlyReport({

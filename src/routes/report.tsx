@@ -99,14 +99,15 @@ function ReportPage() {
         <p className="py-10 text-center text-muted-foreground">جارِ التحميل...</p>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard label="إجمالي الإيرادات والتحصيلات" value={currency(report.totalRevenue)} icon={TrendingUp} />
-            <StatCard label="إجمالي المصروفات" value={currency(report.totalExpenses)} icon={TrendingDown} />
+            <StatCard label="(-) إجمالي المصروفات والتشغيل" value={currency(report.totalExpenses)} hint="شامل المرتبات والصيانة والنثريات وقطع الغيار" icon={TrendingDown} />
+            <StatCard label="(-) إجمالي حساب السولار والوقود" value={currency(report.fuelExpense)} hint="مستقل عن المصروفات" icon={TrendingDown} />
             <div className="panel relative overflow-hidden p-5">
               <div className="absolute -left-8 -top-8 h-24 w-24 rounded-full bg-primary/20 blur-2xl" />
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm text-muted-foreground">صافي الربح / الخسارة الشهري</p>
+                  <p className="text-sm text-muted-foreground">(=) الصافي الفعلي المتبقي</p>
                   <p className={`mt-2 text-2xl font-extrabold ${report.netProfit >= 0 ? "text-gold-gradient" : "text-destructive"}`}>
                     {currency(report.netProfit)}
                   </p>
@@ -133,12 +134,19 @@ function ReportPage() {
               <LineRow label="بند المرتبات والأجور (سائقين وموظفين)" value={report.payrollExpense} tone="bad" />
               <LineRow label="بند أجور الصيانة والورش الخارجية" value={report.maintenanceExpense} tone="bad" />
               <LineRow label="بند قطع الغيار المسحوبة من المخزن" value={report.partsExpense} tone="bad" />
-              <LineRow label="بند السولار والوقود" value={report.fuelExpense} tone="bad" />
               <LineRow label="بند المصاريف الإدارية والنثريات" value={report.adminMiscExpense} tone="bad" />
               <LineRow label="بند مصروفات الاشتراكات والخطوط" value={report.subscriptionExpense} tone="bad" />
               <div className="mt-2 flex items-center justify-between border-t border-destructive/30 pt-2 text-sm font-bold">
                 <span>إجمالي المصروفات</span>
                 <span className="text-destructive">{currency(report.totalExpenses)}</span>
+              </div>
+              <div className="mt-3 flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-bold">
+                <span>إجمالي حساب السولار والوقود (مستقل)</span>
+                <span className="text-destructive">{currency(report.fuelExpense)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between border-t border-primary/30 pt-2 text-sm font-bold">
+                <span>الصافي = الإيرادات − المصروفات − السولار</span>
+                <span className={report.netProfit >= 0 ? "text-success" : "text-destructive"}>{currency(report.netProfit)}</span>
               </div>
             </Panel>
           </div>

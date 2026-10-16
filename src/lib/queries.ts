@@ -579,6 +579,7 @@ export function dbErrorMessage(e: unknown, fallback: string) {
   const o = e as { code?: string; message?: string; details?: string; hint?: string } | null;
   if (!o) return fallback;
   if (o.code === "23505") return `${fallback}: القيمة مكررة (${o.details ?? o.message ?? ""})`;
+  if (o.code === "23503") return `${fallback}: السجل مرتبط ببيانات أخرى (حركات مخزن أو دفعات) ولا يمكن حذفه`;
   if (o.code === "42501" || /row-level security/i.test(o.message ?? "")) return `${fallback}: ليس لديك صلاحية تنفيذ هذا الإجراء`;
   const parts = [o.message, o.details, o.hint].filter(Boolean).join(" — ");
   return parts ? `${fallback}: ${parts}` : fallback;
@@ -2422,7 +2423,7 @@ export async function updateSupplier(id: string, input: SupplierInput) {
 }
 export async function deleteSupplier(id: string) {
   const { error } = await supabase.from("suppliers").delete().eq("id", id);
-  if (error) throw error;
+  if (error) throw new Error(dbErrorMessage(error, "تعذر حذف المورد"));
 }
 
 export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string; date?: string }) {

@@ -59,7 +59,7 @@ export const Route = createFileRoute("/suppliers")({
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const emptySupplier = { id: "", name: "", phone: "", dueDate: "", alertDate: "" };
-const emptyInvoice = { id: "", date: todayStr(), ref: "", total: "", items: "", previousPath: null as string | null };
+const emptyInvoice = { id: "", date: todayStr(), ref: "", total: "", items: "", paid: "", paySource: "", previousPath: null as string | null };
 const emptyPayment = { date: todayStr(), amount: "", method: "كاش (Cash)", notes: "" };
 
 const kindTone: Record<string, string> = {
@@ -176,12 +176,20 @@ function SuppliersPage() {
   };
   const openEditInvoice = (s: SupplierSummary, e: SupplierLedgerEntry) => {
     setInvoiceFor(s);
-    setInvoiceForm({ id: e.id, date: e.date, ref: e.invoiceRef ?? "", total: String(e.withdrawals), items: e.itemsDetails ?? "", previousPath: e.attachmentPath });
+    setInvoiceForm({ id: e.id, date: e.date, ref: e.invoiceRef ?? "", total: String(e.withdrawals), items: e.itemsDetails ?? "", paid: e.invoicePaid ? String(e.invoicePaid) : "", paySource: e.invoiceSource ?? "", previousPath: e.attachmentPath });
     setInvoiceFile(null);
   };
   const submitInvoice = async () => {
     if (!invoiceFor || !invoiceForm.ref.trim() || !(Number(invoiceForm.total) >= 0) || !invoiceForm.total) {
       setError("أدخل رقم/اسم الفاتورة وإجمالي المبلغ");
+      return;
+    }
+    if ((Number(invoiceForm.paid) || 0) > Number(invoiceForm.total)) {
+      setError("المبلغ المدفوع أكبر من إجمالي الفاتورة");
+      return;
+    }
+    if ((Number(invoiceForm.paid) || 0) > 0 && !invoiceForm.paySource) {
+      setError("اختر طريقة الدفع / مصدر التمويل للمبلغ المدفوع");
       return;
     }
     setSaving(true);
@@ -193,6 +201,8 @@ function SuppliersPage() {
         invoiceRef: invoiceForm.ref,
         totalAmount: Number(invoiceForm.total),
         itemsDetails: invoiceForm.items,
+        paidAmount: Number(invoiceForm.paid) || 0,
+        paySource: invoiceForm.paySource,
         file: invoiceFile,
       };
       if (invoiceForm.id) await updateSupplierInvoice(invoiceForm.id, input, invoiceForm.previousPath);
@@ -504,6 +514,13 @@ function SuppliersPage() {
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">إجمالي المبلغ</Label>
               <Input value={invoiceForm.total} onChange={(e) => setInvoiceForm({ ...invoiceForm, total: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">المدفوع فورًا (اختياري)</Label>
+                <Input value={invoiceForm.paid} onChange={(e) => setInvoiceForm({ ...invoiceForm, paid: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
+              </div>
+              {(Number(invoiceForm.paid) || 0) > 0 && <PaymentSourceSelect value={invoiceForm.paySource} onChange={(v) => setInvoiceForm({ ...invoiceForm, paySource: v })} />}
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">تفاصيل الأصناف</Label>

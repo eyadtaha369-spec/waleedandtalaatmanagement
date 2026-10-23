@@ -2514,7 +2514,7 @@ export async function deleteSupplier(id: string) {
   if (error) throw new Error(dbErrorMessage(error, "تعذر حذف المورد"));
 }
 
-export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string; date?: string }) {
+export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string; date?: string }): Promise<string> {
   const { data, error } = await supabase
     .from("supplier_payments")
     .insert({
@@ -2532,7 +2532,30 @@ export async function addSupplierPayment(input: { supplierId: string; amount: nu
     { table: "supplier_payments", id: data.id as string },
     { date: input.date || new Date().toISOString().slice(0, 10), amount: input.amount, category: CUSTODY_SUPPLIERS_CATEGORY, description: `سداد للمورد ${sup?.supplier_name ?? ""}`.trim(), payFrom: input.method, notes: input.notes },
   );
+  return data.id as string;
 }
+
+/**
+ * Immediate payment that accompanies a purchase / invoice: creates, updates or removes the payment on the
+ * supplier's statement (the DB trigger moves balance_due) and mirrors it in the custody ledger when relevant.
+ * Returns the payment id to store on the invoice / purchase, or null when nothing is paid.
+ */
+async function syncImmediatePayment(existingId: string | null, p: { supplierId: string; amount: number; source: string; date: string; notes: string }): Promise<string | null> {
+  if (!(p.amount > 0) || !p.source) {
+    if (existingId) await deleteSupplierPayment(existingId);
+    return null;
+  }
+  if (!existingId) return addSupplierPayment({ supplierId: p.supplierId, amount: p.amount, method: p.source, notes: p.notes, date: p.date });
+  const { error } = await supabase.from("supplier_payments").update({ supplier_id: p.supplierId, amount: p.amount, date: p.date, method: p.source, notes: p.notes }).eq("id", existingId);
+  if (error) throw error;
+  const { data: sup } = await supabase.from("suppliers").select("supplier_name").eq("id", p.supplierId).maybeSingle();
+  await syncCustodyLink(
+    { table: "supplier_payments", id: existingId },
+    { date: p.date, amount: p.amount, category: CUSTODY_SUPPLIERS_CATEGORY, description: `سداد للمورد ${sup?.supplier_name ?? ""}`.trim(), payFrom: p.source, notes: p.notes },
+  );
+  return existingId;
+}
+
 export async function deleteSupplierPayment(id: string) {
   await syncCustodyLink({ table: "supplier_payments", id }, null);
   // a payment that came from the custody ledger takes its custody row with it
@@ -2551,6 +2574,9 @@ export interface SupplierInvoiceInput {
   invoiceRef: string;
   totalAmount: number;
   itemsDetails: string;
+  /** مدفوع فورًا (جزئيًا أو كليًا) ومن أي مصدر */
+  paidAmount?: number;
+  paySource?: string;
   file?: File | null;
 }
 
@@ -2563,23 +2589,37 @@ async function uploadInvoiceFile(supplierId: string, file: File): Promise<string
 }
 
 export async function addSupplierInvoice(input: SupplierInvoiceInput) {
+  const paid = input.paidAmount ?? 0;
+  if (paid > 0 && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل للمبلغ المدفوع");
   const attachment = input.file ? await uploadInvoiceFile(input.supplierId, input.file) : null;
-  const { error } = await supabase.from("supplier_invoices").insert({
-    supplier_id: input.supplierId,
-    invoice_date: input.invoiceDate,
-    invoice_ref: input.invoiceRef,
-    total_amount: input.totalAmount,
-    items_details: input.itemsDetails,
-    attachment_path: attachment,
-  });
+  const { data, error } = await supabase
+    .from("supplier_invoices")
+    .insert({
+      supplier_id: input.supplierId,
+      invoice_date: input.invoiceDate,
+      invoice_ref: input.invoiceRef,
+      total_amount: input.totalAmount,
+      items_details: input.itemsDetails,
+      attachment_path: attachment,
+      pay_source: input.paySource || null,
+      paid_amount: paid,
+    })
+    .select("id")
+    .single();
   if (error) {
     if (attachment) await supabase.storage.from(INVOICE_BUCKET).remove([attachment]);
     throw error;
   }
+  const paymentId = await syncImmediatePayment(null, { supplierId: input.supplierId, amount: paid, source: input.paySource ?? "", date: input.invoiceDate, notes: `دفعة فاتورة ${input.invoiceRef}`.trim() });
+  if (paymentId) await supabase.from("supplier_invoices").update({ payment_id: paymentId }).eq("id", data.id);
 }
 
 export async function updateSupplierInvoice(id: string, input: SupplierInvoiceInput, previousPath: string | null) {
+  const paid = input.paidAmount ?? 0;
+  if (paid > 0 && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل للمبلغ المدفوع");
+  const { data: prev } = await supabase.from("supplier_invoices").select("payment_id").eq("id", id).maybeSingle();
   const attachment = input.file ? await uploadInvoiceFile(input.supplierId, input.file) : previousPath;
+  const paymentId = await syncImmediatePayment((prev?.payment_id as string | null) ?? null, { supplierId: input.supplierId, amount: paid, source: input.paySource ?? "", date: input.invoiceDate, notes: `دفعة فاتورة ${input.invoiceRef}`.trim() });
   const { error } = await supabase
     .from("supplier_invoices")
     .update({
@@ -2588,6 +2628,9 @@ export async function updateSupplierInvoice(id: string, input: SupplierInvoiceIn
       total_amount: input.totalAmount,
       items_details: input.itemsDetails,
       attachment_path: attachment,
+      pay_source: input.paySource || null,
+      paid_amount: paid,
+      payment_id: paymentId,
     })
     .eq("id", id);
   if (error) throw error;
@@ -2595,8 +2638,10 @@ export async function updateSupplierInvoice(id: string, input: SupplierInvoiceIn
 }
 
 export async function deleteSupplierInvoice(id: string, attachmentPath: string | null) {
+  const { data: prev } = await supabase.from("supplier_invoices").select("payment_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("supplier_invoices").delete().eq("id", id);
   if (error) throw error;
+  if (prev?.payment_id) await deleteSupplierPayment(prev.payment_id as string);
   if (attachmentPath) await supabase.storage.from(INVOICE_BUCKET).remove([attachmentPath]);
 }
 
@@ -2619,6 +2664,8 @@ export interface SupplierLedgerEntry {
   // raw invoice fields, for editing
   invoiceRef?: string;
   itemsDetails?: string;
+  invoicePaid?: number;
+  invoiceSource?: string;
 }
 
 export async function fetchSupplierLedger(supplierId: string): Promise<SupplierLedgerEntry[]> {
@@ -2654,6 +2701,8 @@ export async function fetchSupplierLedger(supplierId: string): Promise<SupplierL
       attachmentPath: i.attachment_path ?? null,
       invoiceRef: i.invoice_ref,
       itemsDetails: i.items_details ?? "",
+      invoicePaid: Number(i.paid_amount ?? 0),
+      invoiceSource: i.pay_source ?? "",
     });
   }
   for (const pay of payments ?? []) {
@@ -2712,6 +2761,9 @@ export interface InventoryPurchaseInput {
   quantity: number;
   unitPrice: number;
   invoiceRef: string;
+  /** مدفوع فورًا (جزئيًا أو كليًا) ومن أي مصدر، والباقي يبقى مستحقًا للمورد */
+  paidAmount?: number;
+  paySource?: string;
   file?: File | null;
 }
 
@@ -2728,6 +2780,8 @@ export interface InventoryPurchase {
   total: number;
   invoiceRef: string;
   attachmentPath: string | null;
+  paidAmount: number;
+  paySource: string;
 }
 
 export const purchaseTotal = (quantity: number, unitPrice: number) => Math.round(quantity * unitPrice * 100) / 100;
@@ -2767,23 +2821,33 @@ async function resolvePurchaseRefs(input: InventoryPurchaseInput): Promise<{ ite
 /** Stock inward from a supplier. The database trigger raises stock and the supplier's balance_due. */
 export async function receiveInventoryStock(input: InventoryPurchaseInput) {
   if (!(input.quantity > 0)) throw new Error("أدخل كمية صحيحة");
+  const paid = input.paidAmount ?? 0;
+  if (paid > 0 && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل للمبلغ المدفوع");
   const { itemId, supplierId } = await resolvePurchaseRefs(input);
   const attachment = input.file ? await uploadInvoiceFile(supplierId, input.file) : null;
-  const { error } = await supabase.from("inventory_transactions").insert({
-    inventory_id: itemId,
-    type: "IN",
-    quantity: input.quantity,
-    unit_price: input.unitPrice,
-    total_cost: purchaseTotal(input.quantity, input.unitPrice),
-    supplier_id: supplierId,
-    tx_date: input.date,
-    invoice_ref: input.invoiceRef.trim() || null,
-    attachment_path: attachment,
-  });
+  const { data, error } = await supabase
+    .from("inventory_transactions")
+    .insert({
+      inventory_id: itemId,
+      type: "IN",
+      quantity: input.quantity,
+      unit_price: input.unitPrice,
+      total_cost: purchaseTotal(input.quantity, input.unitPrice),
+      supplier_id: supplierId,
+      tx_date: input.date,
+      invoice_ref: input.invoiceRef.trim() || null,
+      attachment_path: attachment,
+      pay_source: input.paySource || null,
+      paid_amount: paid,
+    })
+    .select("id")
+    .single();
   if (error) {
     if (attachment) await supabase.storage.from(INVOICE_BUCKET).remove([attachment]);
     throw error;
   }
+  const paymentId = await syncImmediatePayment(null, { supplierId, amount: paid, source: input.paySource ?? "", date: input.date, notes: `دفعة إذن توريد ${input.invoiceRef}`.trim() });
+  if (paymentId) await supabase.from("inventory_transactions").update({ payment_id: paymentId }).eq("id", data.id);
   await supabase.from("inventory").update({ unit_price: input.unitPrice }).eq("id", itemId);
 }
 
@@ -2798,8 +2862,12 @@ async function assertPurchaseRevertible(id: string, newItemId: string | null, ne
 
 export async function updateInventoryPurchase(id: string, input: InventoryPurchaseInput, previousPath: string | null) {
   if (!(input.quantity > 0)) throw new Error("أدخل كمية صحيحة");
+  const paid = input.paidAmount ?? 0;
+  if (paid > 0 && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل للمبلغ المدفوع");
   const { itemId, supplierId } = await resolvePurchaseRefs(input);
   await assertPurchaseRevertible(id, itemId, input.quantity);
+  const { data: prev } = await supabase.from("inventory_transactions").select("payment_id").eq("id", id).maybeSingle();
+  const paymentId = await syncImmediatePayment((prev?.payment_id as string | null) ?? null, { supplierId, amount: paid, source: input.paySource ?? "", date: input.date, notes: `دفعة إذن توريد ${input.invoiceRef}`.trim() });
   const attachment = input.file ? await uploadInvoiceFile(supplierId, input.file) : previousPath;
   const { error } = await supabase
     .from("inventory_transactions")
@@ -2812,6 +2880,9 @@ export async function updateInventoryPurchase(id: string, input: InventoryPurcha
       tx_date: input.date,
       invoice_ref: input.invoiceRef.trim() || null,
       attachment_path: attachment,
+      pay_source: input.paySource || null,
+      paid_amount: paid,
+      payment_id: paymentId,
     })
     .eq("id", id);
   if (error) throw error;
@@ -2820,8 +2891,10 @@ export async function updateInventoryPurchase(id: string, input: InventoryPurcha
 
 export async function deleteInventoryPurchase(id: string, attachmentPath: string | null) {
   await assertPurchaseRevertible(id, null, 0);
+  const { data: prev } = await supabase.from("inventory_transactions").select("payment_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("inventory_transactions").delete().eq("id", id);
   if (error) throw error;
+  if (prev?.payment_id) await deleteSupplierPayment(prev.payment_id as string);
   if (attachmentPath) await supabase.storage.from(INVOICE_BUCKET).remove([attachmentPath]);
 }
 
@@ -2845,6 +2918,8 @@ export async function fetchInventoryPurchases(): Promise<InventoryPurchase[]> {
     total: Number(t.total_cost ?? 0),
     invoiceRef: t.invoice_ref ?? "",
     attachmentPath: t.attachment_path ?? null,
+    paidAmount: Number(t.paid_amount ?? 0),
+    paySource: t.pay_source ?? "",
   }));
 }
 
@@ -3209,6 +3284,7 @@ export interface Trip {
   amountPaid: number;
   balanceDue: number;
   driverFee: number;
+  paySource: string;
   notificationPreference: string;
   status: "مجدولة" | "جاري التنفيذ" | "مكتملة" | "ملغاة";
 }
@@ -3233,6 +3309,7 @@ export async function fetchTrips(): Promise<Trip[]> {
     amountPaid: Number(t.amount_paid ?? 0),
     balanceDue: Number(t.balance_due ?? 0),
     driverFee: Number(t.driver_fee ?? 0),
+    paySource: t.pay_source ?? "",
     notificationPreference: t.notification_preference ?? "بدون تنبيه",
     status: t.status ?? "مجدولة",
   }));
@@ -3250,6 +3327,7 @@ interface TripInput {
   driverFee: number;
   notificationPreference: string;
   status: string;
+  paySource?: string;
 }
 
 async function resolveTripPayload(input: TripInput) {
@@ -3269,20 +3347,55 @@ async function resolveTripPayload(input: TripInput) {
     driver_fee: input.driverFee,
     notification_preference: input.notificationPreference,
     status: input.status,
+    pay_source: input.paySource || null,
   };
 }
 
+/** Where an incoming trip collection lands: the custody ledger («عهدة») or a treasury deposit on the chosen account. */
+async function syncTripCollection(tripId: string, i: TripInput) {
+  const date = i.tripDate.slice(0, 10);
+  const amount = i.amountPaid;
+  const toCustody = !!i.paySource && i.paySource === CUSTODY_SOURCE && amount > 0;
+  const toTreasury = !!i.paySource && i.paySource !== CUSTODY_SOURCE && amount > 0;
+  const note = `تحصيل رحلة: ${i.clientName}${i.destination ? ` — ${i.destination}` : ""}`;
+
+  const { data: dep } = await supabase.from("treasury").select("id").eq("trip_id", tripId).maybeSingle();
+  if (toTreasury) {
+    const row = { date, account: i.paySource as string, opening: 0, deposits: amount, withdrawals: 0, notes: note, trip_id: tripId };
+    const { error } = dep ? await supabase.from("treasury").update(row).eq("id", dep.id) : await supabase.from("treasury").insert(row);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر ترحيل التحصيل للخزينة"));
+  } else if (dep) {
+    const { error } = await supabase.from("treasury").delete().eq("id", dep.id);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث الخزينة"));
+  }
+
+  const { data: cus } = await supabase.from("custody_entries").select("id").eq("source_table", "trips").eq("source_id", tripId).maybeSingle();
+  if (toCustody) {
+    const row = custodyRow({ date, kind: "in", amount, person: i.clientName, category: "", description: note, notes: "", sourceTable: "trips", sourceId: tripId });
+    const { error } = cus ? await supabase.from("custody_entries").update(row).eq("id", cus.id) : await supabase.from("custody_entries").insert(row);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر ترحيل التحصيل للعهدة"));
+  } else if (cus) {
+    const { error } = await supabase.from("custody_entries").delete().eq("id", cus.id);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث العهدة"));
+  }
+}
+
 export async function addTrip(input: TripInput) {
+  if (input.amountPaid > 0 && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل للمبلغ المحصّل");
   const payload = await resolveTripPayload(input);
-  const { error } = await supabase.from("trips").insert(payload);
+  const { data, error } = await supabase.from("trips").insert(payload).select("id").single();
   if (error) throw error;
+  await syncTripCollection(data.id as string, input);
 }
 export async function updateTrip(id: string, input: TripInput) {
+  if (input.amountPaid > 0 && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل للمبلغ المحصّل");
   const payload = await resolveTripPayload(input);
   const { error } = await supabase.from("trips").update(payload).eq("id", id);
   if (error) throw error;
+  await syncTripCollection(id, input);
 }
 export async function deleteTrip(id: string) {
+  await syncTripCollection(id, { clientName: "", clientPhone: "", busCode: "", driverName: "", tripDate: "1900-01-01", destination: "", totalPrice: 0, amountPaid: 0, driverFee: 0, notificationPreference: "", status: "", paySource: "" });
   const { error } = await supabase.from("trips").delete().eq("id", id);
   if (error) throw error;
 }
@@ -3303,6 +3416,7 @@ export interface RentedOp {
   routeName: string;
   paid: boolean;
   paidAt: string;
+  paySource: string;
   notes: string;
   missionId: string;
 }
@@ -3324,6 +3438,7 @@ export interface RentedOpInput {
   vehicleType: string;
   routeName: string;
   paid: boolean;
+  paySource?: string;
   notes: string;
 }
 
@@ -3344,6 +3459,7 @@ export async function fetchRentedOps(): Promise<RentedOp[]> {
     routeName: r.route_name ?? "",
     paid: !!r.paid,
     paidAt: r.paid_at ?? "",
+    paySource: r.pay_source ?? "",
     notes: r.notes ?? "",
     missionId: r.mission_id ?? "",
   }));
@@ -3362,29 +3478,49 @@ const rentedRow = (i: RentedOpInput) => ({
   route_name: i.routeName.trim() || null,
   paid: i.paid,
   paid_at: i.paid ? new Date().toISOString().slice(0, 10) : null,
+  pay_source: i.paid ? i.paySource || null : null,
   notes: i.notes || null,
 });
 
+/** Rental cost settled from «عهدة الخزينة» is mirrored in the custody ledger. */
+async function syncRentedPayout(id: string, i: { date: string; owner: string; bus: string; fare: number; paid: boolean; paySource?: string }) {
+  await syncCustodyLink(
+    { table: "rented_bus_operations", id },
+    i.paid ? { date: i.date, amount: i.fare, category: "سيارات مستأجرة", description: `إيجار ${i.owner} — ${i.bus}`, payFrom: i.paySource ?? "" } : null,
+  );
+}
+
 export async function addRentedOp(input: RentedOpInput) {
-  const { error } = await supabase.from("rented_bus_operations").insert(rentedRow(input));
+  if (input.paid && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل لتكلفة التأجير");
+  const { data, error } = await supabase.from("rented_bus_operations").insert(rentedRow(input)).select("id").single();
   if (error) throw error;
+  await syncRentedPayout(data.id as string, { ...input });
 }
 export async function updateRentedOp(id: string, input: RentedOpInput, wasPaid: boolean, paidAt: string) {
+  if (input.paid && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل لتكلفة التأجير");
   const row = rentedRow(input);
   if (input.paid && wasPaid && paidAt) row.paid_at = paidAt; // keep the original settlement date
   const { error } = await supabase.from("rented_bus_operations").update(row).eq("id", id);
   if (error) throw error;
+  await syncRentedPayout(id, { ...input });
 }
 export async function deleteRentedOp(id: string) {
+  await syncCustodyLink({ table: "rented_bus_operations", id }, null);
   const { error } = await supabase.from("rented_bus_operations").delete().eq("id", id);
   if (error) throw error;
 }
 
-/** "تم السداد / تصفير الحساب": marks the given trips as paid. */
-export async function settleRentedOps(ids: string[]) {
+/** "تم السداد / تصفير الحساب": marks the given trips as paid from the chosen funding source. */
+export async function settleRentedOps(ids: string[], paySource: string) {
   if (!ids.length) return;
-  const { error } = await supabase.from("rented_bus_operations").update({ paid: true, paid_at: new Date().toISOString().slice(0, 10) }).in("id", ids);
+  if (!paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل");
+  const { data, error } = await supabase
+    .from("rented_bus_operations")
+    .update({ paid: true, paid_at: new Date().toISOString().slice(0, 10), pay_source: paySource })
+    .in("id", ids)
+    .select("id, op_date, owner_name, bus_label, rental_fare");
   if (error) throw error;
+  for (const r of data ?? []) await syncRentedPayout(r.id as string, { date: r.op_date as string, owner: r.owner_name as string, bus: r.bus_label as string, fare: Number(r.rental_fare ?? 0), paid: true, paySource });
 }
 
 export function computeRentedLedger(ops: RentedOp[], filter: { owner: string; bus: string; range: DateRange }) {

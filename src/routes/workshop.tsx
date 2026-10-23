@@ -186,6 +186,8 @@ function WorkshopPage() {
     quantity: "",
     unitPrice: "",
     invoiceRef: "",
+    paidAmount: "",
+    paySource: "",
     file: null as File | null,
   });
   const [receiveForm, setReceiveForm] = useState(emptyReceive);
@@ -382,6 +384,8 @@ function WorkshopPage() {
       quantity: String(p.quantity),
       unitPrice: String(p.unitPrice),
       invoiceRef: p.invoiceRef,
+      paidAmount: p.paidAmount ? String(p.paidAmount) : "",
+      paySource: p.paySource,
     });
     setReceiving(true);
   };
@@ -392,6 +396,8 @@ function WorkshopPage() {
     if (supplierNew && !f.newSupplierName.trim()) return setError("اختر المورد أو أدخل مورد جديد");
     if (itemNew && !f.newItemName.trim()) return setError("اختر الصنف أو أدخل صنف جديد");
     if (!(Number(f.quantity) > 0)) return setError("أدخل الكمية المشتراة");
+    if ((Number(f.paidAmount) || 0) > 0 && !f.paySource) return setError("اختر طريقة الدفع / مصدر التمويل للمبلغ المدفوع");
+    if ((Number(f.paidAmount) || 0) > (Number(f.quantity) * (Number(f.unitPrice) || 0))) return setError("المبلغ المدفوع أكبر من إجمالي التوريد");
     setSaving(true);
     setError(null);
     try {
@@ -406,6 +412,8 @@ function WorkshopPage() {
         quantity: Number(f.quantity),
         unitPrice: Number(f.unitPrice) || 0,
         invoiceRef: f.invoiceRef,
+        paidAmount: Number(f.paidAmount) || 0,
+        paySource: f.paySource,
         file: f.file,
       };
       if (f.id) await updateInventoryPurchase(f.id, input, f.previousPath);
@@ -1087,6 +1095,13 @@ function WorkshopPage() {
                 <Label className="text-xs text-muted-foreground">سعر تكلفة الوحدة</Label>
                 <Input value={receiveForm.unitPrice} onChange={(e) => setReceiveForm({ ...receiveForm, unitPrice: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
               </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">المدفوع فورًا للمورد (اختياري — والباقي يبقى مستحقًا عليه)</Label>
+                <Input value={receiveForm.paidAmount} onChange={(e) => setReceiveForm({ ...receiveForm, paidAmount: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
+              </div>
+              {(Number(receiveForm.paidAmount) || 0) > 0 && <PaymentSourceSelect value={receiveForm.paySource} onChange={(v) => setReceiveForm({ ...receiveForm, paySource: v })} />}
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">صورة الفاتورة (اختياري){receiveForm.previousPath ? " — يوجد مرفق حالي، اختر ملفًا لاستبداله" : ""}</Label>

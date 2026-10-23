@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CheckCheck, Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { AccountPicker } from "@/components/account-picker";
 import { DateRangeFilter } from "@/components/date-range-filter";
@@ -53,7 +54,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const PENDING = "معلق / لم يتم السداد";
 const PAID = "تم السداد";
 
-const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", fare: "", clientFare: "", vehicleType: "", routeName: "", status: PENDING, notes: "" });
+const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", fare: "", clientFare: "", vehicleType: "", routeName: "", status: PENDING, paySource: "", notes: "" });
 
 function RentedPage() {
   const [ops, setOps] = useState<RentedOp[]>([]);
@@ -70,6 +71,7 @@ function RentedPage() {
   const [ledgerBus, setLedgerBus] = useState("__all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmSettle, setConfirmSettle] = useState(false);
+  const [settleSource, setSettleSource] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<RentedOp | null>(null);
   const [working, setWorking] = useState(false);
 
@@ -115,17 +117,18 @@ function RentedPage() {
   };
   const openEdit = (o: RentedOp) => {
     const client = clients.find((c) => c.id === o.clientId);
-    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, fare: String(o.fare), clientFare: String(o.clientFare), vehicleType: o.vehicleType, routeName: o.routeName, status: o.paid ? PAID : PENDING, notes: o.notes });
+    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, fare: String(o.fare), clientFare: String(o.clientFare), vehicleType: o.vehicleType, routeName: o.routeName, status: o.paid ? PAID : PENDING, paySource: o.paySource, notes: o.notes });
     setManualRoute(!!o.routeName && !clientRoutes.some((r) => r.clientId === o.clientId && r.routeName === o.routeName));
     setAdding(true);
   };
   const submit = async () => {
     if (!form.owner.trim() || !form.bus.trim()) return setError("أدخل اسم صاحب العربية ورقم / اسم العربية");
     if (!form.vehicleType) return setError("اختر نوع السيارة");
+    if (form.status === PAID && !form.paySource) return setError("اختر طريقة الدفع / مصدر التمويل لتكلفة التأجير");
     setSaving(true);
     setError(null);
     try {
-      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, fare: Number(form.fare) || 0, clientFare: Number(form.clientFare) || 0, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, notes: form.notes };
+      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, fare: Number(form.fare) || 0, clientFare: Number(form.clientFare) || 0, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, paySource: form.paySource, notes: form.notes };
       if (form.id) await updateRentedOp(form.id, payload, form.wasPaid, form.paidAt);
       else await addRentedOp(payload);
       await loadAll();
@@ -142,7 +145,7 @@ function RentedPage() {
   const doSettle = async () => {
     setWorking(true);
     try {
-      await settleRentedOps(toSettle);
+      await settleRentedOps(toSettle, settleSource);
       setSelected(new Set());
       await loadAll();
       setConfirmSettle(false);
@@ -423,6 +426,7 @@ function RentedPage() {
                 </Select>
               </div>
             </div>
+            {form.status === PAID && <PaymentSourceSelect value={form.paySource} onChange={(v) => setForm({ ...form, paySource: v })} label="طريقة الدفع / مصدر التمويل (لتكلفة التأجير)" />}
             <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
               <span className="text-muted-foreground">صافي ربح الوردية (سعر الشركة − تكلفة التأجير)</span>
               <b className={formNet < 0 ? "text-destructive" : "text-success"}>{currency(formNet)}</b>
@@ -446,9 +450,10 @@ function RentedPage() {
               سيتم تحويل {toSettle.length} رحلة إلى «تم السداد» بقيمة {currency(settleAmount)}، ويصبح المتبقي على {ledgerOwner} صفرًا لهذه الفترة.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <PaymentSourceSelect value={settleSource} onChange={setSettleSource} />
           <AlertDialogFooter>
             <AlertDialogCancel className="border-border">رجوع</AlertDialogCancel>
-            <AlertDialogAction className="bg-primary text-primary-foreground" onClick={doSettle} disabled={working}>{working ? "جارِ التسجيل..." : "تأكيد السداد"}</AlertDialogAction>
+            <AlertDialogAction className="bg-primary text-primary-foreground" onClick={(e) => { if (!settleSource) { e.preventDefault(); setError("اختر طريقة الدفع / مصدر التمويل"); return; } doSettle(); }} disabled={working}>{working ? "جارِ التسجيل..." : "تأكيد السداد"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

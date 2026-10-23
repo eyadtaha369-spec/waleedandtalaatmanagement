@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Printer, Trash2 } from "lucide-react";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,7 @@ const emptyForm = {
   destination: "",
   totalPrice: "",
   amountPaid: "",
+  paySource: "",
   driverFee: "",
   notificationPreference: "بدون تنبيه" as string,
   status: "مجدولة",
@@ -105,6 +107,7 @@ function TripsPage() {
       destination: t.destination,
       totalPrice: String(t.totalPrice),
       amountPaid: String(t.amountPaid),
+      paySource: t.paySource,
       driverFee: String(t.driverFee),
       notificationPreference: t.notificationPreference,
       status: t.status,
@@ -125,6 +128,7 @@ function TripsPage() {
         destination: form.destination,
         totalPrice: Number(form.totalPrice) || 0,
         amountPaid: Number(form.amountPaid) || 0,
+        paySource: form.paySource,
         driverFee: Number(form.driverFee) || 0,
         notificationPreference: form.notificationPreference,
         status: form.status,
@@ -315,6 +319,7 @@ function TripsPage() {
                 <Label className="text-xs text-muted-foreground">أجر السائق</Label>
                 <Input value={form.driverFee} onChange={(e) => setForm({ ...form, driverFee: e.target.value })} type="number" className="border-border bg-input/60" />
               </div>
+            {(Number(form.amountPaid) || 0) > 0 && <PaymentSourceSelect value={form.paySource} onChange={(v) => setForm({ ...form, paySource: v })} label="طريقة الدفع / مصدر التمويل (جهة التحصيل)" />}
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">خيار التنبيه</Label>

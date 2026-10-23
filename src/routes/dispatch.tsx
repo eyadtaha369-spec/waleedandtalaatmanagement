@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Banknote, Bus, Pencil, Plus, Printer, Trash2, Users } from "lucide-react";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { BusPicker } from "@/components/bus-picker";
 import type { Bus as BusRecord } from "@/lib/fleet-data";
 import { AppShell } from "@/components/app-shell";
@@ -59,6 +60,7 @@ interface ShiftRow {
   route: string;
   busValue: string;
   driverValue: string;
+  paySource: string;
   attendanceStatus: string;
   overtime: string;
   advance: string;
@@ -67,7 +69,7 @@ interface ShiftRow {
 }
 
 let rowKey = 0;
-const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", clientName: "", route: "", busValue: "", driverValue: "", attendanceStatus: "حاضر", overtime: "", advance: "", penalty: "", karta: "" });
+const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", clientName: "", route: "", busValue: "", driverValue: "", paySource: "", attendanceStatus: "حاضر", overtime: "", advance: "", penalty: "", karta: "" });
 
 function DispatchPage() {
   const [date, setDate] = useState(today());
@@ -135,6 +137,7 @@ function DispatchPage() {
         route: o.route,
         busValue: String(o.busValue),
         driverValue: String(o.driverValue),
+        paySource: o.paySource,
         attendanceStatus: o.attendanceStatus,
         overtime: o.overtime ? String(o.overtime) : "",
         advance: o.advance ? String(o.advance) : "",
@@ -154,6 +157,10 @@ function DispatchPage() {
       setError("اختر الأتوبيس والسائق والشركة لكل وردية");
       return;
     }
+    if (rows.some((r) => (Number(r.advance) || 0) + (Number(r.karta) || 0) > 0 && !r.paySource)) {
+      setError("اختر طريقة الدفع / مصدر التمويل للسلفة والكرتة");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -165,6 +172,7 @@ function DispatchPage() {
         route: r.route,
         busValue: Number(r.busValue) || 0,
         driverValue: Number(r.driverValue) || 0,
+        paySource: r.paySource,
         attendanceStatus: r.attendanceStatus,
         overtime: Number(r.overtime) || 0,
         advance: Number(r.advance) || 0,
@@ -394,6 +402,7 @@ function DispatchPage() {
                     <Label className="text-xs text-muted-foreground">الكرتة / مصاريف الطريق (ج.م)</Label>
                     <Input value={r.karta} onChange={(e) => updateRow(r.key, { karta: e.target.value })} type="number" min="0" placeholder="0" className="border-border bg-input/60" />
                   </div>
+                  <PaymentSourceSelect value={r.paySource} onChange={(v) => updateRow(r.key, { paySource: v })} label="طريقة الدفع / مصدر التمويل (للسلفة والكرتة)" />
                 </div>
               </div>
             ))}

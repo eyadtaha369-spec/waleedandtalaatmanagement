@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Lock, Pencil, Plus, Printer, Trash2, Unlock } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { BusPicker } from "@/components/bus-picker";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -125,7 +126,7 @@ function PayrollPage() {
   const [dispatchShifts, setDispatchShifts] = useState<DispatchShift[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [adjFor, setAdjFor] = useState<PersonRow | null>(null);
-  const [adjForm, setAdjForm] = useState({ bonus: "", advances: "", penalties: "", tolls: "", notes: "" });
+  const [adjForm, setAdjForm] = useState({ bonus: "", advances: "", penalties: "", tolls: "", notes: "", paySource: "" });
   const [payTrips, setPayTrips] = useState<PayrollTripRow[]>([]);
   const [empRows, setEmpRows] = useState<EmployeeAttendanceRow[]>([]);
   const [detailFor, setDetailFor] = useState<PersonRow | null>(null);
@@ -276,12 +277,13 @@ function PayrollPage() {
 
   const openAdjust = (p: PersonRow) => {
     const a = adjOf(p);
-    setAdjForm({ bonus: a.bonus ? String(a.bonus) : "", advances: a.advances ? String(a.advances) : "", penalties: a.penalties ? String(a.penalties) : "", tolls: a.tolls ? String(a.tolls) : "", notes: a.notes });
+    setAdjForm({ bonus: a.bonus ? String(a.bonus) : "", advances: a.advances ? String(a.advances) : "", penalties: a.penalties ? String(a.penalties) : "", tolls: a.tolls ? String(a.tolls) : "", notes: a.notes, paySource: a.paySource ?? "" });
     setAdjFor(p);
   };
   const submitAdjust = async () => {
     if (!adjFor || !adjFor.id) return setError("تعذر تحديد الشخص");
     if (!canEdit) return setError("التعديل متاح عند اختيار فترة داخل شهر واحد");
+    if ((Number(adjForm.advances) || 0) + (Number(adjForm.tolls) || 0) > 0 && !adjForm.paySource) return setError("اختر طريقة الدفع / مصدر التمويل للسلف والكرتات");
     setSaving(true);
     try {
       await savePayrollAdjustment(adjFor.type, adjFor.id, month, {
@@ -290,6 +292,7 @@ function PayrollPage() {
         penalties: Number(adjForm.penalties) || 0,
         tolls: Number(adjForm.tolls) || 0,
         notes: adjForm.notes,
+        paySource: adjForm.paySource,
         locked: adjOf(adjFor).locked,
       });
       await loadAll();
@@ -461,6 +464,7 @@ function PayrollPage() {
                 <Input value={adjForm[key as keyof typeof adjForm]} onChange={(e) => setAdjForm({ ...adjForm, [key]: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
               </div>
             ))}
+            <PaymentSourceSelect value={adjForm.paySource} onChange={(v) => setAdjForm({ ...adjForm, paySource: v })} label="طريقة الدفع / مصدر التمويل (للسلف والكرتات)" />
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">ملاحظات</Label>
               <Input value={adjForm.notes} onChange={(e) => setAdjForm({ ...adjForm, notes: e.target.value })} className="border-border bg-input/60" />

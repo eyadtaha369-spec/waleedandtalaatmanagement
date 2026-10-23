@@ -1630,6 +1630,7 @@ export interface PayrollAdjustment {
   tolls: number;
   notes: string;
   locked: boolean;
+  paySource?: string;
 }
 
 export const EMPTY_ADJUSTMENT: PayrollAdjustment = { bonus: 0, advances: 0, penalties: 0, tolls: 0, notes: "", locked: false };
@@ -1666,21 +1667,33 @@ export async function fetchPayrollAdjustments(period: Period): Promise<Map<strin
     cur.penalties += Number((r as any).penalties ?? 0);
     cur.tolls += Number((r as any).tolls ?? 0);
     cur.notes = cur.notes || ((r as any).notes ?? "");
+    cur.paySource = cur.paySource || ((r as any).pay_source ?? "");
     cur.n += 1;
     if ((r as any).locked) cur.lockedN += 1;
     out.set(key, cur);
   }
   return new Map(
-    [...out.entries()].map(([k, v]) => [k, { bonus: v.bonus, advances: v.advances, penalties: v.penalties, tolls: v.tolls, notes: v.notes, locked: v.n > 0 && v.lockedN === v.n }]),
+    [...out.entries()].map(([k, v]) => [k, { bonus: v.bonus, advances: v.advances, penalties: v.penalties, tolls: v.tolls, notes: v.notes, paySource: v.paySource ?? "", locked: v.n > 0 && v.lockedN === v.n }]),
   );
 }
 
 export async function savePayrollAdjustment(type: PayrollSubjectType, id: string, month: string, adj: PayrollAdjustment) {
-  const { error } = await supabase.from("payroll_adjustments").upsert(
-    { subject_type: type, subject_id: id, month, bonus: adj.bonus, advances: adj.advances, penalties: adj.penalties, tolls: adj.tolls, notes: adj.notes || null, locked: adj.locked },
-    { onConflict: "subject_type,subject_id,month" },
-  );
+  const { data, error } = await supabase
+    .from("payroll_adjustments")
+    .upsert(
+      { subject_type: type, subject_id: id, month, bonus: adj.bonus, advances: adj.advances, penalties: adj.penalties, tolls: adj.tolls, notes: adj.notes || null, locked: adj.locked, pay_source: adj.paySource || null },
+      { onConflict: "subject_type,subject_id,month" },
+    )
+    .select("id")
+    .single();
   if (error) throw error;
+  // سلف وكرتات تُدفع من «عهدة الخزينة» تنعكس في دفتر العهدة
+  const { data: who } = await supabase.from(type === "driver" ? "drivers" : "employees").select("name").eq("id", id).maybeSingle();
+  const today = new Date().toISOString().slice(0, 10);
+  await syncCustodyLink(
+    { table: "payroll_adjustments", id: data.id as string },
+    { date: today.startsWith(month) ? today : `${month}-01`, amount: adj.advances + adj.tolls, category: "سلف وكرتات مرتبات", description: `سلف/كرتات مرتب — ${who?.name ?? ""}`.trim(), payFrom: adj.paySource ?? "" },
+  );
 }
 
 // ---- Client ledger & statement (Module 2) ----
@@ -1987,6 +2000,7 @@ export interface DispatchShift {
   driverValue: number; // قيمة السواقة — credited to the driver's salary
   notes: string;
   missionId: string; // non-empty when posted automatically from a مأمورية
+  paySource: string;
   attendanceStatus: string;
   overtime: number;
   advance: number;
@@ -2015,6 +2029,7 @@ function mapShift(o: any): DispatchShift {
     driverValue: Number(o.driver_value ?? 0),
     notes: o.notes ?? "",
     missionId: o.mission_id ?? "",
+    paySource: o.pay_source ?? "",
     attendanceStatus: o.attendance_status ?? "حاضر",
     overtime: Number(o.overtime_amount ?? 0),
     advance: Number(o.advance_amount ?? 0),
@@ -2051,6 +2066,7 @@ export interface DispatchShiftInput {
   busValue: number;
   driverValue: number;
   notes: string;
+  paySource?: string;
   attendanceStatus?: string;
   overtime?: number;
   advance?: number;
@@ -2076,6 +2092,7 @@ async function resolveShiftPayloads(inputs: DispatchShiftInput[]) {
     bus_value: i.busValue,
     driver_value: i.driverValue,
     notes: i.notes,
+    pay_source: i.paySource || null,
     attendance_status: i.attendanceStatus ?? "حاضر",
     overtime_amount: i.overtime ?? 0,
     advance_amount: i.advance ?? 0,
@@ -2084,19 +2101,35 @@ async function resolveShiftPayloads(inputs: DispatchShiftInput[]) {
   }));
 }
 
+/** advance + karta paid out of pocket → mirrored in the custody ledger when the source is «عهدة الخزينة». */
+async function syncShiftCustody(id: string, i: DispatchShiftInput) {
+  const amount = (i.advance ?? 0) + (i.karta ?? 0);
+  await syncCustodyLink(
+    { table: "dispatch_shifts", id },
+    { date: i.date, amount, category: "سلفة / كرتة وردية", description: `سلفة وكرتة وردية ${i.driverName} — ${i.busCode}`, payFrom: i.paySource ?? "" },
+  );
+}
+
 export async function addDispatchShifts(inputs: DispatchShiftInput[]) {
   if (inputs.length === 0) return;
   const payload = await resolveShiftPayloads(inputs);
-  const { error } = await supabase.from("dispatch_shifts").insert(payload);
+  const { data, error } = await supabase.from("dispatch_shifts").insert(payload).select("id");
   if (error) throw error;
+  for (let k = 0; k < inputs.length; k++) {
+    const row = data?.[k];
+    const input = inputs[k];
+    if (row && input) await syncShiftCustody(row.id as string, input);
+  }
 }
 export async function updateDispatchShift(id: string, input: DispatchShiftInput) {
   const payload = (await resolveShiftPayloads([input]))[0];
   if (!payload) throw new Error("بيانات الوردية غير صالحة");
   const { error } = await supabase.from("dispatch_shifts").update(payload).eq("id", id);
   if (error) throw error;
+  await syncShiftCustody(id, input);
 }
 export async function deleteDispatchShift(id: string) {
+  await syncCustodyLink({ table: "dispatch_shifts", id }, null);
   const { error } = await supabase.from("dispatch_shifts").delete().eq("id", id);
   if (error) throw error;
 }

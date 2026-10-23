@@ -1594,7 +1594,7 @@ export function computeDriverPayroll(
 export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollRow[]> {
   const { start, end } = periodBounds(period);
   const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts, custodyAdv] = await Promise.all([
-    supabase.from("drivers").select("name, base_salary"),
+    supabase.from("drivers").select("id, name, base_salary"),
     fetchDailyShifts(period),
     supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
     fetchDispatchShifts(period),
@@ -1608,7 +1608,7 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
       // إضافي/سلفة/جزاء/كرتة المسجلة مباشرة في ورديات الحركة تُرحَّل تلقائيًا للمرتب
       ...dispatchShifts.map((o) => ({ driver: o.driver, overtimeAllowance: o.overtime, dailyAdvance: o.advance, penalty: o.penalty, toll: o.karta })),
       // مبالغ صُرفت للسائق من عهدة الخزينة تُخصم كسلفة
-      ...custodyAdv.filter((c) => c.type === "driver").map((c) => ({ driver: c.name, overtimeAllowance: 0, dailyAdvance: c.amount, penalty: 0 })),
+      ...custodyAdv.filter((c) => c.type === "driver").map((c) => ({ driver: (drivers ?? []).find((d: any) => d.id === c.id)?.name ?? c.name, overtimeAllowance: 0, dailyAdvance: c.amount, penalty: 0 })),
     ],
     [
       ...(tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
@@ -2344,7 +2344,7 @@ export async function fetchEmployeePayroll(period: Period): Promise<EmployeePayr
       allowance: Number(r.allowance ?? 0),
       advance: Number(r.advance ?? 0),
       penalty: Number(r.penalty ?? 0),
-    })).concat(custodyAdv.filter((c) => c.type === "employee").map((c) => ({ employeeName: c.name, allowance: 0, advance: c.amount, penalty: 0 }))),
+    })).concat(custodyAdv.filter((c) => c.type === "employee").map((c) => ({ employeeName: employees.find((e) => e.id === c.id)?.name ?? c.name, allowance: 0, advance: c.amount, penalty: 0 }))),
   );
 }
 
@@ -3850,10 +3850,10 @@ export async function syncCustodyLink(
   if (error) throw new Error(dbErrorMessage(error, "تعذر تسجيل المصروف في عهدة الخزينة"));
 }
 
-/** Custody payments made to a driver/employee — counted as advances against their salary. */
-export async function fetchCustodyAdvances(period: Period): Promise<{ type: "driver" | "employee"; name: string; amount: number }[]> {
+/** Custody payments made to a driver/employee — counted as advances against their salary. Matched by id, not by name. */
+export async function fetchCustodyAdvances(period: Period): Promise<{ type: "driver" | "employee"; id: string; name: string; amount: number }[]> {
   const { start, end } = periodBounds(period);
-  const { data, error } = await supabase.from("custody_entries").select("subject_type, person, amount").eq("kind", "out").not("subject_type", "is", null).gte("entry_date", start).lt("entry_date", end);
+  const { data, error } = await supabase.from("custody_entries").select("subject_type, subject_id, person, amount").eq("kind", "out").not("subject_type", "is", null).gte("entry_date", start).lt("entry_date", end);
   if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سلف العهدة"));
-  return (data ?? []).map((r: any) => ({ type: r.subject_type, name: r.person ?? "", amount: Number(r.amount ?? 0) }));
+  return (data ?? []).map((r: any) => ({ type: r.subject_type, id: r.subject_id ?? "", name: r.person ?? "", amount: Number(r.amount ?? 0) }));
 }

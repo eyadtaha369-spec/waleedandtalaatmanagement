@@ -53,7 +53,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const PENDING = "معلق / لم يتم السداد";
 const PAID = "تم السداد";
 
-const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", gasCost: "", fare: "", clientFare: "", vehicleType: "", routeName: "", status: PENDING, notes: "" });
+const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", fare: "", clientFare: "", vehicleType: "", routeName: "", status: PENDING, notes: "" });
 
 function RentedPage() {
   const [ops, setOps] = useState<RentedOp[]>([]);
@@ -106,7 +106,7 @@ function RentedPage() {
 
   const routesOfClient = useMemo(() => clientRoutes.filter((r) => r.clientId === form.clientId), [clientRoutes, form.clientId]);
 
-  const formNet = rentedNetProfit({ clientFare: Number(form.clientFare) || 0, fare: Number(form.fare) || 0, gasCost: Number(form.gasCost) || 0 });
+  const formNet = rentedNetProfit({ clientFare: Number(form.clientFare) || 0, fare: Number(form.fare) || 0 });
 
   const openAdd = () => {
     setForm({ ...emptyForm(), owner: ledgerOwner });
@@ -115,7 +115,7 @@ function RentedPage() {
   };
   const openEdit = (o: RentedOp) => {
     const client = clients.find((c) => c.id === o.clientId);
-    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, gasCost: String(o.gasCost), fare: String(o.fare), clientFare: String(o.clientFare), vehicleType: o.vehicleType, routeName: o.routeName, status: o.paid ? PAID : PENDING, notes: o.notes });
+    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, fare: String(o.fare), clientFare: String(o.clientFare), vehicleType: o.vehicleType, routeName: o.routeName, status: o.paid ? PAID : PENDING, notes: o.notes });
     setManualRoute(!!o.routeName && !clientRoutes.some((r) => r.clientId === o.clientId && r.routeName === o.routeName));
     setAdding(true);
   };
@@ -125,7 +125,7 @@ function RentedPage() {
     setSaving(true);
     setError(null);
     try {
-      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, gasCost: Number(form.gasCost) || 0, fare: Number(form.fare) || 0, clientFare: Number(form.clientFare) || 0, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, notes: form.notes };
+      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, fare: Number(form.fare) || 0, clientFare: Number(form.clientFare) || 0, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, notes: form.notes };
       if (form.id) await updateRentedOp(form.id, payload, form.wasPaid, form.paidAt);
       else await addRentedOp(payload);
       await loadAll();
@@ -190,18 +190,18 @@ function RentedPage() {
 
       <Panel title="سجل حركة العربيات المستأجرة">
         <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "نوع السيارة": o.vehicleType, الخط: o.routeName, "تكلفة السولار": o.gasCost, "تكلفة التأجير": o.fare, "سعر الشركة": o.clientFare, "صافي الربح": rentedNetProfit(o), الحالة: o.paid ? PAID : PENDING })))}>
+          <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "نوع السيارة": o.vehicleType, الخط: o.routeName, "تكلفة التأجير": o.fare, "سعر الشركة": o.clientFare, "صافي الربح": rentedNetProfit(o), الحالة: o.paid ? PAID : PENDING })))}>
             تصدير Excel
           </Button>
           <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAdd}>
             <Plus className="ml-2 h-4 w-4" /> تسجيل حركة عربية مستأجرة
           </Button>
         </div>
-        <DataTable head={["التاريخ", "صاحب العربية / المكتب", "العربية", "النوع", "السائق", "الشركة / الخط", "تكلفة السولار", "تكلفة التأجير", "سعر الشركة", "صافي الربح", "الحالة", "الإجراءات"]}>
+        <DataTable head={["التاريخ", "صاحب العربية / المكتب", "العربية", "النوع", "السائق", "الشركة / الخط", "تكلفة التأجير", "سعر الشركة", "صافي الربح", "الحالة", "الإجراءات"]}>
           {loading ? (
-            <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
+            <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
           ) : logRows.length === 0 ? (
-            <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات في هذه الفترة.</td></tr>
+            <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">لا توجد حركات في هذه الفترة.</td></tr>
           ) : (
             logRows.map((o) => (
               <tr key={o.id} className="transition-colors hover:bg-secondary/30">
@@ -211,7 +211,6 @@ function RentedPage() {
                 <td className="px-4 py-3">{o.vehicleType || "—"}</td>
                 <td className="px-4 py-3">{o.driver || "—"}</td>
                 <td className="px-4 py-3">{clients.find((c) => c.id === o.clientId)?.name ?? (o.destination || "—")}{o.routeName ? ` — ${o.routeName}` : ""}</td>
-                <td className="px-4 py-3">{currency(o.gasCost)}</td>
                 <td className="px-4 py-3 font-bold text-warning">{currency(o.fare)}</td>
                 <td className="px-4 py-3">{o.clientId && o.clientFare <= 0 && !o.missionId ? <span className="text-xs text-warning" title="أدخل سعر الشركة ليُرحَّل إلى كشف حساب الشركة">لم يُرحَّل — بدون سعر</span> : currency(o.clientFare)}</td>
                 <td className={`px-4 py-3 font-bold ${rentedNetProfit(o) < 0 ? "text-destructive" : "text-success"}`}>{currency(rentedNetProfit(o))}</td>
@@ -278,7 +277,7 @@ function RentedPage() {
               </span>
             </div>
             <div className="mt-3">
-              <DataTable head={["", "التاريخ", "العربية", "السائق", "الشركة / المكان", "تكلفة السولار", "الإيجار", "الحالة"]}>
+              <DataTable head={["", "التاريخ", "العربية", "السائق", "الشركة / المكان", "الإيجار", "الحالة"]}>
                 {ledger.rows.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-4 text-center text-muted-foreground">لا توجد رحلات لهذا المالك في الفترة المحددة.</td></tr>
                 ) : (
@@ -303,7 +302,6 @@ function RentedPage() {
                       <td className="px-4 py-3">{r.bus}</td>
                       <td className="px-4 py-3">{r.driver || "—"}</td>
                       <td className="px-4 py-3">{clients.find((c) => c.id === r.clientId)?.name ?? (r.destination || "—")}</td>
-                      <td className="px-4 py-3">{currency(r.gasCost)}</td>
                       <td className="px-4 py-3 font-bold">{currency(r.fare)}</td>
                       <td className="px-4 py-3"><StatusPill label={r.paid ? PAID : "معلق"} tone={r.paid ? "good" : "warn"} /></td>
                     </tr>
@@ -311,7 +309,6 @@ function RentedPage() {
                 )}
               </DataTable>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">إجمالي تكلفة السولار في الفترة (للعلم، لا تدخل في المستحق): {currency(ledger.totalGas)}</p>
           </>
         )}
       </Panel>
@@ -325,19 +322,19 @@ function RentedPage() {
           </p>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr>{["التاريخ", "العربية", "السائق", "الشركة / المكان", "تكلفة السولار", "الإيجار", "الحالة"].map((h) => <th key={h} style={{ ...td, background: "#eee" }}>{h}</th>)}</tr>
+              <tr>{["التاريخ", "العربية", "السائق", "الشركة / المكان", "الإيجار", "الحالة"].map((h) => <th key={h} style={{ ...td, background: "#eee" }}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {ledger.rows.map((r) => (
                 <tr key={r.id}>
                   <td style={td}>{r.date}</td><td style={td}>{r.bus}</td><td style={td}>{r.driver || "—"}</td>
                   <td style={td}>{clients.find((c) => c.id === r.clientId)?.name ?? (r.destination || "—")}</td>
-                  <td style={td}>{currency(r.gasCost)}</td><td style={td}>{currency(r.fare)}</td><td style={td}>{r.paid ? PAID : "معلق"}</td>
+                  <td style={td}>{currency(r.fare)}</td><td style={td}>{r.paid ? PAID : "معلق"}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr style={{ fontWeight: 800 }}><td colSpan={4} style={td}>الإجماليات</td><td style={td}>{currency(ledger.totalGas)}</td><td style={td}>{currency(ledger.totalDue)}</td><td style={td}></td></tr>
+              <tr style={{ fontWeight: 800 }}><td colSpan={4} style={td}>الإجماليات</td><td style={td}>{currency(ledger.totalDue)}</td><td style={td}></td></tr>
             </tfoot>
           </table>
           <p style={{ marginTop: 14, fontWeight: 700 }}>
@@ -408,10 +405,6 @@ function RentedPage() {
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">تكلفة الوقود / السولار</Label>
-                <Input type="number" min="0" step="any" value={form.gasCost} onChange={(e) => setForm({ ...form, gasCost: e.target.value })} className="border-border bg-input/60" />
-              </div>
-              <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">سعر الشركة (إيراد)</Label>
                 <Input type="number" min="0" step="any" value={form.clientFare} onChange={(e) => setForm({ ...form, clientFare: e.target.value })} className="border-border bg-input/60" />
               </div>
@@ -431,7 +424,7 @@ function RentedPage() {
               </div>
             </div>
             <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">صافي ربح الوردية (سعر الشركة − التأجير − السولار)</span>
+              <span className="text-muted-foreground">صافي ربح الوردية (سعر الشركة − تكلفة التأجير)</span>
               <b className={formNet < 0 ? "text-destructive" : "text-success"}>{currency(formNet)}</b>
             </div>
             <div className="grid gap-1.5">

@@ -3223,7 +3223,6 @@ export interface RentedOp {
   driver: string;
   clientId: string;
   destination: string;
-  gasCost: number;
   fare: number; // تكلفة التأجير المستحقة لمالك العربية
   clientFare: number; // سعر الشركة (إيراد)
   vehicleType: string;
@@ -3236,8 +3235,8 @@ export interface RentedOp {
 
 export const RENTED_VEHICLE_TYPES = ["هاي إس (HiAce)", "ملاكي", "أوتوبيس 33", "أوتوبيس 50", "دوبل كابينة"] as const;
 
-/** صافي ربح الوردية = سعر الشركة − تكلفة التأجير − تكلفة السولار */
-export const rentedNetProfit = (o: { clientFare: number; fare: number; gasCost: number }) => o.clientFare - o.fare - o.gasCost;
+/** صافي ربح الوردية = سعر الشركة − تكلفة التأجير */
+export const rentedNetProfit = (o: { clientFare: number; fare: number }) => o.clientFare - o.fare;
 
 export interface RentedOpInput {
   date: string;
@@ -3246,7 +3245,6 @@ export interface RentedOpInput {
   driver: string;
   clientId: string;
   destination: string;
-  gasCost: number;
   fare: number;
   clientFare: number;
   vehicleType: string;
@@ -3266,7 +3264,6 @@ export async function fetchRentedOps(): Promise<RentedOp[]> {
     driver: r.driver_name ?? "",
     clientId: r.client_id ?? "",
     destination: r.destination ?? "",
-    gasCost: Number(r.gas_cost ?? 0),
     fare: Number(r.rental_fare ?? 0),
     clientFare: Number(r.client_fare ?? 0),
     vehicleType: r.vehicle_type ?? "",
@@ -3285,7 +3282,6 @@ const rentedRow = (i: RentedOpInput) => ({
   driver_name: i.driver.trim() || null,
   client_id: i.clientId || null,
   destination: i.destination.trim() || null,
-  gas_cost: i.gasCost,
   rental_fare: i.fare,
   client_fare: i.clientFare,
   vehicle_type: i.vehicleType || null,
@@ -3328,7 +3324,6 @@ export function computeRentedLedger(ops: RentedOp[], filter: { owner: string; bu
     totalDue,
     totalPaid,
     remaining: totalDue - totalPaid,
-    totalGas: rows.reduce((s, r) => s + r.gasCost, 0),
     totalClientFare: rows.reduce((s, r) => s + r.clientFare, 0),
     totalNet: rows.reduce((s, r) => s + rentedNetProfit(r), 0),
     unpaidIds: rows.filter((r) => !r.paid).map((r) => r.id),

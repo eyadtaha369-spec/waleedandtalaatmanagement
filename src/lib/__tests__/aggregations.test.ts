@@ -396,10 +396,10 @@ describe("date ranges and rented ledger", () => {
     expect(inDateRange("2026-10-02", { from: "2026-10-01", to: "2026-10-01" })).toBe(false);
   });
   it("computeRentedLedger totals and filters", () => {
-    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", gasCost: 10, fare, clientFare: fare + 100, vehicleType: "ملاكي", routeName: "", missionId: "", paid, paidAt: "", notes: "" });
+    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", fare, clientFare: fare + 100, vehicleType: "ملاكي", routeName: "", missionId: "", paid, paidAt: "", notes: "" });
     const ops = [mk("1", "2026-10-01", "B1", 100, true), mk("2", "2026-10-05", "B1", 200, false), mk("3", "2026-09-05", "B2", 50, false)];
     const l = computeRentedLedger(ops, { owner: "أ", bus: "", range: { from: "2026-10-01", to: "2026-10-31" } });
-    expect([l.totalDue, l.totalPaid, l.remaining, l.totalGas, l.unpaidIds]).toEqual([300, 100, 200, 20, ["2"]]);
+    expect([l.totalDue, l.totalPaid, l.remaining, l.unpaidIds]).toEqual([300, 100, 200, ["2"]]);
     expect(l.totalClientFare).toBe(500);
     expect(l.totalNet).toBe(500 - 300 - 20);
     expect(computeRentedLedger(ops, { owner: "أ", bus: "B2", range: { from: "", to: "" } }).remaining).toBe(50);

@@ -16,6 +16,8 @@ import {
   CUSTODY_CATEGORIES,
   CUSTODY_MAINT_CATEGORY,
   CUSTODY_PAYROLL_CATEGORY,
+  CUSTODY_SUPPLIERS_CATEGORY,
+  fetchSuppliers,
   fetchBuses,
   fetchDrivers,
   fetchEmployees,
@@ -37,7 +39,7 @@ export const Route = createFileRoute("/custody")({
 });
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
-const emptyForm = (kind: "in" | "out") => ({ id: "", kind, date: todayStr(), amount: "", person: "", category: kind === "out" ? "نثرية" : "", description: "", notes: "", personKey: "", busCode: "", orderId: "" });
+const emptyForm = (kind: "in" | "out") => ({ id: "", kind, date: todayStr(), amount: "", person: "", category: kind === "out" ? "نثرية" : "", description: "", notes: "", personKey: "", busCode: "", orderId: "", supplierId: "" });
 const PRESETS: { key: CustodyPreset; label: string }[] = [
   { key: "day", label: "تقرير اليوم" },
   { key: "week", label: "تقرير الأسبوع الحالي" },
@@ -58,6 +60,7 @@ function CustodyPage() {
   const [target, setTarget] = useState<CustodyEntry | null>(null);
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [buses, setBuses] = useState<Bus[]>([]);
+  const [supplierOpts, setSupplierOpts] = useState<PersonOption[]>([]);
   const [orders, setOrders] = useState<MaintenanceOrder[]>([]);
 
   const load = async () => {
@@ -75,7 +78,8 @@ function CustodyPage() {
     load();
     (async () => {
       try {
-        const [d, e, b, o] = await Promise.all([fetchDrivers(), fetchEmployees(), fetchBuses(), fetchMaintenanceOrders()]);
+        const [d, e, b, o, sp] = await Promise.all([fetchDrivers(), fetchEmployees(), fetchBuses(), fetchMaintenanceOrders(), fetchSuppliers()]);
+        setSupplierOpts(sp.map((x) => ({ value: x.id, label: x.name, group: "مورد" })));
         setPeople([
           ...d.map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })),
           ...e.filter((x) => x.isActive).map((x) => ({ value: `employee:${x.id}`, label: x.name, group: "موظف" })),
@@ -99,7 +103,7 @@ function CustodyPage() {
     setOpen(true);
   };
   const openEdit = (e: CustodyEntry) => {
-    setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), person: e.person, category: e.category, description: e.description, notes: e.notes, personKey: e.subjectType && e.subjectId ? `${e.subjectType}:${e.subjectId}` : "", busCode: e.busCode, orderId: e.maintenanceOrderId });
+    setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), person: e.person, category: e.category, description: e.description, notes: e.notes, personKey: e.subjectType && e.subjectId ? `${e.subjectType}:${e.subjectId}` : "", busCode: e.busCode, orderId: e.maintenanceOrderId, supplierId: e.supplierId });
     setFormError("");
     setOpen(true);
   };
@@ -114,6 +118,9 @@ function CustodyPage() {
     const picked = people.find((p) => p.value === form.personKey);
     if (isPayroll && !picked) return setFormError("اختر السائق أو الموظف");
     if (isMaint && !form.busCode) return setFormError("اختر العربية (رقم اللوحة)");
+    const isSupplier = form.kind === "out" && form.category === CUSTODY_SUPPLIERS_CATEGORY;
+    const pickedSupplier = supplierOpts.find((p) => p.value === form.supplierId);
+    if (isSupplier && !pickedSupplier) return setFormError("اختر المورد");
     setSaving(true);
     setFormError("");
     try {
@@ -122,9 +129,10 @@ function CustodyPage() {
         date: form.date,
         kind: form.kind,
         amount,
-        person: isPayroll ? (picked?.label ?? "") : form.person,
+        person: isPayroll ? (picked?.label ?? "") : isSupplier ? (pickedSupplier?.label ?? "") : form.person,
         category: form.kind === "out" ? form.category : "",
-        description: form.description || (isPayroll ? `${form.category} — ${picked?.label ?? ""}` : ""),
+        description: form.description || (isPayroll ? `${form.category} — ${picked?.label ?? ""}` : isSupplier ? `سداد للمورد ${pickedSupplier?.label ?? ""}` : ""),
+        supplierId: isSupplier ? form.supplierId : "",
         notes: form.notes,
         subjectType,
         subjectId,
@@ -316,6 +324,13 @@ function CustodyPage() {
                     <Label className="text-xs text-muted-foreground">اختر السائق أو الموظف</Label>
                     <PersonPicker value={form.personKey} options={people} onChange={(v) => setForm({ ...form, personKey: v })} />
                     <p className="text-xs text-muted-foreground">يُخصم المبلغ تلقائيًا من مرتب الشخص في صفحة المرتبات والأجور (كسلفة/مدفوع مقدمًا).</p>
+                  </div>
+                )}
+                {form.category === CUSTODY_SUPPLIERS_CATEGORY && (
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">اختيار المورد</Label>
+                    <PersonPicker value={form.supplierId} options={supplierOpts} onChange={(v) => setForm({ ...form, supplierId: v })} placeholder="اختر المورد" />
+                    <p className="text-xs text-muted-foreground">يُسجَّل المبلغ تلقائيًا كدفعة في كشف حساب المورد ويقلّل رصيده المستحق.</p>
                   </div>
                 )}
                 {form.category === CUSTODY_MAINT_CATEGORY && (

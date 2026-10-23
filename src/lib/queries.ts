@@ -2530,11 +2530,13 @@ export async function addSupplierPayment(input: { supplierId: string; amount: nu
   const { data: sup } = await supabase.from("suppliers").select("supplier_name").eq("id", input.supplierId).maybeSingle();
   await syncCustodyLink(
     { table: "supplier_payments", id: data.id as string },
-    { date: input.date || new Date().toISOString().slice(0, 10), amount: input.amount, category: "موردون", description: `سداد للمورد ${sup?.supplier_name ?? ""}`.trim(), payFrom: input.method, notes: input.notes },
+    { date: input.date || new Date().toISOString().slice(0, 10), amount: input.amount, category: CUSTODY_SUPPLIERS_CATEGORY, description: `سداد للمورد ${sup?.supplier_name ?? ""}`.trim(), payFrom: input.method, notes: input.notes },
   );
 }
 export async function deleteSupplierPayment(id: string) {
   await syncCustodyLink({ table: "supplier_payments", id }, null);
+  // a payment that came from the custody ledger takes its custody row with it
+  await supabase.from("custody_entries").delete().eq("supplier_payment_id", id);
   const { error } = await supabase.from("supplier_payments").delete().eq("id", id);
   if (error) throw error;
 }
@@ -3701,7 +3703,8 @@ export async function fetchEmployeeAttendanceInPeriod(period: Period): Promise<E
 
 export const CUSTODY_PAYROLL_CATEGORY = "مرتبات / سلف";
 export const CUSTODY_MAINT_CATEGORY = "صيانة / ورش";
-export const CUSTODY_CATEGORIES = ["نثرية", "إداريات", "سولار", CUSTODY_MAINT_CATEGORY, CUSTODY_PAYROLL_CATEGORY, "انتقالات", "أخرى"] as const;
+export const CUSTODY_SUPPLIERS_CATEGORY = "موردين";
+export const CUSTODY_CATEGORIES = ["نثرية", "إداريات", "سولار", CUSTODY_MAINT_CATEGORY, CUSTODY_PAYROLL_CATEGORY, CUSTODY_SUPPLIERS_CATEGORY, "انتقالات", "أخرى"] as const;
 
 export interface CustodyEntry {
   id: string;
@@ -3721,10 +3724,13 @@ export interface CustodyEntry {
   /** صيانة / ورش */
   busCode: string;
   maintenanceOrderId: string;
+  /** موردين: the supplier paid, and the supplier_payments row posted to their statement */
+  supplierId: string;
+  supplierPaymentId: string;
 }
 
-export type CustodyInput = Omit<CustodyEntry, "id" | "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId"> &
-  Partial<Pick<CustodyEntry, "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId">>;
+export type CustodyInput = Omit<CustodyEntry, "id" | "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId" | "supplierId" | "supplierPaymentId"> &
+  Partial<Pick<CustodyEntry, "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId" | "supplierId">>;
 
 export type CustodyPreset = "day" | "week" | "month" | "custom";
 
@@ -3777,6 +3783,8 @@ function mapCustody(r: any): CustodyEntry {
     subjectId: r.subject_id ?? "",
     busCode: r.bus_code ?? "",
     maintenanceOrderId: r.maintenance_order_id ?? "",
+    supplierId: r.supplier_id ?? "",
+    supplierPaymentId: r.supplier_payment_id ?? "",
   };
 }
 
@@ -3800,19 +3808,58 @@ const custodyRow = (i: CustodyInput) => ({
   subject_id: i.subjectId || null,
   bus_code: i.busCode || null,
   maintenance_order_id: i.maintenanceOrderId || null,
+  supplier_id: i.supplierId || null,
 });
 
+const isSupplierPayout = (i: CustodyInput) => i.kind === "out" && i.category === CUSTODY_SUPPLIERS_CATEGORY && !!i.supplierId;
+
+/** Posts / updates / removes the matching payment on the supplier's statement (the DB trigger moves the balance). */
+async function syncSupplierPayment(custodyId: string, existingPaymentId: string, i: CustodyInput): Promise<string> {
+  const ref = `مرجع عهدة الخزينة ${custodyId.slice(0, 8)}`;
+  if (!isSupplierPayout(i)) {
+    if (existingPaymentId) {
+      const { error } = await supabase.from("supplier_payments").delete().eq("id", existingPaymentId);
+      if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث حساب المورد"));
+    }
+    return "";
+  }
+  const payload = {
+    supplier_id: i.supplierId,
+    amount: i.amount,
+    date: i.date,
+    method: CUSTODY_SOURCE,
+    notes: [i.description, ref].filter(Boolean).join(" — "),
+  };
+  if (existingPaymentId) {
+    const { error } = await supabase.from("supplier_payments").update(payload).eq("id", existingPaymentId);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث حساب المورد"));
+    return existingPaymentId;
+  }
+  const { data, error } = await supabase.from("supplier_payments").insert(payload).select("id").single();
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تسجيل الدفعة في حساب المورد"));
+  return data.id as string;
+}
+
 export async function addCustodyEntry(i: CustodyInput) {
-  const { error } = await supabase.from("custody_entries").insert(custodyRow(i));
-  if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ الحركة"));
+  const id = crypto.randomUUID();
+  const paymentId = await syncSupplierPayment(id, "", i);
+  const { error } = await supabase.from("custody_entries").insert({ ...custodyRow(i), id, supplier_payment_id: paymentId || null });
+  if (error) {
+    if (paymentId) await supabase.from("supplier_payments").delete().eq("id", paymentId); // roll back the half-saved payout
+    throw new Error(dbErrorMessage(error, "تعذر حفظ الحركة"));
+  }
 }
 export async function updateCustodyEntry(id: string, i: CustodyInput) {
-  const { error } = await supabase.from("custody_entries").update(custodyRow(i)).eq("id", id);
+  const { data: prev } = await supabase.from("custody_entries").select("supplier_payment_id").eq("id", id).maybeSingle();
+  const paymentId = await syncSupplierPayment(id, (prev?.supplier_payment_id as string | null) ?? "", i);
+  const { error } = await supabase.from("custody_entries").update({ ...custodyRow(i), supplier_payment_id: paymentId || null }).eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر تعديل الحركة"));
 }
 export async function deleteCustodyEntry(id: string) {
+  const { data: prev } = await supabase.from("custody_entries").select("supplier_payment_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("custody_entries").delete().eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر حذف الحركة"));
+  if (prev?.supplier_payment_id) await supabase.from("supplier_payments").delete().eq("id", prev.supplier_payment_id as string);
 }
 
 /**

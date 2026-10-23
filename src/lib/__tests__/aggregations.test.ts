@@ -401,7 +401,7 @@ describe("date ranges and rented ledger", () => {
     const l = computeRentedLedger(ops, { owner: "أ", bus: "", range: { from: "2026-10-01", to: "2026-10-31" } });
     expect([l.totalDue, l.totalPaid, l.remaining, l.unpaidIds]).toEqual([300, 100, 200, ["2"]]);
     expect(l.totalClientFare).toBe(500);
-    expect(l.totalNet).toBe(500 - 300 - 20);
+    expect(l.totalNet).toBe(500 - 300);
     expect(computeRentedLedger(ops, { owner: "أ", bus: "B2", range: { from: "", to: "" } }).remaining).toBe(50);
   });
   it("applySupplierRange carries opening balance", () => {

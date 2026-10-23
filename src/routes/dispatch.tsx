@@ -38,6 +38,7 @@ import {
   deleteDispatchShift,
   computeDailyReport,
   type DispatchShift,
+  ATTENDANCE_STATUSES,
   type DispatchShiftInput,
 } from "@/lib/queries";
 
@@ -58,10 +59,15 @@ interface ShiftRow {
   route: string;
   busValue: string;
   driverValue: string;
+  attendanceStatus: string;
+  overtime: string;
+  advance: string;
+  penalty: string;
+  karta: string;
 }
 
 let rowKey = 0;
-const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", clientName: "", route: "", busValue: "", driverValue: "" });
+const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", clientName: "", route: "", busValue: "", driverValue: "", attendanceStatus: "حاضر", overtime: "", advance: "", penalty: "", karta: "" });
 
 function DispatchPage() {
   const [date, setDate] = useState(today());
@@ -129,6 +135,11 @@ function DispatchPage() {
         route: o.route,
         busValue: String(o.busValue),
         driverValue: String(o.driverValue),
+        attendanceStatus: o.attendanceStatus,
+        overtime: o.overtime ? String(o.overtime) : "",
+        advance: o.advance ? String(o.advance) : "",
+        penalty: o.penalty ? String(o.penalty) : "",
+        karta: o.karta ? String(o.karta) : "",
       },
     ]);
     setAdding(true);
@@ -154,6 +165,11 @@ function DispatchPage() {
         route: r.route,
         busValue: Number(r.busValue) || 0,
         driverValue: Number(r.driverValue) || 0,
+        attendanceStatus: r.attendanceStatus,
+        overtime: Number(r.overtime) || 0,
+        advance: Number(r.advance) || 0,
+        penalty: Number(r.penalty) || 0,
+        karta: Number(r.karta) || 0,
         notes,
       }));
       const first = inputs[0];
@@ -354,6 +370,29 @@ function DispatchPage() {
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">قيمة السواقة (للسائق)</Label>
                     <Input value={r.driverValue} onChange={(e) => updateRow(r.key, { driverValue: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">حالة الحضور</Label>
+                    <Select value={r.attendanceStatus} onValueChange={(v) => updateRow(r.key, { attendanceStatus: v })}>
+                      <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                      <SelectContent>{ATTENDANCE_STATUSES.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">الإضافي (ج.م)</Label>
+                    <Input value={r.overtime} onChange={(e) => updateRow(r.key, { overtime: e.target.value })} type="number" min="0" placeholder="0" className="border-border bg-input/60" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">السلفة (ج.م)</Label>
+                    <Input value={r.advance} onChange={(e) => updateRow(r.key, { advance: e.target.value })} type="number" min="0" placeholder="0" className="border-border bg-input/60" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">الجزاء (ج.م)</Label>
+                    <Input value={r.penalty} onChange={(e) => updateRow(r.key, { penalty: e.target.value })} type="number" min="0" placeholder="0" className="border-border bg-input/60" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">الكرتة / مصاريف الطريق (ج.م)</Label>
+                    <Input value={r.karta} onChange={(e) => updateRow(r.key, { karta: e.target.value })} type="number" min="0" placeholder="0" className="border-border bg-input/60" />
                   </div>
                 </div>
               </div>

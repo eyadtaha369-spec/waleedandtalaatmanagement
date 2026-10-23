@@ -588,3 +588,13 @@ describe("computeMonthlyReport fuel separation", () => {
     expect(r.netProfit).toBe(1000);
   });
 });
+
+describe("computeDriverPayroll with dispatch-shift adjustments", () => {
+  it("adds overtime and deducts advance, penalty and karta from net", () => {
+    const [row] = computeDriverPayroll(
+      [{ name: "أحمد", base_salary: 5000 }],
+      [{ driver: "أحمد", overtimeAllowance: 200, dailyAdvance: 100, penalty: 50, toll: 30 }],
+    );
+    expect(row?.netSalary).toBe(5020);
+  });
+});

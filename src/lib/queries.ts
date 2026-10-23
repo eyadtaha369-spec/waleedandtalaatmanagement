@@ -1580,7 +1580,11 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
   if (dErr) throw dErr;
   return computeDriverPayroll(
     (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) * periodMonths(period).length })),
-    shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty, toll: s.tollFee })),
+    [
+      ...shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty, toll: s.tollFee })),
+      // إضافي/سلفة/جزاء/كرتة المسجلة مباشرة في ورديات الحركة تُرحَّل تلقائيًا للمرتب
+      ...dispatchShifts.map((o) => ({ driver: o.driver, overtimeAllowance: o.overtime, dailyAdvance: o.advance, penalty: o.penalty, toll: o.karta })),
+    ],
     [
       ...(tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
       // أجور المأموريات (مرحَّلة تلقائيًا في ورديات الحركة)
@@ -1955,7 +1959,14 @@ export interface DispatchShift {
   driverValue: number; // قيمة السواقة — credited to the driver's salary
   notes: string;
   missionId: string; // non-empty when posted automatically from a مأمورية
+  attendanceStatus: string;
+  overtime: number;
+  advance: number;
+  penalty: number;
+  karta: number;
 }
+
+export const ATTENDANCE_STATUSES = ["حاضر", "غياب", "إجازة", "نصف يوم"] as const;
 
 const SHIFT_SELECT = "*, buses(bus_code, bus_type, plate_number), drivers(name), clients(client_name)";
 
@@ -1976,6 +1987,11 @@ function mapShift(o: any): DispatchShift {
     driverValue: Number(o.driver_value ?? 0),
     notes: o.notes ?? "",
     missionId: o.mission_id ?? "",
+    attendanceStatus: o.attendance_status ?? "حاضر",
+    overtime: Number(o.overtime_amount ?? 0),
+    advance: Number(o.advance_amount ?? 0),
+    penalty: Number(o.penalty_amount ?? 0),
+    karta: Number(o.karta_amount ?? 0),
   };
 }
 
@@ -2007,6 +2023,11 @@ export interface DispatchShiftInput {
   busValue: number;
   driverValue: number;
   notes: string;
+  attendanceStatus?: string;
+  overtime?: number;
+  advance?: number;
+  penalty?: number;
+  karta?: number;
 }
 
 async function resolveShiftPayloads(inputs: DispatchShiftInput[]) {
@@ -2027,6 +2048,11 @@ async function resolveShiftPayloads(inputs: DispatchShiftInput[]) {
     bus_value: i.busValue,
     driver_value: i.driverValue,
     notes: i.notes,
+    attendance_status: i.attendanceStatus ?? "حاضر",
+    overtime_amount: i.overtime ?? 0,
+    advance_amount: i.advance ?? 0,
+    penalty_amount: i.penalty ?? 0,
+    karta_amount: i.karta ?? 0,
   }));
 }
 

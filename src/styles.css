@@ -222,6 +222,9 @@
 }
 
 @media print {
+  body[data-no-print] * {
+    display: none !important;
+  }
   .no-print {
     display: none !important;
   }

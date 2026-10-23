@@ -613,3 +613,24 @@ describe("custody ledger", () => {
     expect(custodyRange("day", "2026-10-23")).toEqual({ from: "2026-10-23", to: "2026-10-23" });
   });
 });
+
+describe("role permissions", () => {
+  it("fixed page lists and unchanged defaults", async () => {
+    const { canAccessPath, homePathFor, workshopRights } = await import("@/lib/permissions");
+    expect(canAccessPath("admin", "/audit", ["admin"])).toBe(true);
+    expect(canAccessPath("accountant", "/payroll", ["admin", "accountant"])).toBe(true);
+    expect(canAccessPath("accountant", "/finance", ["admin", "accountant"])).toBe(false);
+    expect(canAccessPath("storekeeper", "/workshop", null)).toBe(true);
+    expect(canAccessPath("storekeeper", "/fleet", null)).toBe(false);
+    expect(canAccessPath("workshop_keeper", "/", null)).toBe(false);
+    expect(canAccessPath("maintenance_manager", "/fleet-performance", null)).toBe(true);
+    expect(canAccessPath("maintenance_manager", "/payroll", null)).toBe(false);
+    expect(canAccessPath("staff", "/fleet", null)).toBe(true);
+    expect(canAccessPath("staff", "/finance", ["admin", "accountant"])).toBe(false);
+    expect(canAccessPath("dispatcher", "/dispatch", ["admin", "accountant", "dispatcher"])).toBe(true);
+    expect(homePathFor("workshop_keeper")).toBe("/workshop");
+    expect(workshopRights("workshop_keeper")).toEqual({ fuel: false, inventory: false, print: false, payments: false });
+    expect(workshopRights("storekeeper").fuel).toBe(false);
+    expect(workshopRights("maintenance_manager").fuel).toBe(true);
+  });
+});

@@ -5,6 +5,7 @@ import { DateRangeFilter } from "@/components/date-range-filter";
 import { BusPicker } from "@/components/bus-picker";
 import { ItemStatementSheet } from "@/components/item-statement";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
+import { useMyRole, workshopRights } from "@/lib/permissions";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -526,9 +527,14 @@ function WorkshopPage() {
 
   const statusTone = (st: MaintenanceStatus) => (st === "مكتمل" ? "good" : st === "قيد التنفيذ" ? "warn" : st === "ملغي" ? "bad" : "muted");
 
+  const rights = workshopRights(useMyRole());
+
   return (
     <AppShell>
-      <PageHeader title="الورشة والمخزون والسولار" subtitle="أوامر الصيانة، قطع الغيار، وسجل التزود بالوقود" />
+      <PageHeader
+        title={rights.fuel ? "الورشة والمخزون والسولار" : rights.inventory ? "الورشة والمخزون" : "الورشة"}
+        subtitle={rights.fuel ? "أوامر الصيانة، قطع الغيار، وسجل التزود بالوقود" : rights.inventory ? "أوامر الصيانة وقطع الغيار" : "أوامر الصيانة"}
+      />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
@@ -537,8 +543,8 @@ function WorkshopPage() {
       <Tabs defaultValue="orders">
         <TabsList className="no-print mb-4 border border-border bg-secondary/50">
           <TabsTrigger value="orders">أوامر الصيانة</TabsTrigger>
-          <TabsTrigger value="inventory">المخزن</TabsTrigger>
-          <TabsTrigger value="fuel">سجل السولار</TabsTrigger>
+          {rights.inventory && <TabsTrigger value="inventory">المخزن</TabsTrigger>}
+          {rights.fuel && <TabsTrigger value="fuel">سجل السولار</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="orders">
@@ -630,6 +636,7 @@ function WorkshopPage() {
           </Panel>
         </TabsContent>
 
+        {rights.inventory && (
         <TabsContent value="inventory">
           <Panel title="مخزن قطع الغيار">
             <Toolbar
@@ -723,7 +730,9 @@ function WorkshopPage() {
             </DataTable>
           </Panel>
         </TabsContent>
+        )}
 
+        {rights.fuel && (
         <TabsContent value="fuel">
           <Panel title="استهلاك السولار لكل سيارة">
             <DataTable head={["رقم العربية", "عدد مرات التزود", "إجمالي اللترات", "إجمالي التكلفة", "المسافة (كم)", "كم / لتر", "تكلفة الكم"]}>
@@ -786,6 +795,7 @@ function WorkshopPage() {
             </DataTable>
           </Panel>
         </TabsContent>
+        )}
       </Tabs>
 
       {/* ---- maintenance order dialog ---- */}
@@ -919,9 +929,11 @@ function WorkshopPage() {
             </div>
           )}
           <DialogFooter>
-            <Button className="bg-primary text-primary-foreground" onClick={printLedger} disabled={!ledgerBus || ledger.rows.length === 0}>
-              <Printer className="ml-2 h-4 w-4" /> طباعة كشف صيانة العربية / PDF
-            </Button>
+            {rights.print && (
+              <Button className="bg-primary text-primary-foreground" onClick={printLedger} disabled={!ledgerBus || ledger.rows.length === 0}>
+                <Printer className="ml-2 h-4 w-4" /> طباعة كشف صيانة العربية / PDF
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1096,6 +1108,7 @@ function WorkshopPage() {
                 <Input value={receiveForm.unitPrice} onChange={(e) => setReceiveForm({ ...receiveForm, unitPrice: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
               </div>
             </div>
+            {rights.payments && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">المدفوع فورًا للمورد (اختياري — والباقي يبقى مستحقًا عليه)</Label>
@@ -1103,6 +1116,7 @@ function WorkshopPage() {
               </div>
               {(Number(receiveForm.paidAmount) || 0) > 0 && <PaymentSourceSelect value={receiveForm.paySource} onChange={(v) => setReceiveForm({ ...receiveForm, paySource: v })} />}
             </div>
+            )}
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">صورة الفاتورة (اختياري){receiveForm.previousPath ? " — يوجد مرفق حالي، اختر ملفًا لاستبداله" : ""}</Label>
               <Input type="file" accept="image/*,application/pdf" onChange={(e) => setReceiveForm({ ...receiveForm, file: e.target.files?.[0] ?? null })} className="border-border bg-input/60" />

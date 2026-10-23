@@ -1142,7 +1142,7 @@ export interface Profile {
   id: string;
   email: string;
   fullName: string | null;
-  role: "admin" | "accountant" | "dispatcher" | "staff" | "pending";
+  role: "admin" | "accountant" | "dispatcher" | "staff" | "pending" | "storekeeper" | "workshop_keeper" | "maintenance_manager";
 }
 
 export async function fetchMyProfile(): Promise<Profile | null> {

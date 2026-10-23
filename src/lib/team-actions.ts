@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase-admin.server";
 
 export const createStaffAccount = createServerFn({ method: "POST" })
-  .validator((d: { accessToken: string; email: string; password: string; role: "admin" | "accountant" | "dispatcher" | "staff"; fullName: string }) => d)
+  .validator((d: { accessToken: string; email: string; password: string; role: "admin" | "accountant" | "dispatcher" | "staff" | "storekeeper" | "workshop_keeper" | "maintenance_manager"; fullName: string }) => d)
   .handler(async ({ data }) => {
     const url = process.env['VITE_SUPABASE_URL'];
     const anonKey = process.env['VITE_SUPABASE_PUBLISHABLE_KEY'];

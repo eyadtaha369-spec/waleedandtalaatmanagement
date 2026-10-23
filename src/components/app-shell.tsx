@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { ROLE_LABELS, canAccessPath, homePathFor } from "@/lib/permissions";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -58,13 +59,7 @@ const nav = [
   { to: "/backup", label: "النسخ الاحتياطي", icon: Database, roles: ["admin"] },
 ] as const;
 
-const roleLabels: Record<string, string> = {
-  admin: "مدير",
-  accountant: "محاسب",
-  dispatcher: "منسق تشغيل",
-  staff: "موظف",
-  pending: "بانتظار الموافقة",
-};
+const roleLabels: Record<string, string> = ROLE_LABELS;
 
 function NavList({
   items,
@@ -128,6 +123,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [session]);
 
+  // restricted roles never land on a page they cannot open; the workshop keeper cannot print at all
+  useEffect(() => {
+    if (!profile) return;
+    const rootItem = nav.find((n) => n.to === "/");
+    if (pathname === "/" && rootItem && !canAccessPath(profile.role, "/", rootItem.roles)) {
+      navigate({ to: homePathFor(profile.role) as "/" });
+    }
+    if (profile.role === "workshop_keeper") document.body.setAttribute("data-no-print", "1");
+    return () => document.body.removeAttribute("data-no-print");
+  }, [profile, pathname, navigate]);
+
   const dismissAlert = (id: string) => {
     setAlerts((prev) => prev.filter((x) => x.id !== id));
     markAlertRead(id).catch(() => fetchAlerts().then(setAlerts).catch(() => undefined));
@@ -184,7 +190,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const visibleNav = nav.filter((item) => !item.roles || (profile && (item.roles as readonly string[]).includes(profile.role)));
+  const visibleNav = nav.filter((item) => profile && canAccessPath(profile.role, item.to, item.roles));
+  const here = nav.find((n) => (n.to === "/" ? pathname === "/" : pathname === n.to || pathname.startsWith(`${n.to}/`)));
+  const allowedHere = !profile || !here || canAccessPath(profile.role, here.to, here.roles);
+  if (profile && !allowedHere) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4" dir="rtl">
+        <div className="max-w-sm rounded-2xl border border-border bg-card p-6 text-center">
+          <h1 className="text-lg font-extrabold text-primary">ليس لديك صلاحية لفتح هذه الصفحة</h1>
+          <p className="mt-2 text-sm text-muted-foreground">صلاحيتك الحالية: {ROLE_LABELS[profile.role]}. تواصل مع مدير النظام لو تحتاج وصولًا إضافيًا.</p>
+          <Link to={homePathFor(profile.role) as "/"} className="mt-5 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground">الذهاب إلى صفحتي</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen w-full" dir="rtl">

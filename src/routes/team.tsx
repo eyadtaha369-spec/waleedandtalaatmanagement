@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
+import { ROLE_LABELS } from "@/lib/permissions";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill } from "@/components/ui-kit";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,13 +28,7 @@ export const Route = createFileRoute("/team")({
   component: TeamPage,
 });
 
-const roleLabels: Record<Profile["role"], string> = {
-  pending: "بانتظار الموافقة",
-  admin: "مدير (صلاحيات كاملة)",
-  accountant: "محاسب (مالية وتشغيل)",
-  dispatcher: "منسق تشغيل (بدون مالية)",
-  staff: "موظف (عرض فقط)",
-};
+const roleLabels = ROLE_LABELS;
 
 function TeamPage() {
   const [team, setTeam] = useState<Profile[]>([]);

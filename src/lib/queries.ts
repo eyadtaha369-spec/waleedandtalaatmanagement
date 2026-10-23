@@ -3624,3 +3624,97 @@ export async function fetchEmployeeAttendanceInPeriod(period: Period): Promise<E
     penalty: Number(a.penalty ?? 0),
   }));
 }
+
+// ---- عهدة الخزينة (petty cash & custody) ----
+
+export const CUSTODY_CATEGORIES = ["نثرية", "صيانة", "سولار", "إداريات", "مرتبات وسلف", "انتقالات", "أخرى"] as const;
+
+export interface CustodyEntry {
+  id: string;
+  date: string;
+  kind: "in" | "out";
+  amount: number;
+  person: string; // المستلم / صاحب العهدة
+  category: string; // بند المصروف (للصرف فقط)
+  description: string; // البيان / مصدر العهدة / جهة الصرف
+  notes: string;
+}
+
+export type CustodyInput = Omit<CustodyEntry, "id">;
+
+export type CustodyPreset = "day" | "week" | "month" | "custom";
+
+/** Week runs Saturday → Friday (Egyptian work week). */
+export function custodyRange(preset: Exclude<CustodyPreset, "custom">, today = new Date().toISOString().slice(0, 10)): DateRange {
+  if (preset === "day") return { from: today, to: today };
+  if (preset === "month") return rangeForPreset("current", today);
+  const dow = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0=Sun … 6=Sat
+  const sinceSat = (dow + 1) % 7;
+  const from = addDaysIso(today, -sinceSat);
+  return { from, to: addDaysIso(from, 6) };
+}
+
+export function computeCustody(entries: CustodyEntry[], range: DateRange) {
+  const rows = entries
+    .filter((e) => inDateRange(e.date, range))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const totalIn = rows.filter((r) => r.kind === "in").reduce((s, r) => s + r.amount, 0);
+  const totalOut = rows.filter((r) => r.kind === "out").reduce((s, r) => s + r.amount, 0);
+  const byCategory = new Map<string, number>();
+  for (const r of rows) if (r.kind === "out") byCategory.set(r.category || "أخرى", (byCategory.get(r.category || "أخرى") ?? 0) + r.amount);
+  // رصيد افتتاحي = صافي كل ما قبل بداية الفترة
+  const opening = range.from
+    ? entries.filter((e) => e.date < range.from).reduce((s, e) => s + (e.kind === "in" ? e.amount : -e.amount), 0)
+    : 0;
+  return {
+    rows,
+    totalIn,
+    totalOut,
+    opening,
+    balance: totalIn - totalOut,
+    closing: opening + totalIn - totalOut,
+    byCategory: Array.from(byCategory.entries()).map(([category, total]) => ({ category, total })),
+  };
+}
+
+function mapCustody(r: any): CustodyEntry {
+  return {
+    id: r.id,
+    date: r.entry_date,
+    kind: r.kind,
+    amount: Number(r.amount ?? 0),
+    person: r.person ?? "",
+    category: r.category ?? "",
+    description: r.description ?? "",
+    notes: r.notes ?? "",
+  };
+}
+
+export async function fetchCustody(): Promise<CustodyEntry[]> {
+  const { data, error } = await pageAll((f, t) => supabase.from("custody_entries").select("*").order("entry_date", { ascending: false }).order("id").range(f, t));
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل العهدة"));
+  return data.map(mapCustody);
+}
+
+const custodyRow = (i: CustodyInput) => ({
+  entry_date: i.date,
+  kind: i.kind,
+  amount: i.amount,
+  person: i.person.trim() || null,
+  category: i.category.trim() || null,
+  description: i.description.trim() || null,
+  notes: i.notes.trim() || null,
+});
+
+export async function addCustodyEntry(i: CustodyInput) {
+  const { error } = await supabase.from("custody_entries").insert(custodyRow(i));
+  if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ الحركة"));
+}
+export async function updateCustodyEntry(id: string, i: CustodyInput) {
+  const { error } = await supabase.from("custody_entries").update(custodyRow(i)).eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تعديل الحركة"));
+}
+export async function deleteCustodyEntry(id: string) {
+  const { error } = await supabase.from("custody_entries").delete().eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر حذف الحركة"));
+}

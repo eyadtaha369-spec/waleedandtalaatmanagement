@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -596,5 +596,20 @@ describe("computeDriverPayroll with dispatch-shift adjustments", () => {
       [{ driver: "أحمد", overtimeAllowance: 200, dailyAdvance: 100, penalty: 50, toll: 30 }],
     );
     expect(row?.netSalary).toBe(5020);
+  });
+});
+
+describe("custody ledger", () => {
+  const e = (id: string, date: string, kind: "in" | "out", amount: number, category = "") => ({ id, date, kind, amount, person: "", category, description: "", notes: "" });
+  const entries = [e("1", "2026-09-30", "in", 1000), e("2", "2026-10-02", "in", 500), e("3", "2026-10-03", "out", 200, "نثرية"), e("4", "2026-10-04", "out", 100, "سولار"), e("5", "2026-10-20", "out", 50, "نثرية")];
+  it("isolates the period, carries opening balance and groups by category", () => {
+    const v = computeCustody(entries, { from: "2026-10-01", to: "2026-10-10" });
+    expect([v.totalIn, v.totalOut, v.balance, v.opening, v.closing]).toEqual([500, 300, 200, 1000, 1200]);
+    expect(v.byCategory).toEqual([{ category: "نثرية", total: 200 }, { category: "سولار", total: 100 }]);
+  });
+  it("week runs Saturday to Friday", () => {
+    expect(custodyRange("week", "2026-10-23")).toEqual({ from: "2026-10-17", to: "2026-10-23" });
+    expect(custodyRange("week", "2026-10-24")).toEqual({ from: "2026-10-24", to: "2026-10-30" });
+    expect(custodyRange("day", "2026-10-23")).toEqual({ from: "2026-10-23", to: "2026-10-23" });
   });
 });

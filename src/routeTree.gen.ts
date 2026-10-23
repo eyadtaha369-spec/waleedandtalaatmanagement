@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as BackupRouteImport } from './routes/backup'
 import { Route as ClientsRouteImport } from './routes/clients'
+import { Route as CustodyRouteImport } from './routes/custody'
 import { Route as DispatchRouteImport } from './routes/dispatch'
 import { Route as FinanceRouteImport } from './routes/finance'
 import { Route as FleetRouteImport } from './routes/fleet'
@@ -46,6 +47,11 @@ const BackupRoute = BackupRouteImport.update({
 const ClientsRoute = ClientsRouteImport.update({
   id: '/clients',
   path: '/clients',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CustodyRoute = CustodyRouteImport.update({
+  id: '/custody',
+  path: '/custody',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DispatchRoute = DispatchRouteImport.update({
@@ -124,6 +130,7 @@ export interface FileRoutesByFullPath {
   '/audit': typeof AuditRoute
   '/backup': typeof BackupRoute
   '/clients': typeof ClientsRoute
+  '/custody': typeof CustodyRoute
   '/dispatch': typeof DispatchRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/audit': typeof AuditRoute
   '/backup': typeof BackupRoute
   '/clients': typeof ClientsRoute
+  '/custody': typeof CustodyRoute
   '/dispatch': typeof DispatchRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
@@ -165,6 +173,7 @@ export interface FileRoutesById {
   '/audit': typeof AuditRoute
   '/backup': typeof BackupRoute
   '/clients': typeof ClientsRoute
+  '/custody': typeof CustodyRoute
   '/dispatch': typeof DispatchRoute
   '/finance': typeof FinanceRoute
   '/fleet': typeof FleetRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/backup'
     | '/clients'
+    | '/custody'
     | '/dispatch'
     | '/finance'
     | '/fleet'
@@ -207,6 +217,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/backup'
     | '/clients'
+    | '/custody'
     | '/dispatch'
     | '/finance'
     | '/fleet'
@@ -227,6 +238,7 @@ export interface FileRouteTypes {
     | '/audit'
     | '/backup'
     | '/clients'
+    | '/custody'
     | '/dispatch'
     | '/finance'
     | '/fleet'
@@ -248,6 +260,7 @@ export interface RootRouteChildren {
   AuditRoute: typeof AuditRoute
   BackupRoute: typeof BackupRoute
   ClientsRoute: typeof ClientsRoute
+  CustodyRoute: typeof CustodyRoute
   DispatchRoute: typeof DispatchRoute
   FinanceRoute: typeof FinanceRoute
   FleetRoute: typeof FleetRoute
@@ -292,6 +305,13 @@ declare module '@tanstack/react-router' {
       path: '/clients'
       fullPath: '/clients'
       preLoaderRoute: typeof ClientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/custody': {
+      id: '/custody'
+      path: '/custody'
+      fullPath: '/custody'
+      preLoaderRoute: typeof CustodyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dispatch': {
@@ -400,6 +420,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuditRoute: AuditRoute,
   BackupRoute: BackupRoute,
   ClientsRoute: ClientsRoute,
+  CustodyRoute: CustodyRoute,
   DispatchRoute: DispatchRoute,
   FinanceRoute: FinanceRoute,
   FleetRoute: FleetRoute,

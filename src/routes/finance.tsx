@@ -245,6 +245,10 @@ function FinancePage() {
         <span>المرتبات والأجور (سائقين وموظفين) في صفحة واحدة موحَّدة.</span>
         <Link to="/payroll" className="rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">فتح صفحة المرتبات والأجور ←</Link>
       </div>
+      <div className="no-print mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+        <span>عهدة الخزينة: تغذية العهدة وصرف المصروفات منها مع تقارير يومية وأسبوعية وشهرية.</span>
+        <Link to="/custody" className="rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">فتح عهدة الخزينة ←</Link>
+      </div>
 
       <Tabs defaultValue="treasury">
         <TabsList className="no-print mb-4 flex-wrap border border-border bg-secondary/50">

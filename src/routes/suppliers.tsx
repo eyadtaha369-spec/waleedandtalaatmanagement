@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { BellRing, ChevronDown, FileText, Paperclip, Pencil, Plus, Printer, Receipt, Trash2, Wallet } from "lucide-react";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader, StatCard, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,7 @@ export const Route = createFileRoute("/suppliers")({
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const emptySupplier = { id: "", name: "", phone: "", dueDate: "", alertDate: "" };
 const emptyInvoice = { id: "", date: todayStr(), ref: "", total: "", items: "", previousPath: null as string | null };
-const emptyPayment = { date: todayStr(), amount: "", method: "نقدي", notes: "" };
+const emptyPayment = { date: todayStr(), amount: "", method: "كاش (Cash)", notes: "" };
 
 const kindTone: Record<string, string> = {
   شراء: "border-warning/40 bg-warning/15 text-warning",
@@ -554,10 +555,7 @@ function SuppliersPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">طريقة الدفع</Label>
-                <Input value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })} className="border-border bg-input/60" />
-              </div>
+              <PaymentSourceSelect value={paymentForm.method} onChange={(v) => setPaymentForm({ ...paymentForm, method: v })} />
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">ملاحظات</Label>
                 <Input value={paymentForm.notes} onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })} className="border-border bg-input/60" />

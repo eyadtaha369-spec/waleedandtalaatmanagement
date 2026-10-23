@@ -331,16 +331,19 @@ const subscriptionExpenseRow = async (input: SubscriptionExpenseInput) => {
 
 /** The database trigger also posts the matching withdrawal to the treasury. */
 export async function addSubscriptionExpense(input: SubscriptionExpenseInput) {
-  const { error } = await supabase.from("subscription_expenses").insert(await subscriptionExpenseRow(input));
+  const { data, error } = await supabase.from("subscription_expenses").insert(await subscriptionExpenseRow(input)).select("id").single();
   if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ المصروف"));
+  await syncCustodyLink({ table: "subscription_expenses", id: data.id as string }, { date: input.date || new Date().toISOString().slice(0, 10), amount: input.amount, category: "مصروفات اشتراكات", description: input.description, payFrom: input.payFrom, notes: input.notes });
 }
 
 export async function updateSubscriptionExpense(id: string, input: SubscriptionExpenseInput) {
   const { error } = await supabase.from("subscription_expenses").update(await subscriptionExpenseRow(input)).eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر تعديل المصروف"));
+  await syncCustodyLink({ table: "subscription_expenses", id }, { date: input.date || new Date().toISOString().slice(0, 10), amount: input.amount, category: "مصروفات اشتراكات", description: input.description, payFrom: input.payFrom, notes: input.notes });
 }
 
 export async function deleteSubscriptionExpense(id: string) {
+  await syncCustodyLink({ table: "subscription_expenses", id }, null);
   const { error } = await supabase.from("subscription_expenses").delete().eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر حذف المصروف"));
 }
@@ -377,6 +380,7 @@ export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
     parts: o.parts ?? "—",
     cost: Number(o.total_cost ?? 0),
     laborCost: Number(o.labor_cost ?? 0),
+    paySource: o.pay_source ?? "",
     status: o.status ?? "بانتظار القطع",
     items: (o.maintenance_order_items ?? []).map(
       (i: any): MaintenanceItem => ({
@@ -397,6 +401,7 @@ export interface MaintenanceOrderInput {
   status: string;
   laborCost: number;
   orderDate: string;
+  paySource?: string;
   items: { inventoryId: string; quantity: number; unitPrice: number }[];
 }
 
@@ -471,6 +476,7 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
     status: input.status,
     labor_cost: input.laborCost,
     order_date: input.orderDate,
+    pay_source: input.paySource || null,
   };
   let orderId = id;
   if (orderId) {
@@ -510,6 +516,11 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
   const summary = items.map((i) => `${names.get(i.inventoryId) ?? "صنف"} × ${i.quantity}`).join("، ");
   const { error: totErr } = await supabase.from("maintenance_orders").update({ total_cost: total, parts: summary || null }).eq("id", orderId);
   if (totErr) throw totErr;
+  // الأجور (العمالة) هي ما يُدفع نقدًا؛ قطع الغيار تُسحب من المخزن
+  await syncCustodyLink(
+    { table: "maintenance_orders", id: orderId as string },
+    input.status === "ملغي" ? null : { date: input.orderDate, amount: input.laborCost, category: CUSTODY_MAINT_CATEGORY, description: `أجور صيانة — ${input.busCode}${input.issue ? ` — ${input.issue}` : ""}`, payFrom: input.paySource ?? "", busCode: input.busCode, maintenanceOrderId: orderId as string },
+  );
 }
 
 export async function updateMaintenanceStatus(id: string, status: string) {
@@ -800,7 +811,17 @@ export interface ExpenseInput {
   amount: number;
 }
 
-export const PAY_FROM_OPTIONS = ["الخزينة الرئيسية", "حساب بنكي", "كاش"] as const;
+export const CUSTODY_SOURCE = "عهدة الخزينة";
+/** طريقة الدفع / مصدر التمويل — used by every expense-generating form. */
+export const PAYMENT_SOURCES = [
+  "عهدة الخزينة",
+  "الخزينة الرئيسية (من الجيب / النقدية)",
+  "تحصيلات الشركات",
+  "انستا باي (Instapay)",
+  "محفظة إلكترونية",
+  "كاش (Cash)",
+] as const;
+export const PAY_FROM_OPTIONS = PAYMENT_SOURCES;
 
 export async function fetchExpenses(): Promise<Expense[]> {
   const { data, error } = await supabase.from("expenses").select("*, suppliers!expenses_supplier_id_fkey(supplier_name, balance_due)").order("date", { ascending: false });
@@ -839,8 +860,9 @@ const expenseRow = async (input: ExpenseInput) => {
 
 /** Saving also (via database trigger) deducts the amount from the chosen treasury account and, for a supplier, posts a payment. */
 export async function addExpense(input: ExpenseInput) {
-  const { error } = await supabase.from("expenses").insert(await expenseRow(input));
+  const { data, error } = await supabase.from("expenses").insert(await expenseRow(input)).select("id").single();
   if (error) throw error;
+  await syncCustodyLink({ table: "expenses", id: data.id as string }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes });
 }
 
 export interface LoanInput {
@@ -1571,11 +1593,12 @@ export function computeDriverPayroll(
 
 export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollRow[]> {
   const { start, end } = periodBounds(period);
-  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts] = await Promise.all([
+  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts, custodyAdv] = await Promise.all([
     supabase.from("drivers").select("name, base_salary"),
     fetchDailyShifts(period),
     supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
     fetchDispatchShifts(period),
+    fetchCustodyAdvances(period),
   ]);
   if (dErr) throw dErr;
   return computeDriverPayroll(
@@ -1584,6 +1607,8 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
       ...shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty, toll: s.tollFee })),
       // إضافي/سلفة/جزاء/كرتة المسجلة مباشرة في ورديات الحركة تُرحَّل تلقائيًا للمرتب
       ...dispatchShifts.map((o) => ({ driver: o.driver, overtimeAllowance: o.overtime, dailyAdvance: o.advance, penalty: o.penalty, toll: o.karta })),
+      // مبالغ صُرفت للسائق من عهدة الخزينة تُخصم كسلفة
+      ...custodyAdv.filter((c) => c.type === "driver").map((c) => ({ driver: c.name, overtimeAllowance: 0, dailyAdvance: c.amount, penalty: 0 })),
     ],
     [
       ...(tripRows ?? []).map((t: any) => ({ driver: t.drivers?.name ?? "", fee: Number(t.driver_fee ?? 0) })),
@@ -1813,6 +1838,7 @@ export async function deleteStudent(id: string) {
 }
 
 export async function deleteMaintenanceOrder(id: string) {
+  await syncCustodyLink({ table: "maintenance_orders", id }, null);
   const { error } = await supabase.from("maintenance_orders").delete().eq("id", id);
   if (error) throw error;
 }
@@ -1856,8 +1882,10 @@ export async function deleteTreasuryEntry(id: string) {
 export async function updateExpense(id: string, input: ExpenseInput) {
   const { error } = await supabase.from("expenses").update(await expenseRow(input)).eq("id", id);
   if (error) throw error;
+  await syncCustodyLink({ table: "expenses", id }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes });
 }
 export async function deleteExpense(id: string) {
+  await syncCustodyLink({ table: "expenses", id }, null);
   const { error } = await supabase.from("expenses").delete().eq("id", id);
   if (error) throw error;
 }
@@ -2265,8 +2293,9 @@ export function computeEmployeePayroll(
 
 export async function fetchEmployeePayroll(period: Period): Promise<EmployeePayrollRow[]> {
   const { start, end } = periodBounds(period);
-  const [employees, { data, error }] = await Promise.all([
+  const [employees, custodyAdv, { data, error }] = await Promise.all([
     fetchEmployees(),
+    fetchCustodyAdvances(period),
     supabase
       .from("employee_attendance")
       .select("allowance, advance, penalty, employees(name)")
@@ -2282,7 +2311,7 @@ export async function fetchEmployeePayroll(period: Period): Promise<EmployeePayr
       allowance: Number(r.allowance ?? 0),
       advance: Number(r.advance ?? 0),
       penalty: Number(r.penalty ?? 0),
-    })),
+    })).concat(custodyAdv.filter((c) => c.type === "employee").map((c) => ({ employeeName: c.name, allowance: 0, advance: c.amount, penalty: 0 }))),
   );
 }
 
@@ -2453,16 +2482,26 @@ export async function deleteSupplier(id: string) {
 }
 
 export async function addSupplierPayment(input: { supplierId: string; amount: number; method: string; notes: string; date?: string }) {
-  const { error } = await supabase.from("supplier_payments").insert({
-    supplier_id: input.supplierId,
-    amount: input.amount,
-    method: input.method,
-    notes: input.notes,
-    ...(input.date ? { date: input.date } : {}),
-  });
+  const { data, error } = await supabase
+    .from("supplier_payments")
+    .insert({
+      supplier_id: input.supplierId,
+      amount: input.amount,
+      method: input.method,
+      notes: input.notes,
+      ...(input.date ? { date: input.date } : {}),
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  const { data: sup } = await supabase.from("suppliers").select("supplier_name").eq("id", input.supplierId).maybeSingle();
+  await syncCustodyLink(
+    { table: "supplier_payments", id: data.id as string },
+    { date: input.date || new Date().toISOString().slice(0, 10), amount: input.amount, category: "موردون", description: `سداد للمورد ${sup?.supplier_name ?? ""}`.trim(), payFrom: input.method, notes: input.notes },
+  );
 }
 export async function deleteSupplierPayment(id: string) {
+  await syncCustodyLink({ table: "supplier_payments", id }, null);
   const { error } = await supabase.from("supplier_payments").delete().eq("id", id);
   if (error) throw error;
 }
@@ -3627,7 +3666,9 @@ export async function fetchEmployeeAttendanceInPeriod(period: Period): Promise<E
 
 // ---- عهدة الخزينة (petty cash & custody) ----
 
-export const CUSTODY_CATEGORIES = ["نثرية", "صيانة", "سولار", "إداريات", "مرتبات وسلف", "انتقالات", "أخرى"] as const;
+export const CUSTODY_PAYROLL_CATEGORY = "مرتبات / سلف";
+export const CUSTODY_MAINT_CATEGORY = "صيانة / ورش";
+export const CUSTODY_CATEGORIES = ["نثرية", "إداريات", "سولار", CUSTODY_MAINT_CATEGORY, CUSTODY_PAYROLL_CATEGORY, "انتقالات", "أخرى"] as const;
 
 export interface CustodyEntry {
   id: string;
@@ -3638,9 +3679,19 @@ export interface CustodyEntry {
   category: string; // بند المصروف (للصرف فقط)
   description: string; // البيان / مصدر العهدة / جهة الصرف
   notes: string;
+  /** set when the row was generated automatically by an expense paid from the custody */
+  sourceTable: string;
+  sourceId: string;
+  /** مرتبات / سلف: the driver or employee the amount is advanced to */
+  subjectType: "" | "driver" | "employee";
+  subjectId: string;
+  /** صيانة / ورش */
+  busCode: string;
+  maintenanceOrderId: string;
 }
 
-export type CustodyInput = Omit<CustodyEntry, "id">;
+export type CustodyInput = Omit<CustodyEntry, "id" | "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId"> &
+  Partial<Pick<CustodyEntry, "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId">>;
 
 export type CustodyPreset = "day" | "week" | "month" | "custom";
 
@@ -3687,6 +3738,12 @@ function mapCustody(r: any): CustodyEntry {
     category: r.category ?? "",
     description: r.description ?? "",
     notes: r.notes ?? "",
+    sourceTable: r.source_table ?? "",
+    sourceId: r.source_id ?? "",
+    subjectType: (r.subject_type ?? "") as CustodyEntry["subjectType"],
+    subjectId: r.subject_id ?? "",
+    busCode: r.bus_code ?? "",
+    maintenanceOrderId: r.maintenance_order_id ?? "",
   };
 }
 
@@ -3704,6 +3761,12 @@ const custodyRow = (i: CustodyInput) => ({
   category: i.category.trim() || null,
   description: i.description.trim() || null,
   notes: i.notes.trim() || null,
+  source_table: i.sourceTable || null,
+  source_id: i.sourceId || null,
+  subject_type: i.subjectType || null,
+  subject_id: i.subjectId || null,
+  bus_code: i.busCode || null,
+  maintenance_order_id: i.maintenanceOrderId || null,
 });
 
 export async function addCustodyEntry(i: CustodyInput) {
@@ -3717,4 +3780,47 @@ export async function updateCustodyEntry(id: string, i: CustodyInput) {
 export async function deleteCustodyEntry(id: string) {
   const { error } = await supabase.from("custody_entries").delete().eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر حذف الحركة"));
+}
+
+/**
+ * Keeps the custody ledger in step with an expense that names «عهدة الخزينة» as its payment source:
+ * creates/updates one linked «صرف» row, or removes it when the source is no longer the custody
+ * (or the expense is deleted — pass `active: null`).
+ */
+export async function syncCustodyLink(
+  source: { table: string; id: string },
+  active: { date: string; amount: number; category: string; description: string; payFrom: string; notes?: string; busCode?: string; maintenanceOrderId?: string } | null,
+) {
+  const { data: existing, error: findErr } = await supabase.from("custody_entries").select("id").eq("source_table", source.table).eq("source_id", source.id).maybeSingle();
+  if (findErr) throw new Error(dbErrorMessage(findErr, "تعذر ربط المصروف بعهدة الخزينة"));
+  if (!active || active.payFrom !== CUSTODY_SOURCE || !(active.amount > 0)) {
+    if (existing) {
+      const { error } = await supabase.from("custody_entries").delete().eq("id", existing.id);
+      if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث عهدة الخزينة"));
+    }
+    return;
+  }
+  const row = custodyRow({
+    date: active.date,
+    kind: "out",
+    amount: active.amount,
+    person: "",
+    category: active.category,
+    description: active.description,
+    notes: active.notes ?? "",
+    sourceTable: source.table,
+    sourceId: source.id,
+    busCode: active.busCode ?? "",
+    maintenanceOrderId: active.maintenanceOrderId ?? "",
+  });
+  const { error } = existing ? await supabase.from("custody_entries").update(row).eq("id", existing.id) : await supabase.from("custody_entries").insert(row);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تسجيل المصروف في عهدة الخزينة"));
+}
+
+/** Custody payments made to a driver/employee — counted as advances against their salary. */
+export async function fetchCustodyAdvances(period: Period): Promise<{ type: "driver" | "employee"; name: string; amount: number }[]> {
+  const { start, end } = periodBounds(period);
+  const { data, error } = await supabase.from("custody_entries").select("subject_type, person, amount").eq("kind", "out").not("subject_type", "is", null).gte("entry_date", start).lt("entry_date", end);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سلف العهدة"));
+  return (data ?? []).map((r: any) => ({ type: r.subject_type, name: r.person ?? "", amount: Number(r.amount ?? 0) }));
 }

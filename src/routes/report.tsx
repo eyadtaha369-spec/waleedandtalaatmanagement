@@ -66,7 +66,7 @@ function ReportPage() {
     if (amount <= 0) return;
     setPayingId(supplierId);
     try {
-      await addSupplierPayment({ supplierId, amount, method: "نقدي", notes: "سداد من التقرير المالي الشهري" });
+      await addSupplierPayment({ supplierId, amount, method: "كاش (Cash)", notes: "سداد من التقرير المالي الشهري" });
       await loadAll();
       setPayAmounts({ ...payAmounts, [supplierId]: "" });
     } catch (e) {

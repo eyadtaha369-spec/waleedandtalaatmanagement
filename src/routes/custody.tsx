@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownCircle, ArrowUpCircle, Plus, Printer, Scale } from "lucide-react";
+import { BusPicker } from "@/components/bus-picker";
+import { PersonPicker, type PersonOption } from "@/components/person-picker";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatCard } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -9,9 +11,15 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { currency } from "@/lib/fleet-data";
+import { currency, type Bus, type MaintenanceOrder } from "@/lib/fleet-data";
 import {
   CUSTODY_CATEGORIES,
+  CUSTODY_MAINT_CATEGORY,
+  CUSTODY_PAYROLL_CATEGORY,
+  fetchBuses,
+  fetchDrivers,
+  fetchEmployees,
+  fetchMaintenanceOrders,
   addCustodyEntry,
   computeCustody,
   custodyRange,
@@ -29,7 +37,7 @@ export const Route = createFileRoute("/custody")({
 });
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
-const emptyForm = (kind: "in" | "out") => ({ id: "", kind, date: todayStr(), amount: "", person: "", category: kind === "out" ? "نثرية" : "", description: "", notes: "" });
+const emptyForm = (kind: "in" | "out") => ({ id: "", kind, date: todayStr(), amount: "", person: "", category: kind === "out" ? "نثرية" : "", description: "", notes: "", personKey: "", busCode: "", orderId: "" });
 const PRESETS: { key: CustodyPreset; label: string }[] = [
   { key: "day", label: "تقرير اليوم" },
   { key: "week", label: "تقرير الأسبوع الحالي" },
@@ -48,6 +56,9 @@ function CustodyPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [target, setTarget] = useState<CustodyEntry | null>(null);
+  const [people, setPeople] = useState<PersonOption[]>([]);
+  const [buses, setBuses] = useState<Bus[]>([]);
+  const [orders, setOrders] = useState<MaintenanceOrder[]>([]);
 
   const load = async () => {
     setLoading(true);
@@ -62,6 +73,19 @@ function CustodyPage() {
   };
   useEffect(() => {
     load();
+    (async () => {
+      try {
+        const [d, e, b, o] = await Promise.all([fetchDrivers(), fetchEmployees(), fetchBuses(), fetchMaintenanceOrders()]);
+        setPeople([
+          ...d.map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })),
+          ...e.filter((x) => x.isActive).map((x) => ({ value: `employee:${x.id}`, label: x.name, group: "موظف" })),
+        ]);
+        setBuses(b);
+        setOrders(o);
+      } catch {
+        /* the pickers stay empty; the rest of the page still works */
+      }
+    })();
   }, []);
 
   const range = preset === "custom" ? custom : custodyRange(preset);
@@ -75,7 +99,7 @@ function CustodyPage() {
     setOpen(true);
   };
   const openEdit = (e: CustodyEntry) => {
-    setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), person: e.person, category: e.category, description: e.description, notes: e.notes });
+    setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), person: e.person, category: e.category, description: e.description, notes: e.notes, personKey: e.subjectType && e.subjectId ? `${e.subjectType}:${e.subjectId}` : "", busCode: e.busCode, orderId: e.maintenanceOrderId });
     setFormError("");
     setOpen(true);
   };
@@ -85,10 +109,28 @@ function CustodyPage() {
     if (!(amount > 0)) return setFormError("أدخل مبلغًا أكبر من صفر");
     if (!form.date) return setFormError("اختر التاريخ");
     if (form.kind === "in" && !form.person.trim()) return setFormError("أدخل اسم المستلم / صاحب العهدة");
+    const isPayroll = form.kind === "out" && form.category === CUSTODY_PAYROLL_CATEGORY;
+    const isMaint = form.kind === "out" && form.category === CUSTODY_MAINT_CATEGORY;
+    const picked = people.find((p) => p.value === form.personKey);
+    if (isPayroll && !picked) return setFormError("اختر السائق أو الموظف");
+    if (isMaint && !form.busCode) return setFormError("اختر العربية (رقم اللوحة)");
     setSaving(true);
     setFormError("");
     try {
-      const input = { date: form.date, kind: form.kind, amount, person: form.person, category: form.kind === "out" ? form.category : "", description: form.description, notes: form.notes };
+      const [subjectType, subjectId] = isPayroll ? (form.personKey.split(":") as ["driver" | "employee", string]) : (["", ""] as const);
+      const input = {
+        date: form.date,
+        kind: form.kind,
+        amount,
+        person: isPayroll ? (picked?.label ?? "") : form.person,
+        category: form.kind === "out" ? form.category : "",
+        description: form.description || (isPayroll ? `${form.category} — ${picked?.label ?? ""}` : ""),
+        notes: form.notes,
+        subjectType,
+        subjectId,
+        busCode: isMaint ? form.busCode : "",
+        maintenanceOrderId: isMaint && form.orderId ? form.orderId : "",
+      };
       if (form.id) await updateCustodyEntry(form.id, input);
       else await addCustodyEntry(input);
       setOpen(false);
@@ -182,10 +224,14 @@ function CustodyPage() {
                 <td className={`px-4 py-3 font-bold ${r.kind === "in" ? "text-success" : "text-destructive"}`}>{r.kind === "in" ? "+" : "-"}{currency(r.amount)}</td>
                 <td className="px-4 py-3 text-muted-foreground">{r.notes || "—"}</td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" className="border-border" onClick={() => openEdit(r)}>تعديل ✏️</Button>
-                    <Button size="sm" variant="outline" className="border-destructive/50 text-destructive" onClick={() => setTarget(r)}>حذف 🗑️</Button>
-                  </div>
+                  {r.sourceId ? (
+                    <span className="text-xs text-muted-foreground">مرتبط بمصروف — عدّله من شاشته</span>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="border-border" onClick={() => openEdit(r)}>تعديل ✏️</Button>
+                      <Button size="sm" variant="outline" className="border-destructive/50 text-destructive" onClick={() => setTarget(r)}>حذف 🗑️</Button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))
@@ -257,13 +303,40 @@ function CustodyPage() {
                 <Input value={form.person} onChange={(e) => setForm({ ...form, person: e.target.value })} className="border-border bg-input/60" />
               </div>
             ) : (
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">بند المصروف</Label>
-                <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
-                  <SelectContent>{CUSTODY_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+              <>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">بند المصروف</Label>
+                  <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                    <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                    <SelectContent>{CUSTODY_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                {form.category === CUSTODY_PAYROLL_CATEGORY && (
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">اختر السائق أو الموظف</Label>
+                    <PersonPicker value={form.personKey} options={people} onChange={(v) => setForm({ ...form, personKey: v })} />
+                    <p className="text-xs text-muted-foreground">يُخصم المبلغ تلقائيًا من مرتب الشخص في صفحة المرتبات والأجور (كسلفة/مدفوع مقدمًا).</p>
+                  </div>
+                )}
+                {form.category === CUSTODY_MAINT_CATEGORY && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs text-muted-foreground">العربية (رقم اللوحة)</Label>
+                      <BusPicker value={form.busCode} buses={buses} onChange={(v) => setForm({ ...form, busCode: v, orderId: "" })} />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label className="text-xs text-muted-foreground">أمر الصيانة (اختياري)</Label>
+                      <Select value={form.orderId || "__none"} onValueChange={(v) => setForm({ ...form, orderId: v === "__none" ? "" : v })} disabled={!form.busCode}>
+                        <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none">بدون أمر صيانة</SelectItem>
+                          {orders.filter((o) => o.bus === form.busCode).map((o) => <SelectItem key={o.id} value={o.id}>{o.code} — {o.issue}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">{form.kind === "in" ? "البيان / مصدر العهدة" : "جهة الصرف / البيان"}</Label>

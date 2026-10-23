@@ -4,6 +4,7 @@ import { AlertTriangle, Ban, Check, ChevronsUpDown, FileText, Pencil, Plus, Prin
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { BusPicker } from "@/components/bus-picker";
 import { ItemStatementSheet } from "@/components/item-statement";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -95,7 +96,7 @@ interface PartRow {
 let partKey = 0;
 const newPart = (): PartRow => ({ key: ++partKey, inventoryId: "", quantity: "1", unitPrice: "" });
 
-const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", status: "بانتظار القطع" as MaintenanceStatus };
+const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus };
 const emptyItemForm = { id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "", unitType: "بالقطعة" as UnitType };
 const emptyFuelForm = { id: "", busCode: "", driverName: "", date: new Date().toISOString().slice(0, 10), currentOdometer: "", liters: "", cost: "", station: "" };
 
@@ -250,6 +251,7 @@ function WorkshopPage() {
       date: o.date,
       issue: o.issue === "—" ? "" : o.issue,
       laborCost: o.laborCost ? String(o.laborCost) : "",
+      paySource: o.paySource ?? "",
       status: o.status,
     });
     setParts(o.items.length ? o.items.map((i) => ({ key: ++partKey, inventoryId: i.inventoryId, quantity: String(i.quantity), unitPrice: String(i.unitPrice) })) : [newPart()]);
@@ -281,6 +283,10 @@ function WorkshopPage() {
       setError("أدخل كمية صحيحة لكل قطعة");
       return;
     }
+    if ((Number(form.laborCost) || 0) > 0 && !form.paySource) {
+      setError("اختر طريقة الدفع / مصدر التمويل للمصنعية");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -290,6 +296,7 @@ function WorkshopPage() {
         status: form.status,
         laborCost: Number(form.laborCost) || 0,
         orderDate: form.date,
+        paySource: form.paySource,
         items: filledParts.map((p) => ({ inventoryId: p.inventoryId, quantity: Number(p.quantity), unitPrice: Number(p.unitPrice) || 0 })),
       });
       await loadAll();
@@ -847,6 +854,7 @@ function WorkshopPage() {
                 قطع الغيار: <b className="text-warning">{currency(totals.partsTotal)}</b> &nbsp;|&nbsp; الإجمالي: <b className="text-primary">{currency(totals.total)}</b>
               </p>
             </div>
+            <PaymentSourceSelect value={form.paySource} onChange={(v) => setForm({ ...form, paySource: v })} label="طريقة الدفع / مصدر التمويل (للمصنعية)" />
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitOrder} disabled={saving}>

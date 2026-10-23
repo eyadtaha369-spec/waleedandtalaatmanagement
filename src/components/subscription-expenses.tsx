@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { DataTable, Panel } from "@/components/ui-kit";
 import {
   PAY_FROM_OPTIONS,
@@ -18,7 +19,7 @@ import { currency } from "@/lib/fleet-data";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const NONE = "__none__";
-const emptyForm = () => ({ id: "", date: today(), description: "", routeName: NONE, amount: "", payFrom: "الخزينة الرئيسية", notes: "" });
+const emptyForm = () => ({ id: "", date: today(), description: "", routeName: NONE, amount: "", payFrom: "الخزينة الرئيسية (من الجيب / النقدية)", notes: "" });
 const SUGGESTIONS = ["صيانة أتوبيسات طلاب", "كروت طرق", "بنزين", "رواتب مشرفين"];
 
 export function SubscriptionExpensesPanel({ expenses, routeNames, onChanged }: { expenses: SubscriptionExpense[]; routeNames: string[]; onChanged: () => Promise<void> | void }) {
@@ -34,7 +35,7 @@ export function SubscriptionExpensesPanel({ expenses, routeNames, onChanged }: {
     setOpen(true);
   };
   const openEdit = (e: SubscriptionExpense) => {
-    setForm({ id: e.id, date: e.date, description: e.description, routeName: e.routeName || NONE, amount: String(e.amount), payFrom: e.payFrom || "الخزينة الرئيسية", notes: e.notes });
+    setForm({ id: e.id, date: e.date, description: e.description, routeName: e.routeName || NONE, amount: String(e.amount), payFrom: e.payFrom || "الخزينة الرئيسية (من الجيب / النقدية)", notes: e.notes });
     setError("");
     setOpen(true);
   };
@@ -136,13 +137,7 @@ export function SubscriptionExpensesPanel({ expenses, routeNames, onChanged }: {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">طريقة الصرف</Label>
-                <Select value={form.payFrom} onValueChange={(v) => setForm({ ...form, payFrom: v })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
-                  <SelectContent>{PAY_FROM_OPTIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+              <PaymentSourceSelect value={form.payFrom} onChange={(v) => setForm({ ...form, payFrom: v })} />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">الملاحظات</Label>

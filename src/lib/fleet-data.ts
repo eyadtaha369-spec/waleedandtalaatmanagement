@@ -85,6 +85,7 @@ export interface MaintenanceOrder {
   parts: string;
   cost: number;
   laborCost: number;
+  paySource?: string;
   status: MaintenanceStatus;
   items: MaintenanceItem[];
 }

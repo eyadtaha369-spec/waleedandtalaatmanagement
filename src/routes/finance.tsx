@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2, X, TrendingUp, TrendingDown, Wallet } from "lucide-react";
+import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatCard, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -534,13 +535,7 @@ function FinancePage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">طريقة الصرف / صُرفت من</Label>
-                <Select value={expenseForm.payFrom} onValueChange={(v) => setExpenseForm({ ...expenseForm, payFrom: v })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
-                  <SelectContent>{PAY_FROM_OPTIONS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+              <PaymentSourceSelect value={expenseForm.payFrom} onChange={(v) => setExpenseForm({ ...expenseForm, payFrom: v })} />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">المبلغ</Label>

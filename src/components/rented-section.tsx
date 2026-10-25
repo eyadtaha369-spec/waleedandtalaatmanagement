@@ -248,6 +248,9 @@ export function RentedSection() {
           <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "نوع السيارة": o.vehicleType, الخط: o.routeName, "تكلفة التأجير": o.fare, "سعر الشركة": o.clientFare, "صافي الربح": rentedNetProfit(o), الحالة: o.paid ? PAID : PENDING })))}>
             تصدير Excel
           </Button>
+          <Button variant="outline" className="border-primary/50 text-primary" onClick={openAdv}>
+            <Wallet className="ml-2 h-4 w-4" /> تسجيل سلفة / دفعة تحت الحساب 💵
+          </Button>
           <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAdd}>
             <Plus className="ml-2 h-4 w-4" /> تسجيل حركة عربية مستأجرة
           </Button>

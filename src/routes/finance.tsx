@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AccountPicker } from "@/components/account-picker";
+import { PersonPicker, type PersonOption } from "@/components/person-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -45,6 +46,11 @@ import {
   deleteLoan,
   fetchClients,
   fetchSuppliers,
+  fetchRentedOps,
+  fetchRentedAdvances,
+  listRentedVehicles,
+  rentedVehicleKey,
+  RENTED_EXPENSE_CATEGORY,
   PAY_FROM_OPTIONS,
   type Client,
   type Supplier,
@@ -81,8 +87,10 @@ function FinancePage() {
   const [treasuryForm, setTreasuryForm] = useState(emptyTreasury);
   const [clients, setClients] = useState<Client[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [rentedOpts, setRentedOpts] = useState<PersonOption[]>([]);
+  const [rentedByExpense, setRentedByExpense] = useState<Record<string, string>>({});
   const [addingExpense, setAddingExpense] = useState(false);
-  const emptyExpense = () => ({ id: "", date: todayStr(), category: "", supplierId: "", description: "", notes: "", payFrom: "", amount: "" });
+  const emptyExpense = () => ({ id: "", date: todayStr(), category: "", supplierId: "", description: "", notes: "", payFrom: "", amount: "", rentedVehicle: "" });
   const [expenseForm, setExpenseForm] = useState(emptyExpense);
   const [addingLoan, setAddingLoan] = useState(false);
   const emptyLoan = () => ({ id: "", lender: "", total: "", installments: [{ amount: "", dueDate: "" }] as { amount: string; dueDate: string }[] });
@@ -97,6 +105,13 @@ function FinancePage() {
     setError(null);
     try {
       const [t, e, l, c, sp, sum] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers(), fetchTreasurySummary({ from: "2000-01-01", to: "2100-01-01" })]);
+      try {
+        const [rops, radv] = await Promise.all([fetchRentedOps(), fetchRentedAdvances()]);
+        setRentedOpts(listRentedVehicles(rops, radv).map((v) => ({ value: v.value, label: v.label, group: v.group })));
+        setRentedByExpense(Object.fromEntries(radv.filter((a) => a.sourceTable === "expenses").map((a) => [a.sourceId, rentedVehicleKey(a.owner, a.bus)])));
+      } catch {
+        /* the vehicle picker stays empty; the rest of the page still works */
+      }
       setSummary(sum);
       setClients(c);
       setSuppliers(sp);
@@ -152,11 +167,12 @@ function FinancePage() {
     setAddingExpense(true);
   };
   const openEditExpense = (e: Expense) => {
-    setExpenseForm({ id: e.id, date: e.date, category: e.category, supplierId: e.supplierId, description: e.description, notes: e.notes, payFrom: e.payFrom, amount: String(e.amount) });
+    setExpenseForm({ id: e.id, date: e.date, category: e.category, supplierId: e.supplierId, description: e.description, notes: e.notes, payFrom: e.payFrom, amount: String(e.amount), rentedVehicle: rentedByExpense[e.id] ?? "" });
     setAddingExpense(true);
   };
   const submitExpense = async () => {
     if (!expenseForm.category.trim()) return setError("اختر البند");
+    if (expenseForm.category === RENTED_EXPENSE_CATEGORY && !expenseForm.rentedVehicle) return setError("اختر السيارة المستأجرة");
     if (!(Number(expenseForm.amount) > 0)) return setError("أدخل مبلغ المصروف");
     if (!expenseForm.payFrom) return setError("اختر طريقة الصرف / صُرفت من");
     setSaving(true);
@@ -170,6 +186,7 @@ function FinancePage() {
         notes: expenseForm.notes,
         payFrom: expenseForm.payFrom,
         amount: Number(expenseForm.amount) || 0,
+        rentedVehicle: expenseForm.category === RENTED_EXPENSE_CATEGORY ? expenseForm.rentedVehicle : "",
       };
       if (expenseForm.id) await updateExpense(expenseForm.id, payload);
       else await addExpense(payload);
@@ -511,11 +528,18 @@ function FinancePage() {
                 <Select value={expenseForm.category} onValueChange={(v) => setExpenseForm({ ...expenseForm, category: v })}>
                   <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر البند" /></SelectTrigger>
                   <SelectContent>
-                    {["غاز", "قطع غيار", "موردين", "مرتبات", "إداريات", "مصاريف خارجية"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {["غاز", "قطع غيار", "موردين", "مرتبات", "إداريات", RENTED_EXPENSE_CATEGORY, "مصاريف خارجية"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            {expenseForm.category === RENTED_EXPENSE_CATEGORY && (
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">اختيار السيارة المستأجرة</Label>
+                <PersonPicker value={expenseForm.rentedVehicle} options={rentedOpts} onChange={(v) => setExpenseForm({ ...expenseForm, rentedVehicle: v })} placeholder="ابحث عن سيارة مستأجرة أو مالك" />
+                <p className="text-xs text-muted-foreground">يُرحَّل المبلغ تلقائيًا كدفعة تحت الحساب في كشف حساب هذه السيارة.</p>
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">البيان</Label>
               <Input value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="border-border bg-input/60" />

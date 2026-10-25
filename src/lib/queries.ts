@@ -809,6 +809,8 @@ export interface ExpenseInput {
   notes: string;
   payFrom: string;
   amount: number;
+  /** مفتاح السيارة المستأجرة «المالك||العربية» عند بند «السيارات المستأجرة» */
+  rentedVehicle?: string;
 }
 
 export const CUSTODY_SOURCE = "عهدة الخزينة";
@@ -860,9 +862,11 @@ const expenseRow = async (input: ExpenseInput) => {
 
 /** Saving also (via database trigger) deducts the amount from the chosen treasury account and, for a supplier, posts a payment. */
 export async function addExpense(input: ExpenseInput) {
+  if (input.category === RENTED_EXPENSE_CATEGORY && !input.rentedVehicle) throw new Error("اختر السيارة المستأجرة");
   const { data, error } = await supabase.from("expenses").insert(await expenseRow(input)).select("id").single();
   if (error) throw error;
   await syncCustodyLink({ table: "expenses", id: data.id as string }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes });
+  await syncRentedAdvanceLink({ table: "expenses", id: data.id as string }, input.category === RENTED_EXPENSE_CATEGORY ? { date: input.date, amount: input.amount, vehicle: input.rentedVehicle ?? "", payFrom: input.payFrom, notes: input.description || input.notes } : null);
 }
 
 export interface LoanInput {
@@ -1893,11 +1897,14 @@ export async function deleteTreasuryEntry(id: string) {
 }
 
 export async function updateExpense(id: string, input: ExpenseInput) {
+  if (input.category === RENTED_EXPENSE_CATEGORY && !input.rentedVehicle) throw new Error("اختر السيارة المستأجرة");
   const { error } = await supabase.from("expenses").update(await expenseRow(input)).eq("id", id);
   if (error) throw error;
   await syncCustodyLink({ table: "expenses", id }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes });
+  await syncRentedAdvanceLink({ table: "expenses", id }, input.category === RENTED_EXPENSE_CATEGORY ? { date: input.date, amount: input.amount, vehicle: input.rentedVehicle ?? "", payFrom: input.payFrom, notes: input.description || input.notes } : null);
 }
 export async function deleteExpense(id: string) {
+  await syncRentedAdvanceLink({ table: "expenses", id }, null);
   await syncCustodyLink({ table: "expenses", id }, null);
   const { error } = await supabase.from("expenses").delete().eq("id", id);
   if (error) throw error;
@@ -3419,6 +3426,8 @@ export interface RentedOp {
   paySource: string;
   notes: string;
   missionId: string;
+  /** جزء من الإيجار مخصوم من سلف سابقة */
+  advanceApplied: number;
 }
 
 export const RENTED_VEHICLE_TYPES = ["هاي إس (HiAce)", "ملاكي", "أوتوبيس 33", "أوتوبيس 50", "دوبل كابينة"] as const;
@@ -3462,6 +3471,7 @@ export async function fetchRentedOps(): Promise<RentedOp[]> {
     paySource: r.pay_source ?? "",
     notes: r.notes ?? "",
     missionId: r.mission_id ?? "",
+    advanceApplied: Number(r.advance_applied ?? 0),
   }));
 }
 
@@ -3483,10 +3493,10 @@ const rentedRow = (i: RentedOpInput) => ({
 });
 
 /** Rental cost settled from «عهدة الخزينة» is mirrored in the custody ledger. */
-async function syncRentedPayout(id: string, i: { date: string; owner: string; bus: string; fare: number; paid: boolean; paySource?: string }) {
+async function syncRentedPayout(id: string, i: { date: string; owner: string; bus: string; fare: number; paid: boolean; paySource?: string; applied?: number }) {
   await syncCustodyLink(
     { table: "rented_bus_operations", id },
-    i.paid ? { date: i.date, amount: i.fare, category: "سيارات مستأجرة", description: `إيجار ${i.owner} — ${i.bus}`, payFrom: i.paySource ?? "" } : null,
+    i.paid ? { date: i.date, amount: Math.max(0, i.fare - (i.applied ?? 0)), category: "سيارات مستأجرة", description: `إيجار ${i.owner} — ${i.bus}`, payFrom: i.paySource ?? "" } : null,
   );
 }
 
@@ -3498,42 +3508,226 @@ export async function addRentedOp(input: RentedOpInput) {
 }
 export async function updateRentedOp(id: string, input: RentedOpInput, wasPaid: boolean, paidAt: string) {
   if (input.paid && !input.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل لتكلفة التأجير");
-  const row = rentedRow(input);
-  if (input.paid && wasPaid && paidAt) row.paid_at = paidAt; // keep the original settlement date
+  const { data: prev } = await supabase.from("rented_bus_operations").select("advance_applied, owner_name").eq("id", id).maybeSingle();
+  let applied = Number(prev?.advance_applied ?? 0);
+  const row: Record<string, unknown> = rentedRow(input);
+  if (input.paid && wasPaid && paidAt) row['paid_at'] = paidAt; // keep the original settlement date
+  if (applied > 0 && !input.paid) {
+    await releaseRentedAdvance(String(prev?.owner_name ?? input.owner), applied);
+    applied = 0;
+    row['advance_applied'] = 0;
+  }
   const { error } = await supabase.from("rented_bus_operations").update(row).eq("id", id);
   if (error) throw error;
-  await syncRentedPayout(id, { ...input });
+  await syncRentedPayout(id, { ...input, applied });
 }
 export async function deleteRentedOp(id: string) {
+  const { data: prev } = await supabase.from("rented_bus_operations").select("advance_applied, owner_name").eq("id", id).maybeSingle();
+  if (prev && Number(prev.advance_applied ?? 0) > 0) await releaseRentedAdvance(String(prev.owner_name), Number(prev.advance_applied));
   await syncCustodyLink({ table: "rented_bus_operations", id }, null);
   const { error } = await supabase.from("rented_bus_operations").delete().eq("id", id);
   if (error) throw error;
 }
 
-/** "تم السداد / تصفير الحساب": marks the given trips as paid from the chosen funding source. */
-export async function settleRentedOps(ids: string[], paySource: string) {
+/**
+ * "تم السداد / تصفير الحساب": marks the given trips as paid. Open advances of the owner are deducted first
+ * (oldest trip first); only the remainder is paid from the chosen funding source.
+ */
+export async function settleRentedOps(ids: string[], paySource: string, advances: RentedAdvance[] = []) {
   if (!ids.length) return;
-  if (!paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل");
-  const { data, error } = await supabase
-    .from("rented_bus_operations")
-    .update({ paid: true, paid_at: new Date().toISOString().slice(0, 10), pay_source: paySource })
-    .in("id", ids)
-    .select("id, op_date, owner_name, bus_label, rental_fare");
-  if (error) throw error;
-  for (const r of data ?? []) await syncRentedPayout(r.id as string, { date: r.op_date as string, owner: r.owner_name as string, bus: r.bus_label as string, fare: Number(r.rental_fare ?? 0), paid: true, paySource });
+  const { data, error: fErr } = await supabase.from("rented_bus_operations").select("id, op_date, owner_name, bus_label, rental_fare, advance_applied").in("id", ids).order("op_date");
+  if (fErr) throw error_(fErr, "تعذر تحميل الرحلات");
+  const pool = advances.map((a) => ({ id: a.id, left: Math.max(0, a.amount - a.applied), applied: a.applied })).filter((a) => a.left > 0);
+  const poolTotal = pool.reduce((t, a) => t + a.left, 0);
+  const totalFare = (data ?? []).reduce((t, r: any) => t + Number(r.rental_fare ?? 0), 0);
+  if (!paySource && totalFare > poolTotal) throw new Error("اختر طريقة الدفع / مصدر التمويل");
+  const today = new Date().toISOString().slice(0, 10);
+  for (const r of data ?? []) {
+    const fare = Number(r.rental_fare ?? 0);
+    let need = fare;
+    for (const a of pool) {
+      if (need <= 0) break;
+      const take = Math.min(a.left, need);
+      a.left -= take;
+      a.applied += take;
+      need -= take;
+    }
+    const applied = fare - need;
+    const { error } = await supabase.from("rented_bus_operations").update({ paid: true, paid_at: today, pay_source: need > 0 ? paySource : paySource || "خصم من سلفة", advance_applied: applied }).eq("id", r.id);
+    if (error) throw error_(error, "تعذر تسجيل السداد");
+    await syncRentedPayout(r.id as string, { date: r.op_date as string, owner: r.owner_name as string, bus: r.bus_label as string, fare, paid: true, paySource, applied });
+  }
+  for (const a of pool) {
+    const { error } = await supabase.from("rented_advances").update({ applied: a.applied }).eq("id", a.id);
+    if (error) throw error_(error, "تعذر تحديث السلف");
+  }
+}
+const error_ = (e: unknown, fallback: string) => new Error(dbErrorMessage(e, fallback));
+
+// ---- سلف / دفعات تحت الحساب للسيارات المستأجرة ----
+
+export const RENTED_EXPENSE_CATEGORY = "السيارات المستأجرة";
+
+export interface RentedAdvance {
+  id: string;
+  date: string;
+  owner: string;
+  bus: string;
+  amount: number;
+  applied: number;
+  paySource: string;
+  notes: string;
+  sourceTable: string;
+  sourceId: string;
 }
 
-export function computeRentedLedger(ops: RentedOp[], filter: { owner: string; bus: string; range: DateRange }) {
+export const rentedVehicleKey = (owner: string, bus: string) => `${owner}||${bus}`;
+export const parseRentedVehicleKey = (key: string) => {
+  const [owner = "", bus = ""] = key.split("||");
+  return { owner, bus };
+};
+
+const mapRentedAdvance = (r: any): RentedAdvance => ({
+  id: r.id,
+  date: r.adv_date,
+  owner: r.owner_name,
+  bus: r.bus_label ?? "",
+  amount: Number(r.amount ?? 0),
+  applied: Number(r.applied ?? 0),
+  paySource: r.pay_source ?? "",
+  notes: r.notes ?? "",
+  sourceTable: r.source_table ?? "",
+  sourceId: r.source_id ?? "",
+});
+
+export async function fetchRentedAdvances(): Promise<RentedAdvance[]> {
+  const { data, error } = await pageAll((f, t) => supabase.from("rented_advances").select("*").order("adv_date", { ascending: false }).order("id").range(f, t));
+  if (error) throw error_(error, "تعذر تحميل سلف السيارات المستأجرة");
+  return data.map(mapRentedAdvance);
+}
+
+/** كل السيارات المستأجرة المسجلة (مالك + عربية) من الحركات والسلف. */
+export function listRentedVehicles(ops: { owner: string; bus: string }[], advances: { owner: string; bus: string }[] = []) {
+  const seen = new Map<string, { value: string; label: string; group: string; owner: string; bus: string }>();
+  for (const v of [...ops, ...advances]) {
+    if (!v.owner) continue;
+    const key = rentedVehicleKey(v.owner, v.bus);
+    if (!seen.has(key)) seen.set(key, { value: key, label: v.bus ? `${v.bus} — ${v.owner}` : `${v.owner} (كل العربيات)`, group: v.owner, owner: v.owner, bus: v.bus });
+  }
+  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "ar"));
+}
+
+/** Rolls advance usage back when a settled trip is edited back to pending or deleted (newest advance first). */
+async function releaseRentedAdvance(owner: string, amount: number) {
+  const { data } = await supabase.from("rented_advances").select("id, applied").eq("owner_name", owner).gt("applied", 0).order("adv_date", { ascending: false });
+  let left = amount;
+  for (const a of data ?? []) {
+    if (left <= 0) break;
+    const cut = Math.min(Number(a.applied), left);
+    left -= cut;
+    await supabase.from("rented_advances").update({ applied: Number(a.applied) - cut }).eq("id", a.id);
+  }
+}
+
+export interface RentedAdvanceInput {
+  date: string;
+  owner: string;
+  bus: string;
+  amount: number;
+  paySource: string;
+  notes: string;
+}
+
+/** دفعة فورية من الخزينة/العهدة لسيارة مستأجرة — تُسجَّل في كشف حسابها وتتحرك الأرصدة. */
+async function syncRentedAdvanceCash(id: string, i: RentedAdvanceInput | null) {
+  const desc = i ? `سلفة سيارة مستأجرة ${i.owner}${i.bus ? ` — ${i.bus}` : ""}` : "";
+  await syncCustodyLink({ table: "rented_advances", id }, i ? { date: i.date, amount: i.amount, category: RENTED_EXPENSE_CATEGORY, description: desc, payFrom: i.paySource, notes: i.notes } : null);
+  const { data: dep } = await supabase.from("treasury").select("id").eq("rented_advance_id", id).maybeSingle();
+  const toTreasury = !!i && i.paySource !== CUSTODY_SOURCE && i.amount > 0;
+  if (toTreasury && i) {
+    const row = { date: i.date, account: i.paySource, opening: 0, deposits: 0, withdrawals: i.amount, notes: desc, rented_advance_id: id };
+    const { error } = dep ? await supabase.from("treasury").update(row).eq("id", dep.id) : await supabase.from("treasury").insert(row);
+    if (error) throw error_(error, "تعذر ترحيل السلفة للخزينة");
+  } else if (dep) {
+    const { error } = await supabase.from("treasury").delete().eq("id", dep.id);
+    if (error) throw error_(error, "تعذر تحديث الخزينة");
+  }
+}
+
+export async function addRentedAdvance(i: RentedAdvanceInput) {
+  if (!i.owner.trim()) throw new Error("اختر السيارة المستأجرة / المالك");
+  if (!(i.amount > 0)) throw new Error("أدخل مبلغ السلفة");
+  if (!i.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل");
+  const { data, error } = await supabase.from("rented_advances").insert({ adv_date: i.date, owner_name: i.owner.trim(), bus_label: i.bus.trim() || null, amount: i.amount, pay_source: i.paySource, notes: i.notes.trim() || null }).select("id").single();
+  if (error) throw error_(error, "تعذر حفظ السلفة");
+  try {
+    await syncRentedAdvanceCash(data.id as string, i);
+  } catch (e) {
+    await supabase.from("rented_advances").delete().eq("id", data.id);
+    throw e;
+  }
+}
+export async function updateRentedAdvance(id: string, i: RentedAdvanceInput) {
+  if (!(i.amount > 0)) throw new Error("أدخل مبلغ السلفة");
+  if (!i.paySource) throw new Error("اختر طريقة الدفع / مصدر التمويل");
+  const { error } = await supabase.from("rented_advances").update({ adv_date: i.date, owner_name: i.owner.trim(), bus_label: i.bus.trim() || null, amount: i.amount, pay_source: i.paySource, notes: i.notes.trim() || null }).eq("id", id);
+  if (error) throw error_(error, "تعذر تعديل السلفة");
+  await syncRentedAdvanceCash(id, i);
+}
+export async function deleteRentedAdvance(id: string) {
+  const { data: adv } = await supabase.from("rented_advances").select("applied").eq("id", id).maybeSingle();
+  if (adv && Number(adv.applied) > 0) throw new Error("لا يمكن حذف سلفة خُصمت بالفعل من رحلات مسددة");
+  await syncRentedAdvanceCash(id, null);
+  const { error } = await supabase.from("rented_advances").delete().eq("id", id);
+  if (error) throw error_(error, "تعذر حذف السلفة");
+}
+
+/**
+ * يربط مصروفًا من العهدة/الخزينة (بند «السيارات المستأجرة») بكشف حساب السيارة المختارة كدفعة تحت الحساب.
+ * الحركة المالية نفسها يسجلها المصروف/العهدة، فلا تُكرَّر هنا.
+ */
+export async function syncRentedAdvanceLink(
+  source: { table: string; id: string },
+  active: { date: string; amount: number; vehicle: string; payFrom: string; notes: string } | null,
+) {
+  const { data: existing } = await supabase.from("rented_advances").select("id").eq("source_table", source.table).eq("source_id", source.id).maybeSingle();
+  if (!active || !(active.amount > 0) || !active.vehicle) {
+    if (existing) {
+      const { error } = await supabase.from("rented_advances").delete().eq("id", existing.id);
+      if (error) throw error_(error, "تعذر تحديث حساب السيارة المستأجرة");
+    }
+    return;
+  }
+  const { owner, bus } = parseRentedVehicleKey(active.vehicle);
+  const row = { adv_date: active.date, owner_name: owner, bus_label: bus || null, amount: active.amount, pay_source: active.payFrom || null, notes: active.notes || null, source_table: source.table, source_id: source.id };
+  const { error } = existing ? await supabase.from("rented_advances").update(row).eq("id", existing.id) : await supabase.from("rented_advances").insert(row);
+  if (error) throw error_(error, "تعذر ترحيل الدفعة إلى حساب السيارة المستأجرة");
+}
+
+export function computeRentedLedger(
+  ops: RentedOp[],
+  filter: { owner: string; bus: string; range: DateRange },
+  advances: RentedAdvance[] = [],
+) {
   const rows = ops
     .filter((o) => (!filter.owner || o.owner === filter.owner) && (!filter.bus || o.bus === filter.bus) && inDateRange(o.date, filter.range))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const advRows = advances
+    .filter((a) => (!filter.owner || a.owner === filter.owner) && (!filter.bus || !a.bus || a.bus === filter.bus) && inDateRange(a.date, filter.range))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const totalDue = rows.reduce((s, r) => s + r.fare, 0);
   const totalPaid = rows.filter((r) => r.paid).reduce((s, r) => s + r.fare, 0);
+  const totalAdvances = advRows.reduce((s, a) => s + a.amount, 0);
+  const openAdvances = advRows.reduce((s, a) => s + Math.max(0, a.amount - a.applied), 0);
   return {
     rows,
+    advRows,
     totalDue,
     totalPaid,
-    remaining: totalDue - totalPaid,
+    totalAdvances,
+    openAdvances,
+    /** المتبقي = المستحق غير المسدد − السلف التي لم تُخصم بعد */
+    remaining: totalDue - totalPaid - openAdvances,
     totalClientFare: rows.reduce((s, r) => s + r.clientFare, 0),
     totalNet: rows.reduce((s, r) => s + rentedNetProfit(r), 0),
     unpaidIds: rows.filter((r) => !r.paid).map((r) => r.id),
@@ -3840,7 +4034,8 @@ export async function fetchEmployeeAttendanceInPeriod(period: Period): Promise<E
 export const CUSTODY_PAYROLL_CATEGORY = "مرتبات / سلف";
 export const CUSTODY_MAINT_CATEGORY = "صيانة / ورش";
 export const CUSTODY_SUPPLIERS_CATEGORY = "موردين";
-export const CUSTODY_CATEGORIES = ["نثرية", "إداريات", "سولار", CUSTODY_MAINT_CATEGORY, CUSTODY_PAYROLL_CATEGORY, CUSTODY_SUPPLIERS_CATEGORY, "انتقالات", "أخرى"] as const;
+export const CUSTODY_RENTED_CATEGORY = "السيارات المستأجرة";
+export const CUSTODY_CATEGORIES = ["نثرية", "إداريات", "سولار", CUSTODY_MAINT_CATEGORY, CUSTODY_PAYROLL_CATEGORY, CUSTODY_SUPPLIERS_CATEGORY, CUSTODY_RENTED_CATEGORY, "انتقالات", "أخرى"] as const;
 
 export interface CustodyEntry {
   id: string;
@@ -3866,7 +4061,7 @@ export interface CustodyEntry {
 }
 
 export type CustodyInput = Omit<CustodyEntry, "id" | "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId" | "supplierId" | "supplierPaymentId"> &
-  Partial<Pick<CustodyEntry, "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId" | "supplierId">>;
+  Partial<Pick<CustodyEntry, "sourceTable" | "sourceId" | "subjectType" | "subjectId" | "busCode" | "maintenanceOrderId" | "supplierId">> & { rentedVehicle?: string };
 
 export type CustodyPreset = "day" | "week" | "month" | "custom";
 
@@ -3976,6 +4171,11 @@ async function syncSupplierPayment(custodyId: string, existingPaymentId: string,
   return data.id as string;
 }
 
+const isRentedPayout = (i: CustodyInput) => i.kind === "out" && i.category === CUSTODY_RENTED_CATEGORY && !!i.rentedVehicle;
+async function syncCustodyRentedAdvance(id: string, i: CustodyInput) {
+  await syncRentedAdvanceLink({ table: "custody_entries", id }, isRentedPayout(i) ? { date: i.date, amount: i.amount, vehicle: i.rentedVehicle ?? "", payFrom: CUSTODY_SOURCE, notes: i.description || i.notes } : null);
+}
+
 export async function addCustodyEntry(i: CustodyInput) {
   const id = crypto.randomUUID();
   const paymentId = await syncSupplierPayment(id, "", i);
@@ -3984,14 +4184,17 @@ export async function addCustodyEntry(i: CustodyInput) {
     if (paymentId) await supabase.from("supplier_payments").delete().eq("id", paymentId); // roll back the half-saved payout
     throw new Error(dbErrorMessage(error, "تعذر حفظ الحركة"));
   }
+  await syncCustodyRentedAdvance(id, i);
 }
 export async function updateCustodyEntry(id: string, i: CustodyInput) {
   const { data: prev } = await supabase.from("custody_entries").select("supplier_payment_id").eq("id", id).maybeSingle();
   const paymentId = await syncSupplierPayment(id, (prev?.supplier_payment_id as string | null) ?? "", i);
   const { error } = await supabase.from("custody_entries").update({ ...custodyRow(i), supplier_payment_id: paymentId || null }).eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر تعديل الحركة"));
+  await syncCustodyRentedAdvance(id, i);
 }
 export async function deleteCustodyEntry(id: string) {
+  await syncRentedAdvanceLink({ table: "custody_entries", id }, null);
   const { data: prev } = await supabase.from("custody_entries").select("supplier_payment_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("custody_entries").delete().eq("id", id);
   if (error) throw new Error(dbErrorMessage(error, "تعذر حذف الحركة"));

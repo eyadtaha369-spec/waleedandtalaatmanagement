@@ -396,13 +396,21 @@ describe("date ranges and rented ledger", () => {
     expect(inDateRange("2026-10-02", { from: "2026-10-01", to: "2026-10-01" })).toBe(false);
   });
   it("computeRentedLedger totals and filters", () => {
-    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", fare, clientFare: fare + 100, vehicleType: "ملاكي", routeName: "", missionId: "", paid, paidAt: "", notes: "" });
+    const mk = (id: string, date: string, bus: string, fare: number, paid: boolean) => ({ id, date, owner: "أ", bus, driver: "", clientId: "", destination: "", fare, clientFare: fare + 100, vehicleType: "ملاكي", routeName: "", missionId: "", paid, paidAt: "", notes: "", paySource: "", advanceApplied: 0 });
     const ops = [mk("1", "2026-10-01", "B1", 100, true), mk("2", "2026-10-05", "B1", 200, false), mk("3", "2026-09-05", "B2", 50, false)];
     const l = computeRentedLedger(ops, { owner: "أ", bus: "", range: { from: "2026-10-01", to: "2026-10-31" } });
     expect([l.totalDue, l.totalPaid, l.remaining, l.unpaidIds]).toEqual([300, 100, 200, ["2"]]);
     expect(l.totalClientFare).toBe(500);
     expect(l.totalNet).toBe(500 - 300);
     expect(computeRentedLedger(ops, { owner: "أ", bus: "B2", range: { from: "", to: "" } }).remaining).toBe(50);
+  });
+  it("computeRentedLedger deducts open advances from the remaining balance", () => {
+    const op = { id: "1", date: "2026-10-05", owner: "أ", bus: "B1", driver: "", clientId: "", destination: "", fare: 500, clientFare: 700, vehicleType: "ملاكي", routeName: "", missionId: "", paid: false, paidAt: "", notes: "", paySource: "", advanceApplied: 0 };
+    const adv = (id: string, bus: string, amount: number, applied: number) => ({ id, date: "2026-10-02", owner: "أ", bus, amount, applied, paySource: "", notes: "", sourceTable: "", sourceId: "" });
+    const l = computeRentedLedger([op], { owner: "أ", bus: "B1", range: { from: "2026-10-01", to: "2026-10-31" } }, [adv("a", "B1", 200, 0), adv("b", "", 100, 40), adv("c", "B2", 999, 0)]);
+    expect(l.totalAdvances).toBe(300);
+    expect(l.openAdvances).toBe(260);
+    expect(l.remaining).toBe(500 - 260);
   });
   it("applySupplierRange carries opening balance", () => {
     const e = (date: string, w: number, p: number) => ({ id: date, source: "payment" as const, date, kind: "سداد" as const, reference: "", description: "", withdrawals: w, payments: p, attachmentPath: null });

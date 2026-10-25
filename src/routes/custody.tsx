@@ -17,6 +17,11 @@ import {
   CUSTODY_MAINT_CATEGORY,
   CUSTODY_PAYROLL_CATEGORY,
   CUSTODY_SUPPLIERS_CATEGORY,
+  CUSTODY_RENTED_CATEGORY,
+  fetchRentedOps,
+  fetchRentedAdvances,
+  listRentedVehicles,
+  rentedVehicleKey,
   fetchSuppliers,
   fetchBuses,
   fetchDrivers,
@@ -39,7 +44,7 @@ export const Route = createFileRoute("/custody")({
 });
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
-const emptyForm = (kind: "in" | "out") => ({ id: "", kind, date: todayStr(), amount: "", person: "", category: kind === "out" ? "نثرية" : "", description: "", notes: "", personKey: "", busCode: "", orderId: "", supplierId: "" });
+const emptyForm = (kind: "in" | "out") => ({ id: "", kind, date: todayStr(), amount: "", person: "", category: kind === "out" ? "نثرية" : "", description: "", notes: "", personKey: "", busCode: "", orderId: "", supplierId: "", rentedVehicle: "" });
 const PRESETS: { key: CustodyPreset; label: string }[] = [
   { key: "day", label: "تقرير اليوم" },
   { key: "week", label: "تقرير الأسبوع الحالي" },
@@ -61,6 +66,8 @@ function CustodyPage() {
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [buses, setBuses] = useState<Bus[]>([]);
   const [supplierOpts, setSupplierOpts] = useState<PersonOption[]>([]);
+  const [rentedOpts, setRentedOpts] = useState<PersonOption[]>([]);
+  const [rentedByEntry, setRentedByEntry] = useState<Record<string, string>>({});
   const [orders, setOrders] = useState<MaintenanceOrder[]>([]);
 
   const load = async () => {
@@ -78,7 +85,9 @@ function CustodyPage() {
     load();
     (async () => {
       try {
-        const [d, e, b, o, sp] = await Promise.all([fetchDrivers(), fetchEmployees(), fetchBuses(), fetchMaintenanceOrders(), fetchSuppliers()]);
+        const [d, e, b, o, sp, rops, radv] = await Promise.all([fetchDrivers(), fetchEmployees(), fetchBuses(), fetchMaintenanceOrders(), fetchSuppliers(), fetchRentedOps(), fetchRentedAdvances()]);
+        setRentedOpts(listRentedVehicles(rops, radv).map((v) => ({ value: v.value, label: v.label, group: v.group })));
+        setRentedByEntry(Object.fromEntries(radv.filter((a) => a.sourceTable === "custody_entries").map((a) => [a.sourceId, rentedVehicleKey(a.owner, a.bus)])));
         setSupplierOpts(sp.map((x) => ({ value: x.id, label: x.name, group: "مورد" })));
         setPeople([
           ...d.map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })),
@@ -103,7 +112,7 @@ function CustodyPage() {
     setOpen(true);
   };
   const openEdit = (e: CustodyEntry) => {
-    setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), person: e.person, category: e.category, description: e.description, notes: e.notes, personKey: e.subjectType && e.subjectId ? `${e.subjectType}:${e.subjectId}` : "", busCode: e.busCode, orderId: e.maintenanceOrderId, supplierId: e.supplierId });
+    setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), person: e.person, category: e.category, description: e.description, notes: e.notes, personKey: e.subjectType && e.subjectId ? `${e.subjectType}:${e.subjectId}` : "", busCode: e.busCode, orderId: e.maintenanceOrderId, supplierId: e.supplierId, rentedVehicle: rentedByEntry[e.id] ?? "" });
     setFormError("");
     setOpen(true);
   };
@@ -121,6 +130,8 @@ function CustodyPage() {
     const isSupplier = form.kind === "out" && form.category === CUSTODY_SUPPLIERS_CATEGORY;
     const pickedSupplier = supplierOpts.find((p) => p.value === form.supplierId);
     if (isSupplier && !pickedSupplier) return setFormError("اختر المورد");
+    const isRented = form.kind === "out" && form.category === CUSTODY_RENTED_CATEGORY;
+    if (isRented && !form.rentedVehicle) return setFormError("اختر السيارة المستأجرة");
     setSaving(true);
     setFormError("");
     try {
@@ -138,6 +149,7 @@ function CustodyPage() {
         subjectId,
         busCode: isMaint ? form.busCode : "",
         maintenanceOrderId: isMaint && form.orderId ? form.orderId : "",
+        rentedVehicle: isRented ? form.rentedVehicle : "",
       };
       if (form.id) await updateCustodyEntry(form.id, input);
       else await addCustodyEntry(input);
@@ -331,6 +343,13 @@ function CustodyPage() {
                     <Label className="text-xs text-muted-foreground">اختيار المورد</Label>
                     <PersonPicker value={form.supplierId} options={supplierOpts} onChange={(v) => setForm({ ...form, supplierId: v })} placeholder="اختر المورد" />
                     <p className="text-xs text-muted-foreground">يُسجَّل المبلغ تلقائيًا كدفعة في كشف حساب المورد ويقلّل رصيده المستحق.</p>
+                  </div>
+                )}
+                {form.category === CUSTODY_RENTED_CATEGORY && (
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">اختيار السيارة المستأجرة</Label>
+                    <PersonPicker value={form.rentedVehicle} options={rentedOpts} onChange={(v) => setForm({ ...form, rentedVehicle: v })} placeholder="ابحث عن سيارة مستأجرة أو مالك" />
+                    <p className="text-xs text-muted-foreground">يُسجَّل المبلغ تلقائيًا كدفعة تحت الحساب في كشف حساب هذه السيارة ويُخصم من مستحقاتها.</p>
                   </div>
                 )}
                 {form.category === CUSTODY_MAINT_CATEGORY && (

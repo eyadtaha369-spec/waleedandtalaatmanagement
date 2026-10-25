@@ -4,6 +4,7 @@ import { CheckCheck, Pencil, Plus, Printer, Trash2 } from "lucide-react";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
 import { AccountPicker } from "@/components/account-picker";
+import { PersonPicker } from "@/components/person-picker";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { DataTable, PageHeader, Panel, StatCard, StatusPill, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,14 @@ import { Bus, Wallet, Receipt } from "lucide-react";
 import { currency } from "@/lib/fleet-data";
 import {
   addRentedOp,
+  addRentedAdvance,
+  updateRentedAdvance,
+  deleteRentedAdvance,
+  fetchRentedAdvances,
+  listRentedVehicles,
+  rentedVehicleKey,
+  parseRentedVehicleKey,
+  type RentedAdvance,
   computeRentedLedger,
   deleteRentedOp,
   fetchClients,
@@ -74,13 +83,18 @@ function RentedPage() {
   const [settleSource, setSettleSource] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<RentedOp | null>(null);
   const [working, setWorking] = useState(false);
+  const [advances, setAdvances] = useState<RentedAdvance[]>([]);
+  const [advOpen, setAdvOpen] = useState(false);
+  const [advForm, setAdvForm] = useState({ id: "", vehicle: "", amount: "", paySource: "", date: todayStr(), notes: "" });
+  const [advDelete, setAdvDelete] = useState<RentedAdvance | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [o, c, cr] = await Promise.all([fetchRentedOps(), fetchClients(), fetchAllClientRoutes()]);
+      const [o, c, cr, adv] = await Promise.all([fetchRentedOps(), fetchClients(), fetchAllClientRoutes(), fetchRentedAdvances()]);
       setOps(o);
+      setAdvances(adv);
       setClientRoutes(cr);
       setClients(c);
     } catch (e) {
@@ -93,6 +107,52 @@ function RentedPage() {
     loadAll();
   }, []);
 
+  const vehicleOpts = useMemo(() => listRentedVehicles(ops, advances).map((v) => ({ value: v.value, label: v.label, group: v.group })), [ops, advances]);
+  const openAdv = () => {
+    const bus = ledgerBus === "__all" ? "" : ledgerBus;
+    setAdvForm({ id: "", vehicle: ledgerOwner ? rentedVehicleKey(ledgerOwner, bus) : "", amount: "", paySource: "", date: todayStr(), notes: "" });
+    setAdvOpen(true);
+  };
+  const openEditAdv = (a: RentedAdvance) => {
+    setAdvForm({ id: a.id, vehicle: rentedVehicleKey(a.owner, a.bus), amount: String(a.amount), paySource: a.paySource, date: a.date, notes: a.notes });
+    setAdvOpen(true);
+  };
+  const submitAdv = async () => {
+    if (!advForm.vehicle) return setError("اختر السيارة المستأجرة / المالك");
+    if (!(Number(advForm.amount) > 0)) return setError("أدخل مبلغ السلفة");
+    if (!advForm.paySource) return setError("اختر طريقة الدفع / مصدر التمويل");
+    setSaving(true);
+    setError(null);
+    try {
+      const { owner, bus } = parseRentedVehicleKey(advForm.vehicle);
+      const input = { date: advForm.date, owner, bus, amount: Number(advForm.amount), paySource: advForm.paySource, notes: advForm.notes };
+      if (advForm.id) await updateRentedAdvance(advForm.id, input);
+      else await addRentedAdvance(input);
+      if (!ledgerOwner || owner === ledgerOwner) setLedgerBus(bus || "__all");
+      else { setLedgerOwner(owner); setLedgerBus(bus || "__all"); }
+      await loadAll();
+      setAdvOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر حفظ السلفة");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const doDeleteAdv = async () => {
+    if (!advDelete) return;
+    setWorking(true);
+    try {
+      await deleteRentedAdvance(advDelete.id);
+      await loadAll();
+      setAdvDelete(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر حذف السلفة");
+      setAdvDelete(null);
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const owners = useMemo(() => [...new Set(ops.map((o) => o.owner))].sort(), [ops]);
   const busesOfOwner = useMemo(() => [...new Set(ops.filter((o) => o.owner === ledgerOwner).map((o) => o.bus))].sort(), [ops, ledgerOwner]);
 
@@ -102,8 +162,8 @@ function RentedPage() {
 
   const logRows = ops.filter((o) => inDateRange(o.date, range));
   const ledger = useMemo(
-    () => computeRentedLedger(ops, { owner: ledgerOwner, bus: ledgerBus === "__all" ? "" : ledgerBus, range }),
-    [ops, ledgerOwner, ledgerBus, range],
+    () => computeRentedLedger(ops, { owner: ledgerOwner, bus: ledgerBus === "__all" ? "" : ledgerBus, range }, advances),
+    [ops, advances, ledgerOwner, ledgerBus, range],
   );
 
   const routesOfClient = useMemo(() => clientRoutes.filter((r) => r.clientId === form.clientId), [clientRoutes, form.clientId]);
@@ -142,10 +202,12 @@ function RentedPage() {
 
   const toSettle = selected.size ? ledger.unpaidIds.filter((id) => selected.has(id)) : ledger.unpaidIds;
   const settleAmount = ledger.rows.filter((r) => toSettle.includes(r.id)).reduce((s, r) => s + r.fare, 0);
+  const advDeduct = Math.min(settleAmount, ledger.openAdvances);
+  const cashDue = settleAmount - advDeduct;
   const doSettle = async () => {
     setWorking(true);
     try {
-      await settleRentedOps(toSettle, settleSource);
+      await settleRentedOps(toSettle, settleSource, ledger.advRows);
       setSelected(new Set());
       await loadAll();
       setConfirmSettle(false);
@@ -261,9 +323,10 @@ function RentedPage() {
           <p className="py-4 text-center text-sm text-muted-foreground">سجّل أول حركة لعربية مستأجرة لعرض الكشف.</p>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
               <StatCard label="إجمالي المستحق" value={currency(ledger.totalDue)} icon={Receipt} />
               <StatCard label="إجمالي المسدد" value={currency(ledger.totalPaid)} icon={Wallet} />
+              <StatCard label="سلف / دفعات تحت الحساب" value={currency(ledger.openAdvances)} icon={Wallet} />
               <StatCard label="المتبقي" value={currency(ledger.remaining)} icon={Bus} />
               <StatCard label="إيراد الشركات" value={currency(ledger.totalClientFare)} icon={Receipt} />
               <StatCard label="صافي الربح" value={currency(ledger.totalNet)} icon={Wallet} />
@@ -272,7 +335,10 @@ function RentedPage() {
               <Button className="bg-primary text-primary-foreground" disabled={toSettle.length === 0} onClick={() => setConfirmSettle(true)}>
                 <CheckCheck className="ml-2 h-4 w-4" /> تم السداد / تصفير الحساب
               </Button>
-              <Button variant="outline" className="border-border" disabled={ledger.rows.length === 0} onClick={printLedger}>
+              <Button variant="outline" className="border-primary/50 text-primary" onClick={openAdv}>
+                <Wallet className="ml-2 h-4 w-4" /> تسجيل سلفة / دفعة تحت الحساب 💵
+              </Button>
+              <Button variant="outline" className="border-border" disabled={ledger.rows.length === 0 && ledger.advRows.length === 0} onClick={printLedger}>
                 <Printer className="ml-2 h-4 w-4" /> طباعة كشف العربية / PDF
               </Button>
               <span className="text-xs text-muted-foreground">
@@ -312,11 +378,39 @@ function RentedPage() {
                 )}
               </DataTable>
             </div>
+            {ledger.advRows.length > 0 && (
+              <div className="mt-4">
+                <h4 className="mb-2 text-sm font-extrabold text-primary">السلف والدفعات تحت الحساب</h4>
+                <DataTable head={["التاريخ", "العربية", "المبلغ", "المخصوم", "المتبقي", "طريقة الدفع", "البيان", ""]}>
+                  {ledger.advRows.map((a) => (
+                    <tr key={a.id} className="transition-colors hover:bg-secondary/30">
+                      <td className="px-4 py-3">{a.date}</td>
+                      <td className="px-4 py-3">{a.bus || "كل العربيات"}</td>
+                      <td className="px-4 py-3 font-bold text-success">{currency(a.amount)}</td>
+                      <td className="px-4 py-3">{currency(a.applied)}</td>
+                      <td className="px-4 py-3 font-bold">{currency(a.amount - a.applied)}</td>
+                      <td className="px-4 py-3">{a.paySource || "—"}</td>
+                      <td className="px-4 py-3">{a.notes || "—"}</td>
+                      <td className="px-4 py-3">
+                        {a.sourceTable ? (
+                          <span className="text-xs text-muted-foreground">من {a.sourceTable === "custody_entries" ? "العهدة" : "المصروفات"}</span>
+                        ) : (
+                          <div className="no-print flex gap-1">
+                            <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditAdv(a)}><Pencil className="h-4 w-4" /></Button>
+                            <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setAdvDelete(a)}><Trash2 className="h-4 w-4" /></Button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </DataTable>
+              </div>
+            )}
           </>
         )}
       </Panel>
 
-      {ledgerOwner && ledger.rows.length > 0 && (
+      {ledgerOwner && (ledger.rows.length > 0 || ledger.advRows.length > 0) && (
         <div className="print-only" dir="rtl">
           <h1 style={{ textAlign: "center", fontSize: 22, fontWeight: 800 }}>وليد وطلعت لخدمات النقل والرحلات</h1>
           <h2 style={{ textAlign: "center", fontSize: 18, margin: "8px 0 16px" }}>كشف حساب عربية مستأجرة</h2>
@@ -340,8 +434,21 @@ function RentedPage() {
               <tr style={{ fontWeight: 800 }}><td colSpan={4} style={td}>الإجماليات</td><td style={td}>{currency(ledger.totalDue)}</td><td style={td}></td></tr>
             </tfoot>
           </table>
+          {ledger.advRows.length > 0 && (
+            <>
+              <h3 style={{ fontWeight: 700, margin: "14px 0 6px" }}>السلف والدفعات تحت الحساب</h3>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead><tr>{["التاريخ", "العربية", "المبلغ", "المخصوم", "طريقة الدفع", "البيان"].map((h) => <th key={h} style={{ ...td, background: "#eee" }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {ledger.advRows.map((a) => (
+                    <tr key={a.id}><td style={td}>{a.date}</td><td style={td}>{a.bus || "كل العربيات"}</td><td style={td}>{currency(a.amount)}</td><td style={td}>{currency(a.applied)}</td><td style={td}>{a.paySource || "—"}</td><td style={td}>{a.notes || "—"}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
           <p style={{ marginTop: 14, fontWeight: 700 }}>
-            إجمالي المستحق: {currency(ledger.totalDue)} &nbsp;|&nbsp; إجمالي المسدد: {currency(ledger.totalPaid)} &nbsp;|&nbsp; المتبقي: {currency(ledger.remaining)} &nbsp;|&nbsp; إيراد الشركات: {currency(ledger.totalClientFare)} &nbsp;|&nbsp; صافي الربح: {currency(ledger.totalNet)}
+            إجمالي المستحق: {currency(ledger.totalDue)} &nbsp;|&nbsp; إجمالي المسدد: {currency(ledger.totalPaid)} &nbsp;|&nbsp; سلف غير مخصومة: {currency(ledger.openAdvances)} &nbsp;|&nbsp; المتبقي: {currency(ledger.remaining)} &nbsp;|&nbsp; إيراد الشركات: {currency(ledger.totalClientFare)} &nbsp;|&nbsp; صافي الربح: {currency(ledger.totalNet)}
           </p>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 40 }}>
             <span>التاريخ: ____ / ____ / ________</span>
@@ -442,6 +549,52 @@ function RentedPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={advOpen} onOpenChange={setAdvOpen}>
+        <DialogContent className="glass max-h-[90vh] overflow-y-auto text-foreground sm:max-w-lg" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">{advForm.id ? "تعديل سلفة / دفعة تحت الحساب" : "تسجيل سلفة / دفعة تحت الحساب 💵"}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">تُخصم تلقائيًا من مستحقات السيارة عند «تم السداد»، وتظهر في كشف حسابها.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">اختيار السيارة المستأجرة / المالك</Label>
+              <PersonPicker value={advForm.vehicle} options={vehicleOpts} onChange={(v) => setAdvForm({ ...advForm, vehicle: v })} placeholder="ابحث عن سيارة أو مالك" />
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">المبلغ (ج.م)</Label>
+                <Input type="number" min="0" step="any" value={advForm.amount} onChange={(e) => setAdvForm({ ...advForm, amount: e.target.value })} className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">التاريخ</Label>
+                <Input type="date" value={advForm.date} onChange={(e) => setAdvForm({ ...advForm, date: e.target.value })} className="border-border bg-input/60" />
+              </div>
+            </div>
+            <PaymentSourceSelect value={advForm.paySource} onChange={(v) => setAdvForm({ ...advForm, paySource: v })} />
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">ملاحظات / البيان</Label>
+              <Input value={advForm.notes} onChange={(e) => setAdvForm({ ...advForm, notes: e.target.value })} className="border-border bg-input/60" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitAdv} disabled={saving}>{saving ? "جارِ الحفظ..." : "حفظ السلفة"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!advDelete} onOpenChange={(o) => !o && setAdvDelete(null)}>
+        <AlertDialogContent className="glass text-foreground" dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive">حذف السلفة</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">سيتم حذف سلفة {advDelete ? currency(advDelete.amount) : ""} وإلغاء أثرها على الخزينة / العهدة.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border">إلغاء</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={doDeleteAdv} disabled={working}>حذف</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={confirmSettle} onOpenChange={setConfirmSettle}>
         <AlertDialogContent className="glass text-foreground" dir="rtl">
           <AlertDialogHeader>
@@ -450,10 +603,16 @@ function RentedPage() {
               سيتم تحويل {toSettle.length} رحلة إلى «تم السداد» بقيمة {currency(settleAmount)}، ويصبح المتبقي على {ledgerOwner} صفرًا لهذه الفترة.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <PaymentSourceSelect value={settleSource} onChange={setSettleSource} />
+          {advDeduct > 0 && (
+            <div className="rounded-lg border border-border bg-secondary/30 p-3 text-sm">
+              <p>تُخصم سلف مسجلة: <b className="text-success">{currency(advDeduct)}</b></p>
+              <p>المتبقي للدفع نقدًا: <b className="text-warning">{currency(cashDue)}</b></p>
+            </div>
+          )}
+          {cashDue > 0 && <PaymentSourceSelect value={settleSource} onChange={setSettleSource} />}
           <AlertDialogFooter>
             <AlertDialogCancel className="border-border">رجوع</AlertDialogCancel>
-            <AlertDialogAction className="bg-primary text-primary-foreground" onClick={(e) => { if (!settleSource) { e.preventDefault(); setError("اختر طريقة الدفع / مصدر التمويل"); return; } doSettle(); }} disabled={working}>{working ? "جارِ التسجيل..." : "تأكيد السداد"}</AlertDialogAction>
+            <AlertDialogAction className="bg-primary text-primary-foreground" onClick={(e) => { if (cashDue > 0 && !settleSource) { e.preventDefault(); setError("اختر طريقة الدفع / مصدر التمويل"); return; } doSettle(); }} disabled={working}>{working ? "جارِ التسجيل..." : "تأكيد السداد"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

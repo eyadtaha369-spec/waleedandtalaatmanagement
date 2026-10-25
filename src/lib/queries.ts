@@ -4040,3 +4040,22 @@ export async function fetchCustodyAdvances(period: Period): Promise<{ type: "dri
   if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سلف العهدة"));
   return (data ?? []).map((r: any) => ({ type: r.subject_type, id: r.subject_id ?? "", name: r.person ?? "", amount: Number(r.amount ?? 0) }));
 }
+
+/** Names are compared trimmed — a trailing space in the drivers table must not hide a driver's shifts. */
+export const sameDriver = (a: string, b: string) => a.trim() === b.trim();
+
+/** Totals shown above one driver's filtered shifts: shifts, allowances (overtime), advances & penalties, karta. */
+export function computeDriverShiftSummary(shifts: DispatchShift[], attendance: DailyShift[]) {
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const advances = sum(shifts.map((o) => o.advance)) + sum(attendance.map((a) => a.dailyAdvance));
+  const penalties = sum(shifts.map((o) => o.penalty)) + sum(attendance.map((a) => a.penalty));
+  return {
+    shiftCount: shifts.length,
+    driverEarnings: sum(shifts.map((o) => o.driverValue)),
+    allowances: sum(shifts.map((o) => o.overtime)) + sum(attendance.map((a) => a.overtimeAllowance)),
+    advances,
+    penalties,
+    advancesAndPenalties: advances + penalties,
+    karta: sum(shifts.map((o) => o.karta)) + sum(attendance.map((a) => a.tollFee)),
+  };
+}

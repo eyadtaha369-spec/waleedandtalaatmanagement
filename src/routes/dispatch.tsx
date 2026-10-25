@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Banknote, Bus, Pencil, Plus, Printer, Trash2, Users } from "lucide-react";
+import { DateRangeFilter } from "@/components/date-range-filter";
+import { PersonPicker } from "@/components/person-picker";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { BusPicker } from "@/components/bus-picker";
 import type { Bus as BusRecord } from "@/lib/fleet-data";
@@ -34,6 +36,13 @@ import {
   fetchDrivers,
   fetchClients,
   fetchDispatchShiftsByDate,
+  fetchDispatchShifts,
+  fetchDailyShifts,
+  computeDriverShiftSummary,
+  rangeForPreset,
+  sameDriver,
+  type DailyShift,
+  type DateRange,
   addDispatchShifts,
   updateDispatchShift,
   deleteDispatchShift,
@@ -87,6 +96,31 @@ function DispatchPage() {
   const [rows, setRows] = useState<ShiftRow[]>([newRow()]);
   const [deleteTarget, setDeleteTarget] = useState<DispatchShift | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // ---- driver filter ----
+  const [driverFilter, setDriverFilter] = useState("");
+  const [driverRange, setDriverRange] = useState<DateRange>(rangeForPreset("current"));
+  const [driverShifts, setDriverShifts] = useState<DispatchShift[]>([]);
+  const [driverAttendance, setDriverAttendance] = useState<DailyShift[]>([]);
+  const [driverLoading, setDriverLoading] = useState(false);
+
+  const loadDriverView = async () => {
+    if (!driverFilter) return;
+    setDriverLoading(true);
+    try {
+      const [sh, att] = await Promise.all([fetchDispatchShifts(driverRange), fetchDailyShifts(driverRange)]);
+      setDriverShifts(sh.filter((o) => sameDriver(o.driver, driverFilter)).sort((a, b) => (a.date < b.date ? 1 : -1)));
+      setDriverAttendance(att.filter((a) => sameDriver(a.driver, driverFilter)).sort((a, b) => (a.date < b.date ? 1 : -1)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تحميل ورديات السائق");
+    } finally {
+      setDriverLoading(false);
+    }
+  };
+  useEffect(() => {
+    loadDriverView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverFilter, driverRange.from, driverRange.to]);
+  const driverSummary = computeDriverShiftSummary(driverShifts, driverAttendance);
 
   const loadAll = async () => {
     setLoading(true);
@@ -99,6 +133,7 @@ function DispatchPage() {
         fetchClients(),
       ]);
       setShifts(o);
+      if (driverFilter) void loadDriverView();
       setBuses(buses);
       setDriverNames(drivers.map((d) => d.name));
       setClientNames(clients.map((c) => c.name));
@@ -227,6 +262,17 @@ function DispatchPage() {
         <Label className="text-sm text-muted-foreground">تاريخ اليوم</Label>
         <Input value={date} onChange={(e) => e.target.value && setDate(e.target.value)} type="date" className="h-10 w-44 border-border bg-input/60" />
         <span className="text-sm text-primary">{dayName}</span>
+        <div className="flex w-64 items-center gap-1">
+          <PersonPicker
+            value={driverFilter}
+            options={driverNames.map((n) => ({ value: n, label: n.trim(), group: "سائق" }))}
+            onChange={setDriverFilter}
+            placeholder="بحث باسم السائق..."
+          />
+          {driverFilter && (
+            <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setDriverFilter("")}>مسح</Button>
+          )}
+        </div>
         <div className="mr-auto flex gap-2">
           <Button variant="outline" className="border-border" onClick={() => window.print()}>
             <Printer className="ml-2 h-4 w-4" /> طباعة التقرير اليومي
@@ -237,6 +283,70 @@ function DispatchPage() {
         </div>
       </div>
 
+      {driverFilter && (
+        <>
+          <div className="mb-4">
+            <DateRangeFilter value={driverRange} onChange={setDriverRange} />
+          </div>
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard label="إجمالي عدد الورديات" value={String(driverSummary.shiftCount)} hint={`مستحقات السواقة: ${currency(driverSummary.driverEarnings)}`} icon={Bus} />
+            <StatCard label="إجمالي بدلات الورديات" value={currency(driverSummary.allowances)} hint="الإضافي (الورديات + سجل الحضور)" icon={Banknote} />
+            <StatCard label="إجمالي السُلف والجزاءات" value={currency(driverSummary.advancesAndPenalties)} hint={`سُلف ${currency(driverSummary.advances)} — جزاءات ${currency(driverSummary.penalties)}`} icon={Banknote} />
+            <StatCard label="إجمالي الكرتة" value={currency(driverSummary.karta)} icon={Banknote} />
+          </div>
+          <Panel title={`ورديات السائق ${driverFilter.trim()}`}>
+            <DataTable head={["التاريخ", "الأتوبيس", "الشركة", "الخط", "الحضور", "قيمة السواقة", "الإضافي", "السلفة", "الجزاء", "الكرتة", "الإجراءات"]}>
+              {driverLoading ? (
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td></tr>
+              ) : driverShifts.length === 0 ? (
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">لا توجد ورديات لهذا السائق في الفترة.</td></tr>
+              ) : (
+                driverShifts.map((o) => (
+                  <tr key={o.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3">{o.date}</td>
+                    <td className="px-4 py-3 font-bold text-primary">{o.busPlate}</td>
+                    <td className="px-4 py-3">{o.client}</td>
+                    <td className="px-4 py-3 text-xs">{o.route || "—"}</td>
+                    <td className="px-4 py-3 text-xs">{o.attendanceStatus}</td>
+                    <td className="px-4 py-3 text-primary">{currency(o.driverValue)}</td>
+                    <td className="px-4 py-3">{currency(o.overtime)}</td>
+                    <td className="px-4 py-3">{currency(o.advance)}</td>
+                    <td className="px-4 py-3">{currency(o.penalty)}</td>
+                    <td className="px-4 py-3">{currency(o.karta)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEdit(o)}><Pencil className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(o)}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+          <Panel title="سجل الحضور والبدلات للسائق" className="mt-4">
+            <DataTable head={["التاريخ", "الحالة", "الإضافي", "السلفة", "الجزاء", "الكرتة"]}>
+              {driverAttendance.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">لا توجد سجلات حضور في الفترة.</td></tr>
+              ) : (
+                driverAttendance.map((a) => (
+                  <tr key={a.id} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3">{a.date}</td>
+                    <td className="px-4 py-3 text-xs">{a.status}</td>
+                    <td className="px-4 py-3">{currency(a.overtimeAllowance)}</td>
+                    <td className="px-4 py-3">{currency(a.dailyAdvance)}</td>
+                    <td className="px-4 py-3">{currency(a.penalty)}</td>
+                    <td className="px-4 py-3">{currency(a.tollFee)}</td>
+                  </tr>
+                ))
+              )}
+            </DataTable>
+          </Panel>
+        </>
+      )}
+
+      {!driverFilter && (
+        <>
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="عدد الورديات" value={String(report.shiftCount)} icon={Bus} />
         <StatCard label="إجمالي إيرادات الشركات" value={currency(report.totalCompanyRevenue)} icon={Banknote} />
@@ -323,6 +433,8 @@ function DispatchPage() {
           )}
         </DataTable>
       </Panel>
+        </>
+      )}
 
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent className="glass max-h-[90vh] overflow-y-auto text-foreground sm:max-w-3xl" dir="rtl">

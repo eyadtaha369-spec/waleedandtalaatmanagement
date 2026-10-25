@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -632,5 +632,14 @@ describe("role permissions", () => {
     expect(workshopRights("workshop_keeper")).toEqual({ fuel: false, inventory: false, print: false, payments: false });
     expect(workshopRights("storekeeper").fuel).toBe(false);
     expect(workshopRights("maintenance_manager").fuel).toBe(true);
+  });
+});
+
+describe("driver shift summary", () => {
+  it("totals shifts, allowances, advances+penalties and karta across both sources; names compare trimmed", () => {
+    const sh = [{ driverValue: 300, overtime: 50, advance: 100, penalty: 20, karta: 10 }, { driverValue: 200, overtime: 0, advance: 0, penalty: 5, karta: 15 }] as any;
+    const att = [{ overtimeAllowance: 40, dailyAdvance: 60, penalty: 0, tollFee: 5 }] as any;
+    expect(computeDriverShiftSummary(sh, att)).toEqual({ shiftCount: 2, driverEarnings: 500, allowances: 90, advances: 160, penalties: 25, advancesAndPenalties: 185, karta: 30 });
+    expect(sameDriver("علي حماده علي ", "علي حماده علي")).toBe(true);
   });
 });

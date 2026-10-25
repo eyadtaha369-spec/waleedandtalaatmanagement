@@ -7,6 +7,9 @@ import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { BusPicker } from "@/components/bus-picker";
 import type { Bus as BusRecord } from "@/lib/fleet-data";
 import { AppShell } from "@/components/app-shell";
+import { RentedSection } from "@/components/rented-section";
+import { TripsSection } from "@/components/trips-section";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable, PageHeader, Panel, StatCard, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,7 +83,7 @@ interface ShiftRow {
 let rowKey = 0;
 const newRow = (): ShiftRow => ({ key: ++rowKey, busCode: "", driverName: "", clientName: "", route: "", busValue: "", driverValue: "", paySource: "", attendanceStatus: "حاضر", overtime: "", advance: "", penalty: "", karta: "" });
 
-function DispatchPage() {
+function DispatchShiftsSection() {
   const [date, setDate] = useState(today());
   const [shifts, setShifts] = useState<DispatchShift[]>([]);
   const [buses, setBuses] = useState<BusRecord[]>([]);
@@ -245,8 +248,7 @@ function DispatchPage() {
   const dayName = new Date(date).toLocaleDateString("ar-EG", { weekday: "long" });
 
   return (
-    <AppShell>
-      <PageHeader title="الحركة والورديات اليومية" subtitle="تسجيل ورديات الأتوبيسات: قيمة الأتوبيس تُحتسب للشركة، وقيمة السواقة تُحتسب لمرتب السائق" />
+    <>
       <div className="no-print mb-4 flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
         <span>أجور السواقة المسجلة هنا تُرحَّل تلقائيًا إلى كشف المرتبات.</span>
         <Link to="/payroll" className="rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">فتح صفحة المرتبات والأجور ←</Link>
@@ -554,6 +556,32 @@ function DispatchPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+const TABS = [
+  { key: "shifts", label: "الورديات اليومية للحافلات" },
+  { key: "rented", label: "حركة السيارات المستأجرة" },
+  { key: "trips", label: "إدارة الرحلات والتنبيهات" },
+] as const;
+
+function DispatchPage() {
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("shifts");
+  return (
+    <AppShell>
+      <PageHeader title="الحركة والورديات" subtitle="الورديات اليومية، حركة السيارات المستأجرة، وإدارة الرحلات والتنبيهات في مكان واحد" />
+      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} dir="rtl">
+        <TabsList className="no-print mb-4 flex h-auto w-full flex-wrap justify-start gap-1 border border-primary/30 bg-secondary/30 p-1">
+          {TABS.map((t) => (
+            <TabsTrigger key={t.key} value={t.key} className="flex-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">{t.label}</TabsTrigger>
+          ))}
+        </TabsList>
+        {/* Only the active tab is mounted so print views never overlap. */}
+        <TabsContent value="shifts">{tab === "shifts" && <DispatchShiftsSection />}</TabsContent>
+        <TabsContent value="rented">{tab === "rented" && <RentedSection />}</TabsContent>
+        <TabsContent value="trips">{tab === "trips" && <TripsSection />}</TabsContent>
+      </Tabs>
     </AppShell>
   );
 }

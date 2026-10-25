@@ -57,6 +57,7 @@ import {
   type EmployeePayrollRow,
   type DailyShift,
   type DriverPayrollRow,
+  sameDriver,
 } from "@/lib/queries";
 
 export const Route = createFileRoute("/payroll")({
@@ -480,8 +481,8 @@ function PayrollPage() {
 
       {printing && (() => {
         const f = finalOf(printing);
-        const myShifts = shifts.filter((x) => x.driver === printing.name);
-        const myDispatch = dispatchShifts.filter((x) => x.driver === printing.name);
+        const myShifts = shifts.filter((x) => sameDriver(x.driver, printing.name));
+        const myDispatch = dispatchShifts.filter((x) => sameDriver(x.driver, printing.name));
         const td = { border: "1px solid #000", padding: 6 } as const;
         return (
           <div className="print-only" dir="rtl">
@@ -490,41 +491,64 @@ function PayrollPage() {
             <p style={{ marginBottom: 12 }}>
               <b>الاسم:</b> {printing.name} &nbsp;&nbsp; <b>الشهر:</b> {periodLabel(range)} &nbsp;&nbsp; <b>تاريخ الطباعة:</b> {new Date().toISOString().slice(0, 10)}
             </p>
-            {printing.type === "driver" && (
-              <>
-                <h3 style={{ fontWeight: 700, margin: "8px 0" }}>بيان الورديات</h3>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 12 }}>
-                  <thead>
-                    <tr>{["التاريخ", "الأتوبيس", "الخط / الوردية", "إضافي / قيمة السواقة"].map((h) => <th key={h} style={{ ...td, background: "#eee" }}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {myShifts.length + myDispatch.length === 0 && <tr><td colSpan={4} style={td}>لا توجد ورديات مسجلة</td></tr>}
-                    {myDispatch.map((x) => (
-                      <tr key={`d${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.busPlate}</td><td style={td}>{x.route || x.client}</td><td style={td}>{currency(x.driverValue)}</td></tr>
-                    ))}
-                    {myShifts.map((x) => (
-                      <tr key={`s${x.id}`}><td style={td}>{x.date}</td><td style={td}>{x.busPlate}</td><td style={td}>{x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : x.route}</td><td style={td}>{currency(x.overtimeAllowance)}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
+            {printing.type === "driver" ? (() => {
+              const rows = [
+                ...myDispatch.map((x) => ({ k: `d${x.id}`, date: x.date, route: [x.route || x.client, x.missionId ? "(مأمورية)" : ""].filter(Boolean).join(" "), status: x.attendanceStatus || "حاضر", base: x.driverValue, ot: x.overtime, ded: x.advance + x.penalty + x.karta })),
+                ...myShifts.map((x) => ({ k: `s${x.id}`, date: x.date, route: x.route || (x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : "—"), status: x.status || "—", base: 0, ot: x.overtimeAllowance, ded: x.dailyAdvance + x.penalty + x.tollFee })),
+              ].sort((m, n) => m.date.localeCompare(n.date));
+              const otTotal = rows.reduce((t, r) => t + r.ot, 0);
+              const rowsDed = rows.reduce((t, r) => t + r.ded, 0);
+              const extraDed = Math.max(0, f.deductions - rowsDed);
+              const allowTotal = f.baseSalary + (f.shiftAllowances - otTotal) + f.tripFees + f.bonus;
+              const th = { ...td, background: "#eee", textAlign: "center" } as const;
+              const sum = [
+                ["إجمالي بدلات الورديات والرواتب", allowTotal],
+                ["إجمالي الإضافي", otTotal],
+                ["إجمالي السُلف والخصومات", f.deductions],
+              ] as const;
+              return (
+                <>
+                  <h3 style={{ fontWeight: 700, margin: "8px 0" }}>كشف مرتب مفصل — الورديات والمشاوير</h3>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}>
+                    <thead>
+                      <tr>{["تاريخ الوردية", "خط السير / المشوار", "حالة الحضور", "المبلغ الأساسي للوردية", "الإضافي المسجل", "السُلف والجزاءات والكرتات"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {rows.length === 0 && <tr><td colSpan={6} style={{ ...td, textAlign: "center" }}>لا توجد ورديات مسجلة</td></tr>}
+                      {rows.map((r) => (
+                        <tr key={r.k}><td style={td}>{r.date}</td><td style={td}>{r.route}</td><td style={td}>{r.status}</td><td style={td}>{currency(r.base)}</td><td style={td}>{currency(r.ot)}</td><td style={td}>{currency(r.ded)}</td></tr>
+                      ))}
+                      {extraDed > 0 && <tr><td colSpan={5} style={td}>سُلف وخصومات أخرى (عهدة الخزينة / تسويات الشهر)</td><td style={td}>{currency(extraDed)}</td></tr>}
+                      <tr style={{ fontWeight: 800, background: "#f6f6f6" }}><td colSpan={3} style={td}>الإجمالي</td><td style={td}>{currency(rows.reduce((t, r) => t + r.base, 0))}</td><td style={td}>{currency(otTotal)}</td><td style={td}>{currency(rowsDed + extraDed)}</td></tr>
+                    </tbody>
+                  </table>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                    <tbody>
+                      <tr><td style={td}>المرتب الأساسي</td><td style={td}>{currency(f.baseSalary)}</td></tr>
+                      {sum.map(([l, v]) => <tr key={l}><td style={td}>{l}</td><td style={td}>{currency(v)}</td></tr>)}
+                      <tr style={{ fontWeight: 800, background: "#eee", fontSize: 16 }}><td style={td}>صافي المرتب النهائي المستحق للدفع</td><td style={td}>{currency(f.net)}</td></tr>
+                    </tbody>
+                  </table>
+                </>
+              );
+            })() : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                <tbody>
+                  {[
+                    ["المرتب الأساسي", f.baseSalary],
+                    ["إضافي الورديات", f.shiftAllowances],
+                    ["أجر الرحلات", f.tripFees],
+                    ["مكافآت", f.bonus],
+                    ["السُلف", f.advances],
+                    ["الخصومات (الجزاءات)", f.penalties],
+                    ["الكرتات", f.tolls],
+                  ].map(([label, value]) => (
+                    <tr key={label as string}><td style={td}>{label}</td><td style={td}>{currency(value as number)}</td></tr>
+                  ))}
+                  <tr style={{ fontWeight: 800 }}><td style={td}>الإجمالي النهائي (الصافي المستحق)</td><td style={td}>{currency(f.net)}</td></tr>
+                </tbody>
+              </table>
             )}
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <tbody>
-                {[
-                  ["المرتب الأساسي", f.baseSalary],
-                  ["إضافي الورديات", f.shiftAllowances],
-                  ["أجر الرحلات", f.tripFees],
-                  ["مكافآت", f.bonus],
-                  ["السُلف", f.advances],
-                  ["الخصومات (الجزاءات)", f.penalties],
-                  ["الكرتات", f.tolls],
-                ].map(([label, value]) => (
-                  <tr key={label as string}><td style={td}>{label}</td><td style={td}>{currency(value as number)}</td></tr>
-                ))}
-                <tr style={{ fontWeight: 800 }}><td style={td}>الإجمالي النهائي (الصافي المستحق)</td><td style={td}>{currency(f.net)}</td></tr>
-              </tbody>
-            </table>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 48 }}>
               <span>التاريخ: ____ / ____ / ________</span>
               <span>توقيع المستلم: ______________________</span>

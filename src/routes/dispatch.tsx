@@ -38,8 +38,7 @@ import {
   fetchBuses,
   fetchDrivers,
   licenseIssues,
-  LICENSE_BLOCK_MESSAGE,
-  fetchBuses as fetchBusesFresh,
+  LICENSE_WARNING_MESSAGE,
   fetchClients,
   fetchDispatchShiftsByDate,
   fetchDispatchShifts,
@@ -92,7 +91,6 @@ function DispatchShiftsSection() {
   const [buses, setBuses] = useState<BusRecord[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
   const [driverExpiry, setDriverExpiry] = useState<Record<string, string>>({});
-  const [blocked, setBlocked] = useState(false);
   const [clientNames, setClientNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,21 +206,6 @@ function DispatchShiftsSection() {
       setError("اختر طريقة الدفع / مصدر التمويل للسلفة والكرتة");
       return;
     }
-    // فحص فوري من بيانات السائقين والعربيات الحالية قبل الحفظ
-    const [freshDrivers, freshBuses] = await Promise.all([fetchDrivers(), fetchBusesFresh()]);
-    const expiry = Object.fromEntries(freshDrivers.map((d) => [d.name, d.licenseExpiry]));
-    setDriverExpiry(expiry);
-    setBuses(freshBuses);
-    const bad = rows.some((r) => {
-      const is = licenseIssues(expiry[r.driverName], freshBuses.find((b) => b.code === r.busCode));
-      return is.driver || is.bus;
-    });
-    if (bad) {
-      setBlocked(true);
-      setError(LICENSE_BLOCK_MESSAGE);
-      return;
-    }
-    setBlocked(false);
     setSaving(true);
     setError(null);
     try {
@@ -477,8 +460,8 @@ function DispatchShiftsSection() {
             </div>
 
             {anyExpired && (
-              <p role="alert" className="rounded-xl border-2 border-red-500 bg-red-500/10 p-3 text-sm font-extrabold text-red-500">
-                ⛔ {LICENSE_BLOCK_MESSAGE}
+              <p role="alert" className="rounded-xl border-2 border-orange-500 bg-orange-500/15 p-3 text-sm font-extrabold text-orange-500">
+                ⚠️ {LICENSE_WARNING_MESSAGE}
               </p>
             )}
             {rows.map((r, idx) => (
@@ -494,18 +477,18 @@ function DispatchShiftsSection() {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الأتوبيس</Label>
-                    <div className={issue(r).bus ? "rounded-md ring-2 ring-red-500" : ""}>
+                    <div className={issue(r).bus ? "rounded-md ring-2 ring-orange-500" : ""}>
                       <BusPicker value={r.busCode} buses={buses} onChange={(v) => updateRow(r.key, { busCode: v })} />
                     </div>
-                    {issue(r).bus && <p className="text-xs font-bold text-red-500">رخصة / تأمين الأتوبيس منتهي</p>}
+                    {issue(r).bus && <p className="text-xs font-bold text-orange-500">رخصة / تأمين الأتوبيس منتهي</p>}
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">السائق</Label>
                     <Select value={r.driverName} onValueChange={(v) => updateRow(r.key, { driverName: v })}>
-                      <SelectTrigger className={`border-border bg-input/60 ${issue(r).driver ? "border-red-500 ring-2 ring-red-500" : ""}`}><SelectValue placeholder="اختر" /></SelectTrigger>
+                      <SelectTrigger className={`border-border bg-input/60 ${issue(r).driver ? "border-orange-500 ring-2 ring-orange-500" : ""}`}><SelectValue placeholder="اختر" /></SelectTrigger>
                       <SelectContent>{driverNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
                     </Select>
-                    {issue(r).driver && <p className="text-xs font-bold text-red-500">رخصة السائق منتهية</p>}
+                    {issue(r).driver && <p className="text-xs font-bold text-orange-500">رخصة السائق منتهية</p>}
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الشركة</Label>

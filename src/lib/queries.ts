@@ -4383,12 +4383,15 @@ export interface MonthClosing {
   closedAt: string;
   closedBy: string;
   snapshot: MonthClosingSnapshot;
+  /** true = الشهر مقفول؛ false = مفتوح للتعديل بواسطة الأدمن */
+  locked: boolean;
+  unlockedBy: string;
 }
 
 export async function fetchMonthClosings(): Promise<MonthClosing[]> {
   const { data, error } = await supabase.from("month_closings").select("*").order("month", { ascending: false });
   if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سجل الإغلاق"));
-  return (data ?? []).map((r: any) => ({ id: r.id, month: r.month, closedAt: r.closed_at, closedBy: r.closed_by ?? "", snapshot: r.snapshot as MonthClosingSnapshot }));
+  return (data ?? []).map((r: any) => ({ id: r.id, month: r.month, closedAt: r.closed_at, closedBy: r.closed_by ?? "", snapshot: r.snapshot as MonthClosingSnapshot, locked: r.locked !== false, unlockedBy: r.unlocked_by ?? "" }));
 }
 
 /** آخر رصيد لكل حساب خزينة حتى (ولا يشمل) تاريخ `before`. */
@@ -4409,8 +4412,9 @@ export function computeTreasuryClosings(rows: { date: string; account: string; o
  */
 export async function closeFinancialMonth(month: string, closedBy: string): Promise<MonthClosing> {
   if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("اختر الشهر");
-  const { data: already } = await supabase.from("month_closings").select("id").eq("month", month).maybeSingle();
-  if (already) throw new Error("هذا الشهر مغلق بالفعل");
+  const { data: already } = await supabase.from("month_closings").select("id, locked").eq("month", month).maybeSingle();
+  if (already && already.locked !== false) throw new Error("هذا الشهر مغلق بالفعل");
+  const relock = !!already; // شهر فُتح للتعديل ثم يُعاد قفله بلقطة جديدة
   const next = nextMonthPrefix(month);
   const nextStart = `${next}-01`;
   const period: Period = month;
@@ -4465,9 +4469,11 @@ export async function closeFinancialMonth(month: string, closedBy: string): Prom
   }
 
   const who = closedBy || (await supabase.auth.getUser()).data.user?.email || "";
-  const { data, error } = await supabase.from("month_closings").insert({ month, closed_by: who || null, snapshot }).select("*").single();
+  const { data, error } = relock
+    ? await supabase.from("month_closings").update({ snapshot, locked: true, closed_at: new Date().toISOString(), closed_by: who || null }).eq("month", month).select("*").single()
+    : await supabase.from("month_closings").insert({ month, closed_by: who || null, snapshot, locked: true }).select("*").single();
   if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ الإغلاق"));
-  return { id: data.id, month: data.month, closedAt: data.closed_at, closedBy: data.closed_by ?? "", snapshot };
+  return { id: data.id, month: data.month, closedAt: data.closed_at, closedBy: data.closed_by ?? "", snapshot, locked: true, unlockedBy: "" };
 }
 
 // ---- مؤشر كفاءة السولار لكل عربية (من سجلات السولار وقراءات العداد) ----
@@ -4504,9 +4510,9 @@ export function computeFleetFuelRows(
     .sort((a, b) => (a.status === "waste" ? 0 : 1) - (b.status === "waste" ? 0 : 1) || b.wastePct - a.wastePct);
 }
 
-// ---- حظر تشغيل الرخص المنتهية ----
+// ---- تنبيه الرخص المنتهية (تنبيه فقط — لا يمنع الحفظ) ----
 
-export const LICENSE_BLOCK_MESSAGE = "عذراً، لا يمكن تسجيل الوردية؛ رخصة السائق أو الأتوبيس منتهية الصلاحية ويجب التجديد أولاً!";
+export const LICENSE_WARNING_MESSAGE = "تنبيه: رخصة السائق أو الأتوبيس منتهية الصلاحية (يرجى سرعة التجديد)";
 
 /** تاريخ صالح بصيغة YYYY-MM-DD وأقدم من اليوم = منتهي (غير المسجَّل «—» لا يحجب). */
 export const isExpiredDate = (d: string | null | undefined, today = new Date().toISOString().slice(0, 10)) => !!d && /^\d{4}-\d{2}-\d{2}/.test(d) && d.slice(0, 10) < today;
@@ -4542,4 +4548,11 @@ export function computeFuelAlerts(rows: FleetFuelRow[], margin = 0.3): FuelAlert
     }
   }
   return out.sort((a, b) => b.wastePct - a.wastePct);
+}
+
+/** فتح شهر مغلق للتعديل (للأدمن فقط — يفرضه تريجر قاعدة البيانات أيضًا). يُعاد قفله بـ«إغلاق الشهر المالي». */
+export async function unlockFinancialMonth(month: string) {
+  const who = (await supabase.auth.getUser()).data.user?.email || "";
+  const { error } = await supabase.from("month_closings").update({ locked: false, unlocked_at: new Date().toISOString(), unlocked_by: who || null }).eq("month", month);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر فتح الشهر للتعديل"));
 }

@@ -254,7 +254,9 @@ function ClientsPage() {
                 <StatCard label="عدد الأتوبيسات المشتغلة" value={`${summary.totalBusesDeployed} أتوبيس`} icon={Bus} />
                 <StatCard label="إجمالي المطالبة المستحقة" value={currency(summary.totalDue)} icon={FileText} />
                 <StatCard label="رصيد أول المدة (مرحّل)" value={currency(balance.opening)} icon={FileText} />
-                <StatCard label="المتبقي آخر الشهر (يُرحَّل للشهر التالي)" value={currency(balance.closing)} icon={FileText} />
+                <StatCard label="إجمالي المستحق (أول المدة + المطالبات)" value={currency(balance.opening + balance.monthDues + balance.debits)} icon={FileText} />
+                <StatCard label="المحصَّل (كلي / جزئي)" value={currency(balance.credits)} icon={FileText} />
+                <StatCard label="المتبقي = المستحق − المحصَّل (يُرحَّل للشهر التالي)" value={currency(balance.closing)} icon={FileText} />
               </div>
 
               <Panel title={`كشف حساب: ${selectedClient}`} className="mt-4">
@@ -394,6 +396,11 @@ function ClientsPage() {
                 <Label className="text-xs text-muted-foreground">المبلغ (ج.م)</Label>
                 <Input type="number" min="0" step="any" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="border-border bg-input/60" />
               </div>
+            </div>
+            <div className="rounded-lg border border-border bg-secondary/30 p-3 text-sm">
+              <p>المتبقي الحالي على الشركة: <b>{currency(balance.closing)}</b></p>
+              <p>المتبقي بعد هذه الحركة: <b className="text-primary">{currency(balance.closing + (payForm.kind === "in" ? -1 : 1) * (Number(payForm.amount) || 0))}</b></p>
+              <p className="mt-1 text-xs text-muted-foreground">يُرحَّل للخزينة والكشف المبلغ المدخل فقط (تحصيل جزئي مقبول)، والباقي يظل مستحقًا.</p>
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">ملاحظات</Label>

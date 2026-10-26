@@ -4262,3 +4262,162 @@ export function computeDriverShiftSummary(shifts: DispatchShift[], attendance: D
     karta: sum(shifts.map((o) => o.karta)) + sum(attendance.map((a) => a.tollFee)),
   };
 }
+
+// ---- تحصيل / صرف من كشف حساب الشركة → الخزينة ----
+
+/**
+ * يسجّل حركة في كشف حساب الشركة مباشرة في دفتر الخزينة (حساب الشركة)؛
+ * التحصيل إيداع (دائن) والصرف للشركة سحب (مدين)، وقيد الكشف يُنشأ تلقائيًا بتريجر قاعدة البيانات.
+ */
+export async function addClientTreasuryEntry(input: { clientName: string; date: string; kind: "in" | "out"; amount: number; notes: string }) {
+  if (!(input.amount > 0)) throw new Error("أدخل مبلغًا أكبر من صفر");
+  const { data: client, error: cErr } = await supabase.from("clients").select("id").eq("client_name", input.clientName).maybeSingle();
+  if (cErr || !client) throw new Error(dbErrorMessage(cErr, "تعذر العثور على الشركة"));
+  const note = input.notes.trim() || (input.kind === "in" ? "تحصيل من كشف حساب الشركة" : "صرف للشركة من كشف الحساب");
+  await addTreasuryEntry({
+    date: input.date,
+    account: input.clientName,
+    clientId: client.id as string,
+    opening: 0,
+    deposits: input.kind === "in" ? input.amount : 0,
+    withdrawals: input.kind === "out" ? input.amount : 0,
+    notes: note,
+  });
+}
+
+// ---- الإغلاق المالي الشهري ----
+
+export interface MonthClosingSnapshot {
+  treasury: { account: string; closing: number }[];
+  treasuryTotal: number;
+  custodyClosing: number;
+  clientsReceivable: { client: string; closing: number }[];
+  clientsTotal: number;
+  payrollNet: number;
+}
+export interface MonthClosing {
+  id: string;
+  month: string;
+  closedAt: string;
+  closedBy: string;
+  snapshot: MonthClosingSnapshot;
+}
+
+export async function fetchMonthClosings(): Promise<MonthClosing[]> {
+  const { data, error } = await supabase.from("month_closings").select("*").order("month", { ascending: false });
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سجل الإغلاق"));
+  return (data ?? []).map((r: any) => ({ id: r.id, month: r.month, closedAt: r.closed_at, closedBy: r.closed_by ?? "", snapshot: r.snapshot as MonthClosingSnapshot }));
+}
+
+/** آخر رصيد لكل حساب خزينة حتى (ولا يشمل) تاريخ `before`. */
+export function computeTreasuryClosings(rows: { date: string; account: string; opening: number; deposits: number; withdrawals: number; createdAt?: string }[], before: string) {
+  const last = new Map<string, { date: string; createdAt: string; closing: number }>();
+  for (const r of rows) {
+    if (r.date >= before) continue;
+    const cur = last.get(r.account);
+    const at = r.createdAt ?? "";
+    if (!cur || r.date > cur.date || (r.date === cur.date && at >= cur.createdAt)) last.set(r.account, { date: r.date, createdAt: at, closing: r.opening + r.deposits - r.withdrawals });
+  }
+  return [...last.entries()].map(([account, v]) => ({ account, closing: v.closing })).sort((a, b) => a.account.localeCompare(b.account, "ar"));
+}
+
+/**
+ * «إغلاق الشهر المالي»: يحسب صافي الخزينة والعهدة والشركات والمرتبات، يرحّل رصيد كل حساب خزينة
+ * كرصيد افتتاحي للشهر الجديد، ويحفظ لقطة الإغلاق. العهدة وأرصدة الشركات تُرحَّل تراكميًا بالحساب.
+ */
+export async function closeFinancialMonth(month: string, closedBy: string): Promise<MonthClosing> {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("اختر الشهر");
+  const { data: already } = await supabase.from("month_closings").select("id").eq("month", month).maybeSingle();
+  if (already) throw new Error("هذا الشهر مغلق بالفعل");
+  const next = nextMonthPrefix(month);
+  const nextStart = `${next}-01`;
+  const period: Period = month;
+
+  const [{ data: tRows, error: tErr }, custody, { data: shifts, error: sErr }, { data: ledger, error: lErr }, { data: clients }, drivers, employees, adj] = await Promise.all([
+    pageAll((f, t) => supabase.from("treasury").select("date, account, opening, deposits, withdrawals, created_at").lt("date", nextStart).order("id").range(f, t)),
+    fetchCustody(),
+    pageAll((f, t) => supabase.from("dispatch_shifts").select("client_id, bus_value").lt("op_date", nextStart).order("id").range(f, t)),
+    pageAll((f, t) => supabase.from("client_ledger_entries").select("client_id, debit, credit").lt("entry_date", nextStart).order("id").range(f, t)),
+    supabase.from("clients").select("id, client_name"),
+    fetchDriverPayroll(period),
+    fetchEmployeePayroll(period),
+    fetchPayrollAdjustments(period),
+  ]);
+  if (tErr) throw new Error(dbErrorMessage(tErr, "تعذر قراءة الخزينة"));
+  if (sErr) throw new Error(dbErrorMessage(sErr, "تعذر قراءة ورديات الشركات"));
+  if (lErr) throw new Error(dbErrorMessage(lErr, "تعذر قراءة قيود الشركات"));
+
+  const treasury = computeTreasuryClosings(
+    (tRows ?? []).map((r: any) => ({ date: r.date, account: r.account, opening: Number(r.opening ?? 0), deposits: Number(r.deposits ?? 0), withdrawals: Number(r.withdrawals ?? 0), createdAt: r.created_at })),
+    nextStart,
+  );
+
+  const names = new Map((clients ?? []).map((c: any) => [c.id as string, c.client_name as string]));
+  const recv = new Map<string, number>();
+  for (const s of shifts ?? []) if ((s as any).client_id) recv.set((s as any).client_id, (recv.get((s as any).client_id) ?? 0) + Number((s as any).bus_value ?? 0));
+  for (const e of ledger ?? []) recv.set((e as any).client_id, (recv.get((e as any).client_id) ?? 0) + Number((e as any).debit ?? 0) - Number((e as any).credit ?? 0));
+  const clientsReceivable = [...recv.entries()].filter(([, v]) => Math.abs(v) > 0.001).map(([id, closing]) => ({ client: names.get(id) ?? id, closing })).sort((a, b) => b.closing - a.closing);
+
+  let adjTotal = 0;
+  for (const a of adj.values()) adjTotal += a.bonus - a.advances - a.penalties - a.tolls;
+  const payrollNet = drivers.reduce((s, d) => s + d.netSalary, 0) + employees.reduce((s, e) => s + e.netSalary, 0) + adjTotal;
+
+  const snapshot: MonthClosingSnapshot = {
+    treasury,
+    treasuryTotal: treasury.reduce((s, t) => s + t.closing, 0),
+    custodyClosing: computeCustody(custody, { from: "", to: `${month}-31` }).closing,
+    clientsReceivable,
+    clientsTotal: clientsReceivable.reduce((s, c) => s + c.closing, 0),
+    payrollNet,
+  };
+
+  // ترحيل الأرصدة الافتتاحية للخزينة (حركة صفرية بتاريخ أول الشهر الجديد)
+  const { data: existing } = await supabase.from("treasury").select("account").eq("is_rollover", true).eq("date", nextStart);
+  const have = new Set((existing ?? []).map((r: any) => r.account as string));
+  const toInsert = treasury
+    .filter((t) => !have.has(t.account))
+    .map((t) => ({ date: nextStart, account: t.account, opening: t.closing, deposits: 0, withdrawals: 0, is_rollover: true, notes: `رصيد افتتاحي — ترحيل من إغلاق ${month}` }));
+  if (toInsert.length) {
+    const { error } = await supabase.from("treasury").insert(toInsert);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر ترحيل أرصدة الخزينة"));
+  }
+
+  const who = closedBy || (await supabase.auth.getUser()).data.user?.email || "";
+  const { data, error } = await supabase.from("month_closings").insert({ month, closed_by: who || null, snapshot }).select("*").single();
+  if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ الإغلاق"));
+  return { id: data.id, month: data.month, closedAt: data.closed_at, closedBy: data.closed_by ?? "", snapshot };
+}
+
+// ---- مؤشر كفاءة السولار لكل عربية (من سجلات السولار وقراءات العداد) ----
+
+export interface FleetFuelRow {
+  bus: string;
+  liters: number;
+  km: number;
+  per100: number | null; // لتر / 100 كم
+  target: number | null;
+  basis: "shift" | "km100" | "km";
+  status: "waste" | "ok" | "no-target" | "no-data";
+  wastePct: number;
+}
+
+/** متوسط الاستهلاك لكل عربية ومقارنته بمعيارها؛ التنبيه يعمل لمعايير (لتر/100كم) و(لتر/كم) من العداد. */
+export function computeFleetFuelRows(
+  buses: { code: string; fuelTarget: number | null; fuelBasis: "shift" | "km100" | "km" }[],
+  summaries: BusFuelSummary[],
+): FleetFuelRow[] {
+  const byBus = new Map(summaries.map((s) => [s.bus, s]));
+  return buses
+    .map((b) => {
+      const s = byBus.get(b.code);
+      const per100 = s && s.kmPerLiter > 0 ? Math.round((100 / s.kmPerLiter) * 100) / 100 : null;
+      const base = { bus: b.code, liters: s?.liters ?? 0, km: s?.km ?? 0, per100, target: b.fuelTarget, basis: b.fuelBasis };
+      if (per100 == null) return { ...base, status: "no-data" as const, wastePct: 0 };
+      if (!b.fuelTarget || b.fuelTarget <= 0 || b.fuelBasis === "shift") return { ...base, status: "no-target" as const, wastePct: 0 };
+      const actual = b.fuelBasis === "km" ? per100 / 100 : per100;
+      return actual > b.fuelTarget
+        ? { ...base, status: "waste" as const, wastePct: ((actual - b.fuelTarget) / b.fuelTarget) * 100 }
+        : { ...base, status: "ok" as const, wastePct: 0 };
+    })
+    .sort((a, b) => (a.status === "waste" ? 0 : 1) - (b.status === "waste" ? 0 : 1) || b.wastePct - a.wastePct);
+}

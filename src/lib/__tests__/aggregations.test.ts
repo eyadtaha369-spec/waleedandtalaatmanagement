@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver, computeTreasuryClosings, computeFleetFuelRows } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -649,5 +649,26 @@ describe("driver shift summary", () => {
     const att = [{ overtimeAllowance: 40, dailyAdvance: 60, penalty: 0, tollFee: 5 }] as any;
     expect(computeDriverShiftSummary(sh, att)).toEqual({ shiftCount: 2, driverEarnings: 500, allowances: 90, advances: 160, penalties: 25, advancesAndPenalties: 185, karta: 30 });
     expect(sameDriver("علي حماده علي ", "علي حماده علي")).toBe(true);
+  });
+  it("computeTreasuryClosings takes the last balance per account before the cut-off", () => {
+    const rows = [
+      { date: "2026-10-02", account: "كاش", opening: 0, deposits: 500, withdrawals: 0, createdAt: "a" },
+      { date: "2026-10-20", account: "كاش", opening: 500, deposits: 0, withdrawals: 200, createdAt: "b" },
+      { date: "2026-11-02", account: "كاش", opening: 300, deposits: 900, withdrawals: 0, createdAt: "c" },
+      { date: "2026-10-05", account: "بنك", opening: 100, deposits: 0, withdrawals: 0, createdAt: "d" },
+    ];
+    expect(computeTreasuryClosings(rows, "2026-11-01")).toEqual([{ account: "بنك", closing: 100 }, { account: "كاش", closing: 300 }]);
+  });
+  it("computeFleetFuelRows flags buses above their km-based target", () => {
+    const buses = [
+      { code: "B1", fuelTarget: 30, fuelBasis: "km100" as const },
+      { code: "B2", fuelTarget: 30, fuelBasis: "km100" as const },
+      { code: "B3", fuelTarget: 30, fuelBasis: "shift" as const },
+      { code: "B4", fuelTarget: null, fuelBasis: "km100" as const },
+    ];
+    const sum = (bus: string, kmPerLiter: number) => ({ bus, fills: 1, liters: 100, cost: 0, km: 100 * kmPerLiter, kmPerLiter, costPerKm: 0 });
+    const rows = computeFleetFuelRows(buses, [sum("B1", 2.5), sum("B2", 4), sum("B3", 3)]);
+    expect(rows.map((r) => [r.bus, r.status])).toEqual([["B1", "waste"], ["B2", "ok"], ["B3", "no-target"], ["B4", "no-data"]]);
+    expect(Math.round(rows[0]!.wastePct)).toBe(33);
   });
 });

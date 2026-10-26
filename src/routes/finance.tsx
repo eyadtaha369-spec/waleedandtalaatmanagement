@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AccountPicker } from "@/components/account-picker";
+import { MonthClosePanel } from "@/components/month-close-panel";
 import { PersonPicker, type PersonOption } from "@/components/person-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -252,6 +253,7 @@ function FinancePage() {
   return (
     <AppShell>
       <PageHeader title="المالية والخزينة" subtitle="الخزينة، المصروفات والموردون، والقروض" />
+      <MonthClosePanel onClosed={loadAll} />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

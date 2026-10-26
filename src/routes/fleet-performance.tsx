@@ -13,6 +13,11 @@ import { currency, type Bus } from "@/lib/fleet-data";
 import {
   FUEL_BASIS_LABEL,
   FUEL_BASIS_SHORT,
+  computeFleetFuelRows,
+  computeFuelByBus,
+  fetchFuelLogs,
+  inDateRange,
+  type FleetFuelRow,
   computeBusProfile,
   fetchBusProfile,
   fetchBuses,
@@ -44,6 +49,7 @@ function FleetPerformancePage() {
   const [targetInput, setTargetInput] = useState("");
   const [basis, setBasis] = useState<FuelBasis>("shift");
   const [saving, setSaving] = useState(false);
+  const [fleetFuel, setFleetFuel] = useState<FleetFuelRow[]>([]);
 
   const loadBuses = async () => {
     try {
@@ -106,6 +112,13 @@ function FleetPerformancePage() {
     setTimeout(() => window.print(), 150);
   };
 
+  useEffect(() => {
+    if (!buses.length) return;
+    fetchFuelLogs()
+      .then((logs) => setFleetFuel(computeFleetFuelRows(buses.map((b) => ({ code: b.code, fuelTarget: b.fuelTarget, fuelBasis: b.fuelBasis })), computeFuelByBus(logs.filter((l) => inDateRange(l.date, range))))))
+      .catch(() => setFleetFuel([]));
+  }, [buses, range]);
+
   const unit = FUEL_BASIS_LABEL[basis].replace(/ /g, "");
   const fuel = profile?.fuel;
   const border = { border: "1px solid #000", padding: 6 } as const;
@@ -121,6 +134,29 @@ function FleetPerformancePage() {
         ) : buses.length === 0 ? (
           <p className="py-10 text-center text-muted-foreground">لا توجد عربيات مسجلة بعد.</p>
         ) : (
+          <>
+          <Panel title="مؤشر كفاءة استهلاك السولار للأسطول" className="mb-4">
+            <div className="no-print mb-3"><DateRangeFilter value={range} onChange={setRange} /></div>
+            {fleetFuel.some((r) => r.status === "waste") && (
+              <p className="mb-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm font-bold text-destructive">
+                ⚠️ {fleetFuel.filter((r) => r.status === "waste").length} عربية تجاوزت معدل الاستهلاك المعياري: {fleetFuel.filter((r) => r.status === "waste").map((r) => r.bus).join("، ")}
+              </p>
+            )}
+            <DataTable head={["العربية", "اللترات", "الكيلومترات (من العداد)", "متوسط لتر / 100 كم", "المعيار", "الحالة"]}>
+              {fleetFuel.map((r) => (
+                <tr key={r.bus}>
+                  <td className="px-4 py-3 font-bold text-primary">{r.bus}</td>
+                  <td className="px-4 py-3">{num(r.liters)}</td>
+                  <td className="px-4 py-3">{num(r.km, 0)}</td>
+                  <td className="px-4 py-3">{r.per100 == null ? "—" : num(r.per100, 2)}</td>
+                  <td className="px-4 py-3">{r.target == null ? "—" : `${num(r.target, 2)} ${FUEL_BASIS_SHORT[r.basis]}`}</td>
+                  <td className="px-4 py-3">
+                    {r.status === "waste" ? <span className="font-bold text-destructive">⚠️ تجاوز {num(r.wastePct)}%</span> : r.status === "ok" ? <span className="font-bold text-success">✅ منتظم</span> : r.status === "no-data" ? <span className="text-xs text-muted-foreground">لا بيانات عداد</span> : <span className="text-xs text-muted-foreground">حدّد معيار لتر/100كم أو لتر/كم</span>}
+                  </td>
+                </tr>
+              ))}
+            </DataTable>
+          </Panel>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {buses.map((b) => (
               <button
@@ -155,6 +191,7 @@ function FleetPerformancePage() {
               </button>
             ))}
           </div>
+          </>
         )
       ) : (
         <>

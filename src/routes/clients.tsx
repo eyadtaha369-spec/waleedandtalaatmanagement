@@ -30,6 +30,7 @@ import {
 import { currency } from "@/lib/fleet-data";
 import {
   fetchClients,
+  addClientTreasuryEntry,
   addClient,
   updateClient,
   deleteClient,
@@ -74,6 +75,24 @@ function ClientsPage() {
   const [invoiceRows, setInvoiceRows] = useState<ClientInvoiceRow[]>([]);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [extras, setExtras] = useState<{ opening: number; postings: ClientLedgerPosting[] }>({ opening: 0, postings: [] });
+
+  const [payOpen, setPayOpen] = useState(false);
+  const [payForm, setPayForm] = useState({ kind: "in" as "in" | "out", date: new Date().toISOString().slice(0, 10), amount: "", notes: "" });
+  const [paySaving, setPaySaving] = useState(false);
+  const submitPay = async () => {
+    setPaySaving(true);
+    setError(null);
+    try {
+      await addClientTreasuryEntry({ clientName: selectedClient, date: payForm.date, kind: payForm.kind, amount: Number(payForm.amount) || 0, notes: payForm.notes });
+      setExtras(await fetchClientStatementExtras(selectedClient, range));
+      setPayOpen(false);
+      setPayForm({ ...payForm, amount: "", notes: "" });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "تعذر تسجيل الحركة");
+    } finally {
+      setPaySaving(false);
+    }
+  };
 
   const [routesFor, setRoutesFor] = useState<Client | null>(null);
   const [clientRoutes, setClientRoutes] = useState<ClientRoute[]>([]);
@@ -244,9 +263,14 @@ function ClientsPage() {
                   onQuery={() => {}}
                   onExport={() => exportToExcel(`كشف حساب ${selectedClient}`, invoiceRows as unknown as Record<string, string | number>[])}
                   extra={
-                    <Button variant="outline" className="border-border" onClick={() => window.print()}>
-                      <Printer className="ml-2 h-4 w-4" /> طباعة كشف الحساب
-                    </Button>
+                    <>
+                      <Button className="bg-primary text-primary-foreground" onClick={() => { setPayForm({ ...payForm, kind: "in" }); setPayOpen(true); }}>
+                        <Plus className="ml-2 h-4 w-4" /> تسجيل تحصيل / صرف (يُرحَّل للخزينة)
+                      </Button>
+                      <Button variant="outline" className="border-border" onClick={() => window.print()}>
+                        <Printer className="ml-2 h-4 w-4" /> طباعة كشف الحساب
+                      </Button>
+                    </>
                   }
                 />
                 <DataTable head={["اليوم والتاريخ", "رقم الأتوبيس", "نوع السيارة", "اسم السائق", "الخط / الوردية", "القيمة (دائن)"]}>
@@ -343,6 +367,44 @@ function ClientsPage() {
           </Panel>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent className="glass text-foreground" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="text-primary">تحصيل / صرف — {selectedClient}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">تُسجَّل الحركة في دفتر الخزينة (حساب الشركة) وتظهر فورًا في قيود كشف الحساب.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">نوع الحركة</Label>
+              <Select value={payForm.kind} onValueChange={(v) => setPayForm({ ...payForm, kind: v as "in" | "out" })}>
+                <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="in">تحصيل من الشركة (إيداع بالخزينة)</SelectItem>
+                  <SelectItem value="out">صرف للشركة (سحب من الخزينة)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">التاريخ</Label>
+                <Input type="date" value={payForm.date} onChange={(e) => setPayForm({ ...payForm, date: e.target.value })} className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">المبلغ (ج.م)</Label>
+                <Input type="number" min="0" step="any" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="border-border bg-input/60" />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">ملاحظات</Label>
+              <Input value={payForm.notes} onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })} className="border-border bg-input/60" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-primary text-primary-foreground" onClick={submitPay} disabled={paySaving}>{paySaving ? "جارِ الحفظ..." : "حفظ وترحيل للخزينة"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent className="glass text-foreground" dir="rtl">

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { currency } from "@/lib/fleet-data";
 import { useMyRole } from "@/lib/permissions";
-import { CLOSING_MODULES, closeModuleMonth, fetchClients, fetchModuleClosings, unlockModuleMonth, type ClosingModule, type Client, type ModuleClosing } from "@/lib/queries";
+import { CLOSING_MODULES, closeModuleMonth, closeSupplierMonth, fetchClients, fetchSuppliers, fetchSupplierClosings, unlockSupplierMonth, type Supplier, type SupplierClosing, fetchModuleClosings, unlockModuleMonth, type ClosingModule, type Client, type ModuleClosing } from "@/lib/queries";
 
 export const Route = createFileRoute("/closing")({
   head: () => ({ meta: [{ title: "الإغلاق المالي الشهري | وليد وطلعت" }] }),
@@ -44,13 +44,18 @@ function ClosingPage() {
   const [month, setMonth] = useState(prevMonth());
   const [rows, setRows] = useState<ModuleClosing[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supClosings, setSupClosings] = useState<SupplierClosing[]>([]);
   const [scope, setScope] = useState("");
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = async () => {
     try {
-      setRows(await fetchModuleClosings(month));
+      const [r, sc, sup] = await Promise.all([fetchModuleClosings(month), fetchSupplierClosings(month), fetchSuppliers()]);
+      setRows(r);
+      setSupClosings(sc);
+      setSuppliers(sup);
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : "تعذر التحميل" });
     }
@@ -109,6 +114,7 @@ function ClosingPage() {
                         {reopened ? "مفتوح للتعديل (أُعيد فتحه) 🔓" : "مفتوح للشهر الحالي 🟢"}
                       </span>
                     )}
+                    {m.key === "suppliers" && supClosings.some((r) => r.locked) && <span className="mr-2 text-xs text-muted-foreground">+ {supClosings.filter((r) => r.locked).length} مورد مغلق منفردًا</span>}
                     {m.key === "clients" && perClient.some((r) => r.locked) && <span className="mr-2 text-xs text-muted-foreground">+ {perClient.filter((r) => r.locked).length} شركة مغلقة منفردة</span>}
                   </p>
                 </div>
@@ -137,6 +143,52 @@ function ClosingPage() {
                   <p className="text-xs text-muted-foreground sm:col-span-2">
                     {(scopeRow ?? all)!.locked ? "أُغلق" : "أُغلق سابقًا"} بتاريخ {(scopeRow ?? all)!.closedAt.slice(0, 10)}{(scopeRow ?? all)!.closedBy ? ` — ${(scopeRow ?? all)!.closedBy}` : ""}
                   </p>
+                </div>
+              )}
+              {m.key === "suppliers" && (
+                <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary/40 text-xs text-muted-foreground">
+                      <tr>
+                        {["المورد", "الرصيد المستحق", "الحالة", "إجراءات"].map((h) => <th key={h} className="px-3 py-2 text-right font-medium">{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {suppliers.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">لا يوجد موردون مسجلون.</td></tr>}
+                      {suppliers.map((s) => {
+                        const c = supClosings.find((x) => x.supplierId === s.id);
+                        const locked = !!c?.locked;
+                        return (
+                          <tr key={s.id} className="border-t border-border">
+                            <td className="px-3 py-2 font-bold">{s.name}</td>
+                            <td className="px-3 py-2 text-warning">
+                              {money(s.balanceDue)}
+                              {c && <span className="mr-2 block text-xs text-muted-foreground">ختامي الشهر عند الإغلاق: {money(c.snapshot.closing)}</span>}
+                            </td>
+                            <td className="px-3 py-2">
+                              {locked ? (
+                                <span className="rounded-full border border-success/50 bg-success/10 px-2 py-1 text-xs font-bold text-success">مغلق 🔒</span>
+                              ) : (
+                                <span className="rounded-full border border-warning/50 bg-warning/10 px-2 py-1 text-xs font-bold text-warning">{c ? "أُعيد فتحه 🔓" : "مفتوح 🟢"}</span>
+                              )}
+                            </td>
+                            <td className="no-print px-3 py-2">
+                              <div className="flex flex-wrap gap-2">
+                                <Button size="sm" className="bg-primary text-primary-foreground" disabled={locked || busy === `s${s.id}`} onClick={() => run(`s${s.id}`, () => closeSupplierMonth(month, s.id), `تم ${c ? "إعادة قفل" : "إغلاق"} حساب ${s.name} لشهر ${month}`)}>
+                                  {c && !c.locked ? "إعادة القفل 🔒" : "إغلاق الشهر 🔒"}
+                                </Button>
+                                {isAdmin && locked && c && (
+                                  <Button size="sm" variant="outline" className="border-warning/60 text-warning" disabled={busy === c.id} onClick={() => run(c.id, () => unlockSupplierMonth(c.id), `تم فتح التعديل لحساب ${s.name} فقط`)}>
+                                    فتح التعديل 🔓
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
               {m.key === "clients" && perClient.length > 0 && (

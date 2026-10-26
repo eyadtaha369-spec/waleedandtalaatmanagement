@@ -4551,6 +4551,60 @@ export async function unlockModuleMonth(id: string) {
   if (error) throw new Error(dbErrorMessage(error, "تعذر فتح التعديل"));
 }
 
+// ---- إغلاق شهري لكل مورد على حدة ----
+
+export interface SupplierClosing {
+  id: string;
+  month: string;
+  supplierId: string;
+  locked: boolean;
+  closedAt: string;
+  closedBy: string;
+  unlockedBy: string;
+  snapshot: { opening: number; purchases: number; payments: number; closing: number };
+}
+
+export async function fetchSupplierClosings(month: string): Promise<SupplierClosing[]> {
+  const { data, error } = await supabase.from("supplier_closings").select("*").eq("month", month);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل إغلاق الموردين"));
+  return (data ?? []).map((r: any) => ({ id: r.id, month: r.month, supplierId: r.supplier_id, locked: r.locked !== false, closedAt: r.closed_at, closedBy: r.closed_by ?? "", unlockedBy: r.unlocked_by ?? "", snapshot: { opening: 0, purchases: 0, payments: 0, closing: 0, ...(r.snapshot ?? {}) } }));
+}
+
+/** حركة المورد خلال الشهر: الرصيد الافتتاحي والمشتريات والمدفوعات والرصيد الختامي. */
+export async function computeSupplierMonth(supplierId: string, month: string) {
+  const entries = await fetchSupplierLedger(supplierId);
+  const start = `${month}-01`;
+  const nextStart = `${nextMonthPrefix(month)}-01`;
+  let opening = 0, purchases = 0, payments = 0;
+  for (const e of entries) {
+    if (e.date < start) opening += e.withdrawals - e.payments;
+    else if (e.date < nextStart) {
+      purchases += e.withdrawals;
+      payments += e.payments;
+    }
+  }
+  return { opening, purchases, payments, closing: opening + purchases - payments };
+}
+
+export async function closeSupplierMonth(month: string, supplierId: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("اختر الشهر");
+  const { data: existing } = await supabase.from("supplier_closings").select("id, locked").eq("month", month).eq("supplier_id", supplierId).maybeSingle();
+  if (existing && existing.locked !== false) throw new Error("حساب هذا المورد مغلق بالفعل لهذا الشهر");
+  const snapshot = await computeSupplierMonth(supplierId, month);
+  const who = (await supabase.auth.getUser()).data.user?.email || "";
+  const row = { snapshot, locked: true, closed_at: new Date().toISOString(), closed_by: who || null };
+  const { error } = existing
+    ? await supabase.from("supplier_closings").update(row).eq("id", existing.id)
+    : await supabase.from("supplier_closings").insert({ ...row, month, supplier_id: supplierId });
+  if (error) throw new Error(dbErrorMessage(error, "تعذر إغلاق حساب المورد"));
+}
+
+export async function unlockSupplierMonth(id: string) {
+  const who = (await supabase.auth.getUser()).data.user?.email || "";
+  const { error } = await supabase.from("supplier_closings").update({ locked: false, unlocked_at: new Date().toISOString(), unlocked_by: who || null }).eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر فتح التعديل"));
+}
+
 // ---- مؤشر كفاءة السولار لكل عربية (من سجلات السولار وقراءات العداد) ----
 
 export interface FleetFuelRow {

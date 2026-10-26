@@ -4470,3 +4470,43 @@ export function computeFleetFuelRows(
     })
     .sort((a, b) => (a.status === "waste" ? 0 : 1) - (b.status === "waste" ? 0 : 1) || b.wastePct - a.wastePct);
 }
+
+// ---- حظر تشغيل الرخص المنتهية ----
+
+export const LICENSE_BLOCK_MESSAGE = "عذراً، لا يمكن تسجيل الوردية؛ رخصة السائق أو الأتوبيس منتهية الصلاحية ويجب التجديد أولاً!";
+
+/** تاريخ صالح بصيغة YYYY-MM-DD وأقدم من اليوم = منتهي (غير المسجَّل «—» لا يحجب). */
+export const isExpiredDate = (d: string | null | undefined, today = new Date().toISOString().slice(0, 10)) => !!d && /^\d{4}-\d{2}-\d{2}/.test(d) && d.slice(0, 10) < today;
+
+export function licenseIssues(
+  driverLicenseExpiry: string | undefined,
+  bus: { licenseExpiry: string; insuranceExpiry: string } | undefined,
+  today?: string,
+) {
+  return {
+    driver: isExpiredDate(driverLicenseExpiry, today),
+    bus: !!bus && (isExpiredDate(bus.licenseExpiry, today) || isExpiredDate(bus.insuranceExpiry, today)),
+  };
+}
+
+export interface FuelAlert extends FleetFuelRow {
+  reason: "target" | "average";
+  fleetAvg: number | null;
+}
+
+/**
+ * عربيات استهلاكها أعلى من الطبيعي: تجاوز معيارها المحدد، أو (بدون معيار) أعلى من متوسط الأسطول بنسبة `margin`.
+ * متوسط الأسطول يحتاج 3 عربيات على الأقل ببيانات عداد.
+ */
+export function computeFuelAlerts(rows: FleetFuelRow[], margin = 0.3): FuelAlert[] {
+  const withData = rows.filter((r) => r.per100 != null);
+  const avg = withData.length >= 3 ? withData.reduce((s, r) => s + (r.per100 ?? 0), 0) / withData.length : null;
+  const out: FuelAlert[] = [];
+  for (const r of rows) {
+    if (r.status === "waste") out.push({ ...r, reason: "target", fleetAvg: avg });
+    else if (r.status === "no-target" && avg != null && r.per100 != null && r.per100 > avg * (1 + margin)) {
+      out.push({ ...r, reason: "average", fleetAvg: avg, wastePct: ((r.per100 - avg) / avg) * 100 });
+    }
+  }
+  return out.sort((a, b) => b.wastePct - a.wastePct);
+}

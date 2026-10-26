@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver, computeTreasuryClosings, computeFleetFuelRows, shiftPayFactor } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver, computeTreasuryClosings, computeFleetFuelRows, shiftPayFactor, computeFuelAlerts, licenseIssues } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -673,5 +673,17 @@ describe("driver shift summary", () => {
   });
   it("shiftPayFactor pays shifts according to attendance", () => {
     expect([shiftPayFactor("حاضر"), shiftPayFactor("نصف يوم"), shiftPayFactor("غياب"), shiftPayFactor("إجازة"), shiftPayFactor("")]).toEqual([1, 0.5, 0, 0, 1]);
+  });
+  it("licenseIssues blocks expired driver licence, bus licence or insurance only", () => {
+    const bus = { licenseExpiry: "2026-12-01", insuranceExpiry: "2026-09-01" };
+    expect(licenseIssues("2026-01-01", bus, "2026-10-26")).toEqual({ driver: true, bus: true });
+    expect(licenseIssues("—", { licenseExpiry: "2027-01-01", insuranceExpiry: "—" }, "2026-10-26")).toEqual({ driver: false, bus: false });
+  });
+  it("computeFuelAlerts flags target breaches and far-above-average buses without a target", () => {
+    const row = (bus: string, per100: number | null, status: "waste" | "ok" | "no-target" | "no-data", wastePct = 0) => ({ bus, liters: 1, km: 1, per100, target: null, basis: "km100" as const, status, wastePct });
+    const alerts = computeFuelAlerts([row("A", 30, "no-target"), row("B", 30, "no-target"), row("C", 60, "no-target"), row("D", 50, "waste", 25)]);
+    expect(alerts.map((a) => [a.bus, a.reason])).toContainEqual(["D", "target"]);
+    expect(alerts.map((a) => a.bus)).toContain("C");
+    expect(alerts.map((a) => a.bus)).not.toContain("A");
   });
 });

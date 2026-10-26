@@ -39,6 +39,10 @@ import {
   fetchInventory,
   fetchFuelLogs,
   saveMaintenanceOrder,
+  computeFleetFuelRows,
+  computeFuelAlerts,
+  inDateRange,
+  rangeForPreset,
   computeOrderTotals,
   computeFuelByBus,
   dbErrorMessage,
@@ -244,6 +248,19 @@ function WorkshopPage() {
   }, []);
 
   // ---------- maintenance orders ----------
+  const fuelAlerts = useMemo(() => {
+    if (!busList.length) return [];
+    const range = rangeForPreset("current");
+    const rows = computeFleetFuelRows(busList.map((b) => ({ code: b.code, fuelTarget: b.fuelTarget, fuelBasis: b.fuelBasis })), computeFuelByBus(fuelLogs.filter((l) => inDateRange(l.date, range))));
+    return computeFuelAlerts(rows);
+  }, [busList, fuelLogs]);
+
+  const openFuelInspection = (bus: string) => {
+    setForm({ ...emptyOrderForm, date: todayStr(), bus, issue: "فحص موتور / رشاشات — استهلاك سولار عالي" });
+    setParts([newPart()]);
+    setAdding(true);
+  };
+
   const openAddOrder = () => {
     setForm({ ...emptyOrderForm, date: todayStr() });
     setParts([newPart()]);
@@ -548,6 +565,25 @@ function WorkshopPage() {
         title={rights.fuel ? "الورشة والمخزون والسولار" : rights.inventory ? "الورشة والمخزون" : "الورشة"}
         subtitle={rights.fuel ? "أوامر الصيانة، قطع الغيار، وسجل التزود بالوقود" : rights.inventory ? "أوامر الصيانة وقطع الغيار" : "أوامر الصيانة"}
       />
+
+      {rights.fuel && fuelAlerts.length > 0 && (
+        <div className="no-print mb-4 rounded-xl border-2 border-red-500 bg-red-500/10 p-4" role="alert">
+          <p className="mb-2 text-sm font-extrabold text-red-500">⚠️ تنبيه تنفيذي: {fuelAlerts.length} عربية باستهلاك سولار أعلى من الطبيعي هذا الشهر</p>
+          <div className="grid gap-2">
+            {fuelAlerts.map((a) => (
+              <div key={a.bus} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-500/40 bg-background/40 p-2 text-sm">
+                <span>
+                  <b className="text-primary">{a.bus}</b> — {a.per100?.toLocaleString("ar-EG", { maximumFractionDigits: 1 })} لتر/100كم{" "}
+                  {a.reason === "target" ? `(المعيار ${a.target?.toLocaleString("ar-EG")}) — تجاوز ${a.wastePct.toFixed(0)}%` : `(متوسط الأسطول ${a.fleetAvg?.toLocaleString("ar-EG", { maximumFractionDigits: 1 })}) — أعلى بنسبة ${a.wastePct.toFixed(0)}%`}
+                </span>
+                <Button size="sm" className="bg-red-600 text-white hover:bg-red-700" onClick={() => openFuelInspection(a.bus)}>
+                  فتح أمر فحص موتور / رشاشات (استهلاك سولار عالي)
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>

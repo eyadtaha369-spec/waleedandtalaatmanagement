@@ -37,6 +37,9 @@ import { currency } from "@/lib/fleet-data";
 import {
   fetchBuses,
   fetchDrivers,
+  licenseIssues,
+  LICENSE_BLOCK_MESSAGE,
+  fetchBuses as fetchBusesFresh,
   fetchClients,
   fetchDispatchShiftsByDate,
   fetchDispatchShifts,
@@ -88,6 +91,8 @@ function DispatchShiftsSection() {
   const [shifts, setShifts] = useState<DispatchShift[]>([]);
   const [buses, setBuses] = useState<BusRecord[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
+  const [driverExpiry, setDriverExpiry] = useState<Record<string, string>>({});
+  const [blocked, setBlocked] = useState(false);
   const [clientNames, setClientNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +144,7 @@ function DispatchShiftsSection() {
       if (driverFilter) void loadDriverView();
       setBuses(buses);
       setDriverNames(drivers.map((d) => d.name));
+      setDriverExpiry(Object.fromEntries(drivers.map((d) => [d.name, d.licenseExpiry])));
       setClientNames(clients.map((c) => c.name));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
@@ -189,6 +195,9 @@ function DispatchShiftsSection() {
   const updateRow = (key: number, patch: Partial<ShiftRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
+  const issue = (r: ShiftRow) => licenseIssues(driverExpiry[r.driverName], buses.find((b) => b.code === r.busCode));
+  const anyExpired = rows.some((r) => issue(r).driver || issue(r).bus);
+
   const submit = async () => {
     const invalid = rows.some((r) => !r.busCode || !r.driverName || !r.clientName);
     if (invalid) {
@@ -199,6 +208,21 @@ function DispatchShiftsSection() {
       setError("اختر طريقة الدفع / مصدر التمويل للسلفة والكرتة");
       return;
     }
+    // فحص فوري من بيانات السائقين والعربيات الحالية قبل الحفظ
+    const [freshDrivers, freshBuses] = await Promise.all([fetchDrivers(), fetchBusesFresh()]);
+    const expiry = Object.fromEntries(freshDrivers.map((d) => [d.name, d.licenseExpiry]));
+    setDriverExpiry(expiry);
+    setBuses(freshBuses);
+    const bad = rows.some((r) => {
+      const is = licenseIssues(expiry[r.driverName], freshBuses.find((b) => b.code === r.busCode));
+      return is.driver || is.bus;
+    });
+    if (bad) {
+      setBlocked(true);
+      setError(LICENSE_BLOCK_MESSAGE);
+      return;
+    }
+    setBlocked(false);
     setSaving(true);
     setError(null);
     try {
@@ -452,6 +476,11 @@ function DispatchShiftsSection() {
               <Input value={formDate} onChange={(e) => setFormDate(e.target.value)} type="date" className="border-border bg-input/60" />
             </div>
 
+            {anyExpired && (
+              <p role="alert" className="rounded-xl border-2 border-red-500 bg-red-500/10 p-3 text-sm font-extrabold text-red-500">
+                ⛔ {LICENSE_BLOCK_MESSAGE}
+              </p>
+            )}
             {rows.map((r, idx) => (
               <div key={r.key} className="rounded-lg border border-primary/30 bg-primary/5 p-3">
                 <div className="mb-2 flex items-center justify-between">
@@ -465,14 +494,18 @@ function DispatchShiftsSection() {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الأتوبيس</Label>
-                    <BusPicker value={r.busCode} buses={buses} onChange={(v) => updateRow(r.key, { busCode: v })} />
+                    <div className={issue(r).bus ? "rounded-md ring-2 ring-red-500" : ""}>
+                      <BusPicker value={r.busCode} buses={buses} onChange={(v) => updateRow(r.key, { busCode: v })} />
+                    </div>
+                    {issue(r).bus && <p className="text-xs font-bold text-red-500">رخصة / تأمين الأتوبيس منتهي</p>}
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">السائق</Label>
                     <Select value={r.driverName} onValueChange={(v) => updateRow(r.key, { driverName: v })}>
-                      <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
+                      <SelectTrigger className={`border-border bg-input/60 ${issue(r).driver ? "border-red-500 ring-2 ring-red-500" : ""}`}><SelectValue placeholder="اختر" /></SelectTrigger>
                       <SelectContent>{driverNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
                     </Select>
+                    {issue(r).driver && <p className="text-xs font-bold text-red-500">رخصة السائق منتهية</p>}
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الشركة</Label>

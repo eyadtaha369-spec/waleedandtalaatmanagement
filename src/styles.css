@@ -271,3 +271,32 @@
 .scrollbar-sleek::-webkit-scrollbar-thumb:hover {
   background: var(--primary);
 }
+
+/* ---- كشف حساب الشركات: طباعة رسمية ---- */
+.stmt-print { font-family: inherit; color: #0B132B; }
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  body.print-statement .stmt-print { background: #fff; color: #0B132B; padding: 0 !important; }
+  .stmt-print .stmt-head { text-align: center; border-bottom: 3px double #D4AF37; padding-bottom: 8px; margin-bottom: 12px; }
+  .stmt-print .stmt-head h1 { font-size: 22px; font-weight: 800; color: #0B132B; margin: 0; }
+  .stmt-print .stmt-head h2 { font-size: 15px; color: #555; margin: 4px 0 0; }
+  .stmt-print .stmt-meta { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 16px; border: 1px solid #0B132B; padding: 8px 12px; margin-bottom: 14px; font-size: 13px; }
+  .stmt-print .stmt-meta div { display: flex; gap: 8px; }
+  .stmt-print .stmt-meta span { color: #666; min-width: 90px; }
+  .stmt-print h3 { font-size: 14px; font-weight: 700; margin: 14px 0 6px; color: #0B132B; border-right: 4px solid #D4AF37; padding-right: 8px; }
+  .stmt-print table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: auto; }
+  .stmt-print th { background: #0B132B !important; color: #fff !important; padding: 6px 8px; border: 1px solid #0B132B; text-align: center; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .stmt-print td { padding: 5px 8px; border: 1px solid #9aa0ad; text-align: center; vertical-align: middle; }
+  .stmt-print tbody tr:nth-child(even) td { background: #f2f4f8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .stmt-print td.num { text-align: left; direction: ltr; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stmt-print thead { display: table-header-group; }
+  .stmt-print tfoot td { font-weight: 800; background: #e8ecf3 !important; border-top: 2px solid #0B132B; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .stmt-print tr { page-break-inside: avoid; }
+  .stmt-print .stmt-totals { width: 55%; margin: 16px 0 0 auto; margin-right: 0; margin-left: auto; page-break-inside: avoid; }
+  .stmt-print .stmt-totals td:first-child { text-align: right; font-weight: 600; background: #f2f4f8 !important; }
+  .stmt-print .stmt-totals tr.grand td { background: #0B132B !important; color: #fff !important; font-weight: 800; font-size: 14px; border-color: #D4AF37; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .stmt-print .stmt-foot { margin-top: 28px; page-break-inside: avoid; font-size: 12px; }
+  .stmt-print .stmt-sign { display: flex; justify-content: space-between; margin-top: 36px; }
+  .stmt-print .stmt-sign span { width: 30%; text-align: center; font-weight: 700; }
+  .stmt-print .stmt-sign i { display: block; border-top: 1px solid #0B132B; margin-top: 40px; }
+}

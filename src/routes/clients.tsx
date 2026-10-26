@@ -38,6 +38,7 @@ import {
   fetchClientStatementExtras,
   computeClientMonthBalance,
   rangeForPreset,
+  periodLabel,
   type DateRange,
   type ClientLedgerPosting,
   computeClientInvoiceSummary,
@@ -209,6 +210,15 @@ function ClientsPage() {
 
   const summary = computeClientInvoiceSummary(invoiceRows);
   const balance = computeClientMonthBalance(extras.opening, summary.totalDue, extras.postings);
+  const printStatement = () => {
+    document.body.classList.add("print-statement");
+    const cleanup = () => {
+      document.body.classList.remove("print-statement");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    setTimeout(() => window.print(), 150);
+  };
   const filteredClients = clients.filter((c) => (c.name + c.phone).includes(query) || query === "");
 
   return (
@@ -269,7 +279,7 @@ function ClientsPage() {
                       <Button className="bg-primary text-primary-foreground" onClick={() => { setPayForm({ ...payForm, kind: "in" }); setPayOpen(true); }}>
                         <Plus className="ml-2 h-4 w-4" /> تسجيل تحصيل / صرف (يُرحَّل للخزينة)
                       </Button>
-                      <Button variant="outline" className="border-border" onClick={() => window.print()}>
+                      <Button variant="outline" className="border-border" onClick={printStatement}>
                         <Printer className="ml-2 h-4 w-4" /> طباعة كشف الحساب
                       </Button>
                     </>
@@ -369,6 +379,70 @@ function ClientsPage() {
           </Panel>
         </TabsContent>
       </Tabs>
+
+      {selectedClient && (
+        <div className="print-only stmt-print" dir="rtl">
+          <div className="stmt-head">
+            <h1>شركة وليد وطلعت لخدمات النقل والرحلات</h1>
+            <h2>كشف حساب الشركة</h2>
+          </div>
+          <div className="stmt-meta">
+            <div><span>الشركة</span><b>{selectedClient}</b></div>
+            <div><span>الفترة المالية</span><b>{periodLabel(range)}</b></div>
+            <div><span>عدد الورديات</span><b>{summary.totalShifts}</b></div>
+            <div><span>عدد الأتوبيسات</span><b>{summary.totalBusesDeployed}</b></div>
+          </div>
+          <h3>أولًا: الورديات والمطالبات</h3>
+          <table>
+            <thead>
+              <tr>{["م", "اليوم والتاريخ", "رقم الأتوبيس", "نوع السيارة", "اسم السائق", "الخط / الوردية", "القيمة"].map((h) => <th key={h}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {invoiceRows.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: "center" }}>لا توجد ورديات في هذه الفترة</td></tr>
+              ) : (
+                invoiceRows.map((r, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td><td>{r.busCode}</td><td>{r.busType}</td><td>{r.driver}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            <tfoot><tr><td colSpan={6}>إجمالي المطالبة المستحقة</td><td className="num">{currency(summary.totalDue)}</td></tr></tfoot>
+          </table>
+          {extras.postings.length > 0 && (
+            <>
+              <h3>ثانيًا: قيود الحساب (تحصيلات ومدفوعات)</h3>
+              <table>
+                <thead><tr>{["التاريخ", "البيان", "مدين", "دائن"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {extras.postings.map((p) => (
+                    <tr key={p.id}><td>{p.date}</td><td>{p.description}</td><td className="num">{p.debit ? currency(p.debit) : "—"}</td><td className="num">{p.credit ? currency(p.credit) : "—"}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+          <table className="stmt-totals">
+            <tbody>
+              <tr><td>رصيد أول المدة (مرحّل)</td><td className="num">{currency(balance.opening)}</td></tr>
+              <tr><td>مطالبات الفترة</td><td className="num">{currency(balance.monthDues)}</td></tr>
+              {balance.debits > 0 && <tr><td>قيود مدينة أخرى</td><td className="num">{currency(balance.debits)}</td></tr>}
+              <tr><td>إجمالي المستحق</td><td className="num">{currency(balance.opening + balance.monthDues + balance.debits)}</td></tr>
+              <tr><td>المحصَّل</td><td className="num">{currency(balance.credits)}</td></tr>
+              <tr className="grand"><td>المتبقي (يُرحَّل للفترة التالية)</td><td className="num">{currency(balance.closing)}</td></tr>
+            </tbody>
+          </table>
+          <div className="stmt-foot">
+            <p>تاريخ إصدار الكشف: {new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" })}</p>
+            <div className="stmt-sign">
+              <span>المحاسب<i /></span>
+              <span>المدير المالي<i /></span>
+              <span>اعتماد الإدارة<i /></span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
         <DialogContent className="glass text-foreground" dir="rtl">

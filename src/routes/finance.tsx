@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AccountPicker } from "@/components/account-picker";
-import { MonthClosePanel } from "@/components/month-close-panel";
 import { PersonPicker, type PersonOption } from "@/components/person-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -264,7 +263,10 @@ function FinancePage() {
   return (
     <AppShell>
       <PageHeader title="المالية والخزينة" subtitle="الخزينة، المصروفات والموردون، والقروض" />
-      <MonthClosePanel onClosed={loadAll} />
+      <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+        <span>الإغلاق المالي الشهري صار لكل قسم على حدة: شركات، مرتبات، موردين، ورشة، سولار، وخزينة وعهدة.</span>
+        <Link to="/closing" className="rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">فتح لوحة الإغلاق المالي الشهري 🔒</Link>
+      </div>
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

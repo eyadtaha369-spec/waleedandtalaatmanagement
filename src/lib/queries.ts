@@ -4367,32 +4367,7 @@ export async function addClientTreasuryEntry(input: { clientName: string; date: 
   });
 }
 
-// ---- الإغلاق المالي الشهري ----
-
-export interface MonthClosingSnapshot {
-  treasury: { account: string; closing: number }[];
-  treasuryTotal: number;
-  custodyClosing: number;
-  clientsReceivable: { client: string; closing: number }[];
-  clientsTotal: number;
-  payrollNet: number;
-}
-export interface MonthClosing {
-  id: string;
-  month: string;
-  closedAt: string;
-  closedBy: string;
-  snapshot: MonthClosingSnapshot;
-  /** true = الشهر مقفول؛ false = مفتوح للتعديل بواسطة الأدمن */
-  locked: boolean;
-  unlockedBy: string;
-}
-
-export async function fetchMonthClosings(): Promise<MonthClosing[]> {
-  const { data, error } = await supabase.from("month_closings").select("*").order("month", { ascending: false });
-  if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سجل الإغلاق"));
-  return (data ?? []).map((r: any) => ({ id: r.id, month: r.month, closedAt: r.closed_at, closedBy: r.closed_by ?? "", snapshot: r.snapshot as MonthClosingSnapshot, locked: r.locked !== false, unlockedBy: r.unlocked_by ?? "" }));
-}
+// ---- الإغلاق المالي الشهري المستقل لكل قسم ----
 
 /** آخر رصيد لكل حساب خزينة حتى (ولا يشمل) تاريخ `before`. */
 export function computeTreasuryClosings(rows: { date: string; account: string; opening: number; deposits: number; withdrawals: number; createdAt?: string }[], before: string) {
@@ -4406,74 +4381,125 @@ export function computeTreasuryClosings(rows: { date: string; account: string; o
   return [...last.entries()].map(([account, v]) => ({ account, closing: v.closing })).sort((a, b) => a.account.localeCompare(b.account, "ar"));
 }
 
-/**
- * «إغلاق الشهر المالي»: يحسب صافي الخزينة والعهدة والشركات والمرتبات، يرحّل رصيد كل حساب خزينة
- * كرصيد افتتاحي للشهر الجديد، ويحفظ لقطة الإغلاق. العهدة وأرصدة الشركات تُرحَّل تراكميًا بالحساب.
- */
-export async function closeFinancialMonth(month: string, closedBy: string): Promise<MonthClosing> {
-  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("اختر الشهر");
-  const { data: already } = await supabase.from("month_closings").select("id, locked").eq("month", month).maybeSingle();
-  if (already && already.locked !== false) throw new Error("هذا الشهر مغلق بالفعل");
-  const relock = !!already; // شهر فُتح للتعديل ثم يُعاد قفله بلقطة جديدة
+export const CLOSING_MODULES = [
+  { key: "clients", title: "إغلاق حسابات الشركات", desc: "ورديات الشركات ومطالباتها وقيود كشف الحساب والرحلات الخارجية. يمكن إغلاق إجمالي الشركات أو شركة بعينها." },
+  { key: "payroll", title: "إغلاق مرتبات وأجور الشهر", desc: "تسويات المرتبات وحضور السائقين والموظفين وسلفهم وجزاءاتهم." },
+  { key: "suppliers", title: "إغلاق حسابات الموردين", desc: "فواتير ومدفوعات الموردين وتوريدات المخزن، ويشمل مُلّاك السيارات المستأجرة وسلفهم." },
+  { key: "workshop", title: "إغلاق الورشة وأوامر الصيانة", desc: "أوامر الصيانة وما صُرف لها من قطع غيار المخزن." },
+  { key: "fuel", title: "إغلاق استهلاك السولار والوقود", desc: "سجلات التزود بالوقود وقراءات العداد." },
+  { key: "treasury", title: "إغلاق الخزينة والعهدة وترحيل الأرصدة الافتتاحية", desc: "حركات الخزينة والعهدة والمصروفات، ويُرحَّل رصيد كل حساب خزينة كرصيد افتتاحي للشهر الجديد." },
+] as const;
+export type ClosingModule = (typeof CLOSING_MODULES)[number]["key"];
+
+export interface ModuleClosing {
+  id: string;
+  month: string;
+  module: ClosingModule;
+  clientId: string;
+  clientName: string;
+  locked: boolean;
+  snapshot: Record<string, any>;
+  closedAt: string;
+  closedBy: string;
+  unlockedBy: string;
+}
+
+export async function fetchModuleClosings(month: string): Promise<ModuleClosing[]> {
+  const { data, error } = await supabase.from("module_closings").select("*, clients(client_name)").eq("month", month).order("closed_at");
+  if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل حالة الإغلاق"));
+  return (data ?? []).map((r: any) => ({ id: r.id, month: r.month, module: r.module, clientId: r.client_id ?? "", clientName: r.clients?.client_name ?? "", locked: r.locked !== false, snapshot: r.snapshot ?? {}, closedAt: r.closed_at, closedBy: r.closed_by ?? "", unlockedBy: r.unlocked_by ?? "" }));
+}
+
+/** لقطة الإغلاق لكل قسم (وأي ترحيل لازم يحصل قبل القفل). */
+async function buildClosingSnapshot(month: string, module: ClosingModule, clientId: string): Promise<{ snapshot: Record<string, any>; carry?: () => Promise<void> }> {
   const next = nextMonthPrefix(month);
+  const start = `${month}-01`;
   const nextStart = `${next}-01`;
   const period: Period = month;
-
-  const [{ data: tRows, error: tErr }, custody, { data: shifts, error: sErr }, { data: ledger, error: lErr }, { data: clients }, drivers, employees, adj] = await Promise.all([
-    pageAll((f, t) => supabase.from("treasury").select("date, account, opening, deposits, withdrawals, created_at").lt("date", nextStart).order("id").range(f, t)),
-    fetchCustody(),
-    pageAll((f, t) => supabase.from("dispatch_shifts").select("client_id, bus_value").lt("op_date", nextStart).order("id").range(f, t)),
-    pageAll((f, t) => supabase.from("client_ledger_entries").select("client_id, debit, credit").lt("entry_date", nextStart).order("id").range(f, t)),
-    supabase.from("clients").select("id, client_name"),
-    fetchDriverPayroll(period),
-    fetchEmployeePayroll(period),
-    fetchPayrollAdjustments(period),
-  ]);
-  if (tErr) throw new Error(dbErrorMessage(tErr, "تعذر قراءة الخزينة"));
-  if (sErr) throw new Error(dbErrorMessage(sErr, "تعذر قراءة ورديات الشركات"));
-  if (lErr) throw new Error(dbErrorMessage(lErr, "تعذر قراءة قيود الشركات"));
-
-  const treasury = computeTreasuryClosings(
-    (tRows ?? []).map((r: any) => ({ date: r.date, account: r.account, opening: Number(r.opening ?? 0), deposits: Number(r.deposits ?? 0), withdrawals: Number(r.withdrawals ?? 0), createdAt: r.created_at })),
-    nextStart,
-  );
-
-  const names = new Map((clients ?? []).map((c: any) => [c.id as string, c.client_name as string]));
-  const recv = new Map<string, number>();
-  for (const s of shifts ?? []) if ((s as any).client_id) recv.set((s as any).client_id, (recv.get((s as any).client_id) ?? 0) + Number((s as any).bus_value ?? 0));
-  for (const e of ledger ?? []) recv.set((e as any).client_id, (recv.get((e as any).client_id) ?? 0) + Number((e as any).debit ?? 0) - Number((e as any).credit ?? 0));
-  const clientsReceivable = [...recv.entries()].filter(([, v]) => Math.abs(v) > 0.001).map(([id, closing]) => ({ client: names.get(id) ?? id, closing })).sort((a, b) => b.closing - a.closing);
-
-  let adjTotal = 0;
-  for (const a of adj.values()) adjTotal += a.bonus - a.advances - a.penalties - a.tolls;
-  const payrollNet = drivers.reduce((s, d) => s + d.netSalary, 0) + employees.reduce((s, e) => s + e.netSalary, 0) + adjTotal;
-
-  const snapshot: MonthClosingSnapshot = {
-    treasury,
-    treasuryTotal: treasury.reduce((s, t) => s + t.closing, 0),
-    custodyClosing: computeCustody(custody, { from: "", to: `${month}-31` }).closing,
-    clientsReceivable,
-    clientsTotal: clientsReceivable.reduce((s, c) => s + c.closing, 0),
-    payrollNet,
-  };
-
-  // ترحيل الأرصدة الافتتاحية للخزينة (حركة صفرية بتاريخ أول الشهر الجديد)
-  const { data: existing } = await supabase.from("treasury").select("account").eq("is_rollover", true).eq("date", nextStart);
-  const have = new Set((existing ?? []).map((r: any) => r.account as string));
-  const toInsert = treasury
-    .filter((t) => !have.has(t.account))
-    .map((t) => ({ date: nextStart, account: t.account, opening: t.closing, deposits: 0, withdrawals: 0, is_rollover: true, notes: `رصيد افتتاحي — ترحيل من إغلاق ${month}` }));
-  if (toInsert.length) {
-    const { error } = await supabase.from("treasury").insert(toInsert);
-    if (error) throw new Error(dbErrorMessage(error, "تعذر ترحيل أرصدة الخزينة"));
+  if (module === "treasury") {
+    const [{ data: tRows, error }, custody] = await Promise.all([
+      pageAll((f, t) => supabase.from("treasury").select("date, account, opening, deposits, withdrawals, created_at").lt("date", nextStart).order("id").range(f, t)),
+      fetchCustody(),
+    ]);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر قراءة الخزينة"));
+    const treasury = computeTreasuryClosings((tRows ?? []).map((r: any) => ({ date: r.date, account: r.account, opening: Number(r.opening ?? 0), deposits: Number(r.deposits ?? 0), withdrawals: Number(r.withdrawals ?? 0), createdAt: r.created_at })), nextStart);
+    const snapshot = { treasury, treasuryTotal: treasury.reduce((s, t) => s + t.closing, 0), custodyClosing: computeCustody(custody, { from: "", to: `${month}-31` }).closing };
+    const carry = async () => {
+      const { data: existing } = await supabase.from("treasury").select("account").eq("is_rollover", true).eq("date", nextStart);
+      const have = new Set((existing ?? []).map((r: any) => r.account as string));
+      const rows = treasury.filter((t) => !have.has(t.account)).map((t) => ({ date: nextStart, account: t.account, opening: t.closing, deposits: 0, withdrawals: 0, is_rollover: true, notes: `رصيد افتتاحي — ترحيل من إغلاق ${month}` }));
+      if (rows.length) {
+        const { error: e } = await supabase.from("treasury").insert(rows);
+        if (e) throw new Error(dbErrorMessage(e, "تعذر ترحيل أرصدة الخزينة"));
+      }
+    };
+    return { snapshot, carry };
   }
+  if (module === "clients") {
+    const [{ data: shifts, error: sErr }, { data: ledger, error: lErr }, { data: clients }] = await Promise.all([
+      pageAll((f, t) => supabase.from("dispatch_shifts").select("client_id, bus_value").lt("op_date", nextStart).order("id").range(f, t)),
+      pageAll((f, t) => supabase.from("client_ledger_entries").select("client_id, debit, credit").lt("entry_date", nextStart).order("id").range(f, t)),
+      supabase.from("clients").select("id, client_name"),
+    ]);
+    if (sErr) throw new Error(dbErrorMessage(sErr, "تعذر قراءة ورديات الشركات"));
+    if (lErr) throw new Error(dbErrorMessage(lErr, "تعذر قراءة قيود الشركات"));
+    const names = new Map((clients ?? []).map((c: any) => [c.id as string, c.client_name as string]));
+    const recv = new Map<string, number>();
+    for (const x of shifts ?? []) if ((x as any).client_id) recv.set((x as any).client_id, (recv.get((x as any).client_id) ?? 0) + Number((x as any).bus_value ?? 0));
+    for (const e of ledger ?? []) recv.set((e as any).client_id, (recv.get((e as any).client_id) ?? 0) + Number((e as any).debit ?? 0) - Number((e as any).credit ?? 0));
+    const list = [...recv.entries()].filter(([id, v]) => (!clientId || id === clientId) && Math.abs(v) > 0.001).map(([id, closing]) => ({ client: names.get(id) ?? id, closing })).sort((a, b) => b.closing - a.closing);
+    return { snapshot: { receivable: list, total: list.reduce((s, c) => s + c.closing, 0) } };
+  }
+  if (module === "payroll") {
+    const [drivers, employees, adj] = await Promise.all([fetchDriverPayroll(period), fetchEmployeePayroll(period), fetchPayrollAdjustments(period)]);
+    let adjTotal = 0;
+    for (const a of adj.values()) adjTotal += a.bonus - a.advances - a.penalties - a.tolls;
+    return { snapshot: { drivers: drivers.length, employees: employees.length, payrollNet: drivers.reduce((s, d) => s + d.netSalary, 0) + employees.reduce((s, e) => s + e.netSalary, 0) + adjTotal } };
+  }
+  if (module === "suppliers") {
+    const [suppliers, { data: rented }] = await Promise.all([
+      fetchSuppliers(),
+      pageAll((f, t) => supabase.from("rented_bus_operations").select("rental_fare, advance_applied, paid").eq("paid", false).lt("op_date", nextStart).order("id").range(f, t)),
+    ]);
+    const payable = suppliers.reduce((s, x) => s + x.balanceDue, 0);
+    const owners = (rented ?? []).reduce((s: number, r: any) => s + Number(r.rental_fare ?? 0), 0);
+    return { snapshot: { suppliersPayable: payable, suppliersCount: suppliers.length, rentedOwnersUnpaid: owners } };
+  }
+  if (module === "workshop") {
+    const [{ data: orders }, { data: out }] = await Promise.all([
+      supabase.from("maintenance_orders").select("total_cost, labor_cost, status").gte("order_date", start).lt("order_date", nextStart),
+      supabase.from("inventory_transactions").select("total_cost").eq("type", "OUT").gte("created_at", start).lt("created_at", nextStart),
+    ]);
+    const active = (orders ?? []).filter((o: any) => o.status !== "ملغي");
+    return { snapshot: { orders: active.length, totalCost: active.reduce((s: number, o: any) => s + Number(o.total_cost ?? 0), 0), labor: active.reduce((s: number, o: any) => s + Number(o.labor_cost ?? 0), 0), partsFromStock: (out ?? []).reduce((s: number, t: any) => s + Number(t.total_cost ?? 0), 0) } };
+  }
+  const { data: fuel } = await pageAll((f, t) => supabase.from("fuel_logs").select("liters, cost").gte("date", start).lt("date", nextStart).order("id").range(f, t));
+  return { snapshot: { fills: (fuel ?? []).length, liters: (fuel ?? []).reduce((s: number, r: any) => s + Number(r.liters ?? 0), 0), cost: (fuel ?? []).reduce((s: number, r: any) => s + Number(r.cost ?? 0), 0) } };
+}
 
-  const who = closedBy || (await supabase.auth.getUser()).data.user?.email || "";
-  const { data, error } = relock
-    ? await supabase.from("month_closings").update({ snapshot, locked: true, closed_at: new Date().toISOString(), closed_by: who || null }).eq("month", month).select("*").single()
-    : await supabase.from("month_closings").insert({ month, closed_by: who || null, snapshot, locked: true }).select("*").single();
+/** يقفل قسمًا واحدًا لشهر معيّن (الشركات: إجمالي أو شركة محددة). يعمل أيضًا كـ«إعادة قفل» بعد فتح التعديل. */
+export async function closeModuleMonth(month: string, module: ClosingModule, clientId = "") {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("اختر الشهر");
+  const cid = module === "clients" ? clientId : "";
+  let q = supabase.from("module_closings").select("id, locked").eq("month", month).eq("module", module);
+  q = cid ? q.eq("client_id", cid) : q.is("client_id", null);
+  const { data: existing } = await q.maybeSingle();
+  if (existing && existing.locked !== false) throw new Error("هذا القسم مغلق بالفعل لهذا الشهر");
+  const { snapshot, carry } = await buildClosingSnapshot(month, module, cid);
+  if (carry) await carry();
+  const who = (await supabase.auth.getUser()).data.user?.email || "";
+  const row = { snapshot, locked: true, closed_at: new Date().toISOString(), closed_by: who || null };
+  const { error } = existing
+    ? await supabase.from("module_closings").update(row).eq("id", existing.id)
+    : await supabase.from("module_closings").insert({ ...row, month, module, client_id: cid || null });
   if (error) throw new Error(dbErrorMessage(error, "تعذر حفظ الإغلاق"));
-  return { id: data.id, month: data.month, closedAt: data.closed_at, closedBy: data.closed_by ?? "", snapshot, locked: true, unlockedBy: "" };
+}
+
+/** إلغاء الإغلاق / فتح التعديل لقسم واحد (للأدمن فقط — يفرضه تريجر قاعدة البيانات أيضًا). */
+export async function unlockModuleMonth(id: string) {
+  const who = (await supabase.auth.getUser()).data.user?.email || "";
+  const { error } = await supabase.from("module_closings").update({ locked: false, unlocked_at: new Date().toISOString(), unlocked_by: who || null }).eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, "تعذر فتح التعديل"));
 }
 
 // ---- مؤشر كفاءة السولار لكل عربية (من سجلات السولار وقراءات العداد) ----
@@ -4548,11 +4574,4 @@ export function computeFuelAlerts(rows: FleetFuelRow[], margin = 0.3): FuelAlert
     }
   }
   return out.sort((a, b) => b.wastePct - a.wastePct);
-}
-
-/** فتح شهر مغلق للتعديل (للأدمن فقط — يفرضه تريجر قاعدة البيانات أيضًا). يُعاد قفله بـ«إغلاق الشهر المالي». */
-export async function unlockFinancialMonth(month: string) {
-  const who = (await supabase.auth.getUser()).data.user?.email || "";
-  const { error } = await supabase.from("month_closings").update({ locked: false, unlocked_at: new Date().toISOString(), unlocked_by: who || null }).eq("month", month);
-  if (error) throw new Error(dbErrorMessage(error, "تعذر فتح الشهر للتعديل"));
 }

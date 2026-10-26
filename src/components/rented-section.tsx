@@ -316,13 +316,11 @@ export function RentedSection() {
           <p className="py-4 text-center text-sm text-muted-foreground">سجّل أول حركة لعربية مستأجرة لعرض الكشف.</p>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4">
               <StatCard label="إجمالي المستحق" value={currency(ledger.totalDue)} icon={Receipt} />
               <StatCard label="إجمالي المسدد" value={currency(ledger.totalPaid)} icon={Wallet} />
               <StatCard label="سلف / دفعات تحت الحساب" value={currency(ledger.openAdvances)} icon={Wallet} />
               <StatCard label="المتبقي" value={currency(ledger.remaining)} icon={Bus} />
-              <StatCard label="إيراد الشركات" value={currency(ledger.totalClientFare)} icon={Receipt} />
-              <StatCard label="صافي الربح" value={currency(ledger.totalNet)} icon={Wallet} />
             </div>
             <div className="no-print mt-3 flex flex-wrap items-center gap-2">
               <Button className="bg-primary text-primary-foreground" disabled={toSettle.length === 0} onClick={() => setConfirmSettle(true)}>
@@ -441,7 +439,7 @@ export function RentedSection() {
             </>
           )}
           <p style={{ marginTop: 14, fontWeight: 700 }}>
-            إجمالي المستحق: {currency(ledger.totalDue)} &nbsp;|&nbsp; إجمالي المسدد: {currency(ledger.totalPaid)} &nbsp;|&nbsp; سلف غير مخصومة: {currency(ledger.openAdvances)} &nbsp;|&nbsp; المتبقي: {currency(ledger.remaining)} &nbsp;|&nbsp; إيراد الشركات: {currency(ledger.totalClientFare)} &nbsp;|&nbsp; صافي الربح: {currency(ledger.totalNet)}
+            إجمالي المستحق: {currency(ledger.totalDue)} &nbsp;|&nbsp; إجمالي المسدد: {currency(ledger.totalPaid)} &nbsp;|&nbsp; سلف غير مخصومة: {currency(ledger.openAdvances)} &nbsp;|&nbsp; المتبقي: {currency(ledger.remaining)}
           </p>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 40 }}>
             <span>التاريخ: ____ / ____ / ________</span>

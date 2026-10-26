@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2, X, TrendingUp, TrendingDown, Wallet } from "lucide-react";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
+import { useAdminGuard } from "@/lib/permissions";
+import { AdminLockBanner } from "@/components/admin-lock-banner";
 import { DataTable, PageHeader, Panel, StatCard, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +78,7 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 type DeleteTarget = { kind: "treasury" | "expense" | "loan"; id: string; label: string } | null;
 
 function FinancePage() {
+  const { isAdmin, role, guard, notice, dismiss } = useAdminGuard();
   const [treasury, setTreasury] = useState<TreasuryEntry[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -263,6 +266,7 @@ function FinancePage() {
   return (
     <AppShell>
       <PageHeader title="المالية والخزينة" subtitle="الخزينة، المصروفات والموردون، والقروض" />
+      <AdminLockBanner isAdmin={isAdmin} role={role} notice={notice} onDismiss={dismiss} />
       <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
         <span>الإغلاق المالي الشهري صار لكل قسم على حدة: شركات، مرتبات، موردين، ورشة، سولار، وخزينة وعهدة.</span>
         <Link to="/closing" className="rounded-lg bg-primary px-3 py-1.5 font-bold text-primary-foreground">فتح لوحة الإغلاق المالي الشهري 🔒</Link>
@@ -357,14 +361,14 @@ function FinancePage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
-                          <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditTreasury(t)}>
+                          <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={guard(() => openEditTreasury(t))}>
                             <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             size="sm"
                             variant="ghost"
                             className="text-destructive hover:bg-destructive/10"
-                            onClick={() => setDeleteTarget({ kind: "treasury", id: t.id, label: `رصيد ${t.account} بتاريخ ${t.date}` })}
+                            onClick={guard(() => setDeleteTarget({ kind: "treasury", id: t.id, label: `رصيد ${t.account} بتاريخ ${t.date}` }))}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -409,14 +413,14 @@ function FinancePage() {
                     <td className="px-4 py-3 text-warning">{e.supplierId ? currency(e.supplierBalance) : "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditExpense(e)}>
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={guard(() => openEditExpense(e))}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
                           className="text-destructive hover:bg-destructive/10"
-                          onClick={() => setDeleteTarget({ kind: "expense", id: e.id, label: `مصروف ${e.category}` })}
+                          onClick={guard(() => setDeleteTarget({ kind: "expense", id: e.id, label: `مصروف ${e.category}` }))}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -449,14 +453,14 @@ function FinancePage() {
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="font-bold">{l.lender}</h3>
                       <div className="flex items-center gap-1">
-                        <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={() => openEditLoan(l)}>
+                        <Button size="sm" variant="ghost" className="h-11 w-11 p-0 text-primary sm:h-7 sm:w-7 hover:bg-primary/10" onClick={guard(() => openEditLoan(l))}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-11 w-11 p-0 text-destructive sm:h-7 sm:w-7 hover:bg-destructive/10"
-                          onClick={() => setDeleteTarget({ kind: "loan", id: l.id, label: `التزام ${l.lender}` })}
+                          onClick={guard(() => setDeleteTarget({ kind: "loan", id: l.id, label: `التزام ${l.lender}` }))}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

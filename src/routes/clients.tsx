@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Bus, FileText, MapPin, Pencil, Plus, Printer, Receipt, Trash2 } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { AppShell } from "@/components/app-shell";
+import { useAdminGuard } from "@/lib/permissions";
+import { AdminLockBanner } from "@/components/admin-lock-banner";
 import { DataTable, PageHeader, Panel, StatCard, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +63,7 @@ export const Route = createFileRoute("/clients")({
 const dayName = (dateStr: string) => new Date(dateStr).toLocaleDateString("ar-EG", { weekday: "long" });
 
 function ClientsPage() {
+  const { isAdmin, role, guard, notice, dismiss } = useAdminGuard();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +227,7 @@ function ClientsPage() {
   return (
     <AppShell>
       <PageHeader title="كشف حساب ومطالبات الشركات" subtitle="إدارة الشركات العميلة وخطوطها وكشوف الحساب الشهرية" />
+      <AdminLockBanner isAdmin={isAdmin} role={role} notice={notice} onDismiss={dismiss} />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -364,10 +368,10 @@ function ClientsPage() {
                         <Button variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openRoutes(c)}>
                           <MapPin className="ml-2 h-4 w-4" /> الخطوط المسجلة
                         </Button>
-                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEdit(c)}>
+                        <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={guard(() => openEdit(c))}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(c)}>
+                        <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={guard(() => setDeleteTarget(c))}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -536,10 +540,10 @@ function ClientsPage() {
                     <p className="text-xs text-muted-foreground">السعة: {r.vehicleCapacity} راكب</p>
                   </div>
                   <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditRoute(r)}>
+                    <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={guard(() => openEditRoute(r))}>
                       <Pencil className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteRouteTarget(r)}>
+                    <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={guard(() => setDeleteRouteTarget(r))}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>

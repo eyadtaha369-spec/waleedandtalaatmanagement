@@ -76,3 +76,19 @@ export function useMyRole(): RoleName | null {
   }, []);
   return role;
 }
+
+export const ADMIN_ONLY_MESSAGE = "عذراً، التعديل أو الحذف في السجلات المالية متاح لمسؤول النظام (المدير) فقط";
+
+/** تعديل/حذف السجلات المالية للمدير فقط: guard(fn) يمنع التنفيذ لغير المدير ويُظهر التنبيه. */
+export function useAdminGuard() {
+  const role = useMyRole();
+  const isAdmin = role === "admin";
+  const [notice, setNotice] = useState(false);
+  const guard =
+    <A extends unknown[]>(fn: (...args: A) => void) =>
+    (...args: A) => {
+      if (isAdmin) fn(...args);
+      else setNotice(true);
+    };
+  return { isAdmin, role, guard, notice, dismiss: () => setNotice(false) };
+}

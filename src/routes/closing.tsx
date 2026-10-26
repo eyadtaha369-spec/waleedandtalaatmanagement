@@ -68,6 +68,10 @@ function ClosingPage() {
   }, []);
 
   const run = async (key: string, fn: () => Promise<void>, ok: string) => {
+    if (!isAdmin) {
+      setMsg({ ok: false, text: "عذراً، الإغلاق المالي وفتح الشهر متاحان لمسؤول النظام (المدير) فقط" });
+      return;
+    }
     setBusy(key);
     setMsg(null);
     try {
@@ -90,6 +94,7 @@ function ClosingPage() {
           <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-48 border-border bg-input/60" />
         </div>
       </div>
+      {!isAdmin && <p className="mb-4 rounded-lg border border-[#EF4444]/50 bg-[#EF4444]/10 p-3 text-sm font-bold text-[#EF4444]">🔒 الإغلاق المالي وفتح الشهر متاحان لمسؤول النظام (المدير) فقط — الصفحة للعرض.</p>}
       {msg && <p className={`mb-4 rounded-lg border p-3 text-sm ${msg.ok ? "border-success/40 bg-success/10 text-success" : "border-destructive/40 bg-destructive/10 text-destructive"}`}>{msg.text}</p>}
 
       <div className="grid gap-4">
@@ -125,7 +130,7 @@ function ClosingPage() {
                       <PersonPicker value={scope} options={[{ value: "", label: "إجمالي الشركات", group: "الكل" }, ...clients.map((c) => ({ value: c.id, label: c.name, group: "شركة" }))]} onChange={setScope} placeholder="إجمالي الشركات" />
                     </div>
                   )}
-                  <Button className="bg-primary text-primary-foreground" disabled={busy === m.key || scopeLocked} onClick={() => run(m.key, () => closeModuleMonth(month, m.key, m.key === "clients" ? scope : ""), `تم ${scopeRow ? "إعادة قفل" : "إغلاق"} ${m.title.replace("إغلاق ", "")} لشهر ${month}`)}>
+                  <Button className="bg-primary text-primary-foreground" disabled={!isAdmin || busy === m.key || scopeLocked} onClick={() => run(m.key, () => closeModuleMonth(month, m.key, m.key === "clients" ? scope : ""), `تم ${scopeRow ? "إعادة قفل" : "إغلاق"} ${m.title.replace("إغلاق ", "")} لشهر ${month}`)}>
                     {scopeRow && !scopeRow.locked ? "إعادة القفل 🔒" : "إغلاق الشهر 🔒"}
                   </Button>
                   {isAdmin && scopeRow?.locked && (
@@ -174,7 +179,7 @@ function ClosingPage() {
                             </td>
                             <td className="no-print px-3 py-2">
                               <div className="flex flex-wrap gap-2">
-                                <Button size="sm" className="bg-primary text-primary-foreground" disabled={locked || busy === `s${s.id}`} onClick={() => run(`s${s.id}`, () => closeSupplierMonth(month, s.id), `تم ${c ? "إعادة قفل" : "إغلاق"} حساب ${s.name} لشهر ${month}`)}>
+                                <Button size="sm" className="bg-primary text-primary-foreground" disabled={!isAdmin || locked || busy === `s${s.id}`} onClick={() => run(`s${s.id}`, () => closeSupplierMonth(month, s.id), `تم ${c ? "إعادة قفل" : "إغلاق"} حساب ${s.name} لشهر ${month}`)}>
                                   {c && !c.locked ? "إعادة القفل 🔒" : "إغلاق الشهر 🔒"}
                                 </Button>
                                 {isAdmin && locked && c && (

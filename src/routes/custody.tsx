@@ -4,6 +4,8 @@ import { ArrowDownCircle, ArrowUpCircle, Plus, Printer, Scale } from "lucide-rea
 import { BusPicker } from "@/components/bus-picker";
 import { PersonPicker, type PersonOption } from "@/components/person-picker";
 import { AppShell } from "@/components/app-shell";
+import { useAdminGuard } from "@/lib/permissions";
+import { AdminLockBanner } from "@/components/admin-lock-banner";
 import { DataTable, PageHeader, Panel, StatCard } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +55,7 @@ const PRESETS: { key: CustodyPreset; label: string }[] = [
 ];
 
 function CustodyPage() {
+  const { isAdmin, role, guard, notice, dismiss } = useAdminGuard();
   const [entries, setEntries] = useState<CustodyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -189,6 +192,7 @@ function CustodyPage() {
   return (
     <AppShell>
       <PageHeader title="عهدة الخزينة" subtitle="تغذية العهدة وصرف المصروفات منها مع الرصيد الحي" />
+      <AdminLockBanner isAdmin={isAdmin} role={role} notice={notice} onDismiss={dismiss} />
       <div className="no-print mb-4 flex flex-wrap items-center gap-2 text-sm">
         <Link to="/finance" className="text-primary hover:underline">← المالية والخزينة</Link>
       </div>
@@ -248,8 +252,8 @@ function CustodyPage() {
                     <span className="text-xs text-muted-foreground">مرتبط بمصروف — عدّله من شاشته</span>
                   ) : (
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="border-border" onClick={() => openEdit(r)}>تعديل ✏️</Button>
-                      <Button size="sm" variant="outline" className="border-destructive/50 text-destructive" onClick={() => setTarget(r)}>حذف 🗑️</Button>
+                      <Button size="sm" variant="outline" className="border-border" onClick={guard(() => openEdit(r))}>تعديل ✏️</Button>
+                      <Button size="sm" variant="outline" className="border-destructive/50 text-destructive" onClick={guard(() => setTarget(r))}>حذف 🗑️</Button>
                     </div>
                   )}
                 </td>

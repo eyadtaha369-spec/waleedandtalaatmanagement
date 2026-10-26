@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { BellRing, ChevronDown, FileText, Paperclip, Pencil, Plus, Printer, Receipt, Trash2, Wallet } from "lucide-react";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { AppShell } from "@/components/app-shell";
+import { useAdminGuard } from "@/lib/permissions";
+import { AdminLockBanner } from "@/components/admin-lock-banner";
 import { PageHeader, StatCard, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +72,7 @@ const kindTone: Record<string, string> = {
 };
 
 function SuppliersPage() {
+  const { isAdmin, role, guard, notice, dismiss } = useAdminGuard();
   const [suppliers, setSuppliers] = useState<SupplierSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -301,6 +304,7 @@ function SuppliersPage() {
   return (
     <AppShell>
       <PageHeader title="حسابات الموردين والمشتريات" subtitle="فواتير الموردين، الدفعات المسددة، ومواعيد الاستحقاق" />
+      <AdminLockBanner isAdmin={isAdmin} role={role} notice={notice} onDismiss={dismiss} />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
@@ -397,10 +401,10 @@ function SuppliersPage() {
                           <Printer className="ml-1 h-4 w-4" /> طباعة كشف حساب المورد
                         </Button>
                         <div className="mr-auto flex gap-1">
-                          <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditSupplier(s)}>
+                          <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={guard(() => openEditSupplier(s))}>
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => setDeleteSupplierTarget(s)}>
+                          <Button size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={guard(() => setDeleteSupplierTarget(s))}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -434,12 +438,12 @@ function SuppliersPage() {
                                     </Button>
                                   )}
                                   {r.source === "invoice" && (
-                                    <Button size="sm" variant="ghost" className="h-7 text-primary hover:bg-primary/10" onClick={() => openEditInvoice(s, r)}>
+                                    <Button size="sm" variant="ghost" className="h-7 text-primary hover:bg-primary/10" onClick={guard(() => openEditInvoice(s, r))}>
                                       <Pencil className="h-3.5 w-3.5" />
                                     </Button>
                                   )}
                                   {r.source !== "inventory" && (
-                                    <Button size="sm" variant="ghost" className="h-7 text-destructive hover:bg-destructive/10" onClick={() => setDeleteEntry({ supplier: s, entry: r })}>
+                                    <Button size="sm" variant="ghost" className="h-7 text-destructive hover:bg-destructive/10" onClick={guard(() => setDeleteEntry({ supplier: s, entry: r }))}>
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </Button>
                                   )}

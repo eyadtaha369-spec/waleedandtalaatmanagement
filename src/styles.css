@@ -300,3 +300,8 @@
   .stmt-print .stmt-sign span { width: 30%; text-align: center; font-weight: 700; }
   .stmt-print .stmt-sign i { display: block; border-top: 1px solid #0B132B; margin-top: 40px; }
 }
+@media print {
+  .stmt-print td, .stmt-print th { white-space: nowrap; }
+  .stmt-print td:nth-child(5):not(.num) { white-space: normal; }
+  .stmt-print table { page-break-inside: auto; }
+}

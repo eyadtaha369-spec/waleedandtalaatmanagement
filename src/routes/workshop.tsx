@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, Check, ChevronsUpDown, FileText, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
+import { ReportPrint } from "@/components/report-print";
 import { BusPicker } from "@/components/bus-picker";
 import { ItemStatementSheet } from "@/components/item-statement";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
@@ -43,6 +44,10 @@ import {
   computeFuelAlerts,
   inDateRange,
   rangeForPreset,
+  fetchInventoryMovements,
+  periodLabel,
+  type DateRange,
+  type InventoryMovementRow,
   computeOrderTotals,
   computeFuelByBus,
   dbErrorMessage,
@@ -538,6 +543,47 @@ function WorkshopPage() {
   };
 
   const [newStation, setNewStation] = useState("");
+  const ALL: DateRange = { from: "", to: "" };
+  const [ordRange, setOrdRange] = useState<DateRange>(ALL);
+  const [invRange, setInvRange] = useState<DateRange>(ALL);
+  const [fuelRange, setFuelRange] = useState<DateRange>(ALL);
+  const [movements, setMovements] = useState<InventoryMovementRow[]>([]);
+  const [printKind, setPrintKind] = useState<"orders" | "inventory" | "fuel" | null>(null);
+  useEffect(() => {
+    fetchInventoryMovements(invRange).then(setMovements).catch(() => setMovements([]));
+  }, [invRange, inventory, purchases]);
+  const ordersInRange = useMemo(() => orders.filter((o) => inDateRange(o.date, ordRange)), [orders, ordRange]);
+  const orderTotals = useMemo(() => {
+    const live = ordersInRange.filter((o) => o.status !== "ملغي");
+    const parts = live.reduce((a, o) => a + o.items.reduce((x, i) => x + i.quantity * i.unitPrice, 0), 0);
+    const labor = live.reduce((a, o) => a + o.laborCost, 0);
+    return { count: live.length, parts, labor, total: parts + labor };
+  }, [ordersInRange]);
+  const purchasesInRange = useMemo(() => purchases.filter((p) => inDateRange(p.date, invRange)), [purchases, invRange]);
+  const moveTotals = useMemo(() => ({ inQty: movements.reduce((a, m) => a + m.inQty, 0), inValue: movements.reduce((a, m) => a + m.inValue, 0), outQty: movements.reduce((a, m) => a + m.outQty, 0), outValue: movements.reduce((a, m) => a + m.outValue, 0) }), [movements]);
+  const fuelInRange = useMemo(() => fuelLogs.filter((l) => inDateRange(l.date, fuelRange)), [fuelLogs, fuelRange]);
+  const fuelPeriod = useMemo(() => ({ fills: fuelInRange.length, liters: fuelInRange.reduce((a, l) => a + l.liters, 0), cost: fuelInRange.reduce((a, l) => a + l.cost, 0) }), [fuelInRange]);
+  const printReport = (kind: "orders" | "inventory" | "fuel") => {
+    setPrintKind(kind);
+    document.body.classList.add("print-statement");
+    const cleanup = () => {
+      document.body.classList.remove("print-statement");
+      setPrintKind(null);
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    setTimeout(() => window.print(), 250);
+  };
+  const SummaryStrip = ({ items }: { items: [string, string][] }) => (
+    <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+      {items.map(([l, v]) => (
+        <div key={l} className="rounded-lg border border-border bg-secondary/30 p-3">
+          <p className="text-xs text-muted-foreground">{l}</p>
+          <p className="mt-1 font-bold text-primary">{v}</p>
+        </div>
+      ))}
+    </div>
+  );
   const setFuelCalc = (patch: Partial<typeof emptyFuelForm>) =>
     setFuelForm((f) => {
       const n = { ...f, ...patch };
@@ -552,7 +598,7 @@ function WorkshopPage() {
     const sum = (rows: FuelLog[]) => ({ liters: rows.reduce((a, r) => a + r.liters, 0), cost: rows.reduce((a, r) => a + r.cost, 0) });
     return { day: sum(fuelLogs.filter((l) => l.date === today)), month: sum(fuelLogs.filter((l) => l.date.startsWith(month))) };
   }, [fuelLogs]);
-  const fuelByBus = useMemo(() => computeFuelByBus(fuelLogs), [fuelLogs]);
+  const fuelByBus = useMemo(() => computeFuelByBus(fuelInRange), [fuelInRange]);
   const fuelFills = useMemo(() => computeFuelFills(fuelLogs.map((f) => ({ id: f.id, bus: f.bus, date: f.date, order: f.createdAt, liters: f.liters, cost: f.cost, currentOdometer: f.currentOdometer, odoStart: f.odoStart, odoEnd: f.odoEnd }))), [fuelLogs]);
   const plateOf = (code: string) => busList.find((b) => b.code === code)?.plate ?? code;
 
@@ -642,11 +688,14 @@ function WorkshopPage() {
               onExport={() =>
                 exportToExcel(
                   "أوامر الصيانة",
-                  orders.map((o) => ({ الأمر: o.code, العربية: o.bus, التاريخ: o.date, العطل: o.issue, "قطع الغيار": o.parts, المصنعية: o.laborCost, الإجمالي: o.cost, الحالة: o.status })),
+                  ordersInRange.map((o) => ({ الأمر: o.code, العربية: o.bus, التاريخ: o.date, العطل: o.issue, "قطع الغيار": o.parts, المصنعية: o.laborCost, الإجمالي: o.cost, الحالة: o.status })),
                 )
               }
               extra={
                 <>
+                  <Button variant="outline" className="border-border" onClick={() => printReport("orders")}>
+                    <Printer className="ml-2 h-4 w-4" /> طباعة التقرير
+                  </Button>
                   <Button variant="outline" className="border-border" onClick={() => { setLedgerBus(busCodes[0] ?? ""); setLedgerOpen(true); }}>
                     <FileText className="ml-2 h-4 w-4" /> كشف صيانة السيارة
                   </Button>
@@ -656,18 +705,20 @@ function WorkshopPage() {
                 </>
               }
             />
+            <DateRangeFilter value={ordRange} onChange={setOrdRange} className="mb-2" />
+            <SummaryStrip items={[["عدد الأوامر (بدون الملغي)", String(orderTotals.count)], ["قطع الغيار", currency(orderTotals.parts)], ["المصنعية", currency(orderTotals.labor)], ["إجمالي تكلفة الفترة", currency(orderTotals.total)]]} />
             {loading ? (
               <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
             ) : (
-              <div className="grid gap-4 lg:grid-cols-4">
+              <div className="mt-4 grid gap-4 lg:grid-cols-4">
                 {columns.map((col) => (
                   <div key={col} className="rounded-xl border border-border bg-secondary/20 p-3">
                     <h3 className="mb-3 flex items-center justify-between text-sm font-bold">
                       <span>{col}</span>
-                      <StatusPill label={String(orders.filter((o) => o.status === col).length)} tone={statusTone(col)} />
+                      <StatusPill label={String(ordersInRange.filter((o) => o.status === col).length)} tone={statusTone(col)} />
                     </h3>
                     <div className="space-y-3">
-                      {orders
+                      {ordersInRange
                         .filter((o) => o.status === col && (o.code + o.bus + o.issue).includes(query))
                         .map((o) => (
                           <div key={o.id} className={`rounded-lg border border-border bg-card p-3 ${col === "ملغي" ? "opacity-70" : ""}`}>
@@ -732,6 +783,9 @@ function WorkshopPage() {
               onExport={() => exportToExcel("المخزن", inventory.map((i) => ({ الصنف: i.name, الكود: i.code, الوحدة: i.unitType, الرصيد: i.stock, "الحد الأدنى": i.minStock, "سعر الوحدة": i.unitPrice })))}
               extra={
                 <>
+                  <Button variant="outline" className="border-border" onClick={() => printReport("inventory")}>
+                    <Printer className="ml-2 h-4 w-4" /> طباعة تقرير الحركة
+                  </Button>
                   <Button variant="outline" className="border-border" onClick={() => setImportingInventory(true)}>
                     استيراد CSV
                   </Button>
@@ -781,12 +835,40 @@ function WorkshopPage() {
                 ))}
             </DataTable>
           </Panel>
+          <Panel title="حركة المخزن خلال الفترة (وارد / منصرف)" className="mt-4">
+            <DateRangeFilter value={invRange} onChange={setInvRange} className="mb-3" />
+            <DataTable head={["الصنف", "الوحدة", "الوارد (كمية)", "قيمة الوارد", "المنصرف (كمية)", "قيمة المنصرف"]}>
+              {movements.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-4 text-center text-muted-foreground">لا توجد حركة في هذه الفترة.</td></tr>
+              ) : (
+                movements.map((m) => (
+                  <tr key={m.inventoryId} className="transition-colors hover:bg-secondary/30">
+                    <td className="px-4 py-3 font-bold">{m.name}</td>
+                    <td className="px-4 py-3 text-xs">{m.unitType}</td>
+                    <td className="px-4 py-3">{fmtQty(m.inQty)}</td>
+                    <td className="px-4 py-3 text-success">{currency(m.inValue)}</td>
+                    <td className="px-4 py-3">{fmtQty(m.outQty)}</td>
+                    <td className="px-4 py-3 text-warning">{currency(m.outValue)}</td>
+                  </tr>
+                ))
+              )}
+              {movements.length > 0 && (
+                <tr className="bg-secondary/40 font-bold">
+                  <td className="px-4 py-3" colSpan={2}>الإجمالي</td>
+                  <td className="px-4 py-3">{fmtQty(moveTotals.inQty)}</td>
+                  <td className="px-4 py-3 text-success">{currency(moveTotals.inValue)}</td>
+                  <td className="px-4 py-3">{fmtQty(moveTotals.outQty)}</td>
+                  <td className="px-4 py-3 text-warning">{currency(moveTotals.outValue)}</td>
+                </tr>
+              )}
+            </DataTable>
+          </Panel>
           <Panel title="سجل التوريدات (إذون التوريد)" className="mt-4">
             <DataTable head={["التاريخ", "المورد", "الصنف", "الكمية", "سعر الوحدة", "الإجمالي", "رقم الفاتورة", "المرفق", "الإجراءات"]}>
-              {purchases.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-4 text-center text-muted-foreground">لا توجد توريدات بعد.</td></tr>
+              {purchasesInRange.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-4 text-center text-muted-foreground">لا توجد توريدات في هذه الفترة.</td></tr>
               ) : (
-                purchases.map((p) => (
+                purchasesInRange.map((p) => (
                   <tr key={p.id} className="transition-colors hover:bg-secondary/30">
                     <td className="px-4 py-3">{p.date}</td>
                     <td className="px-4 py-3">{p.supplierName}</td>
@@ -833,7 +915,11 @@ function WorkshopPage() {
               </div>
             ))}
           </div>
-          <Panel title="استهلاك السولار لكل سيارة">
+          <Panel title="فترة التقرير">
+            <DateRangeFilter value={fuelRange} onChange={setFuelRange} />
+            <SummaryStrip items={[["عدد مرات التزود", String(fuelPeriod.fills)], ["إجمالي اللترات", `${fmtQty(fuelPeriod.liters)} لتر`], ["إجمالي التكلفة", currency(fuelPeriod.cost)], ["متوسط سعر اللتر", fuelPeriod.liters ? currency(fuelPeriod.cost / fuelPeriod.liters) : "—"]]} />
+          </Panel>
+          <Panel title="استهلاك السولار لكل سيارة" className="mt-4">
             <DataTable head={["رقم العربية", "عدد مرات التزود", "إجمالي اللترات", "إجمالي التكلفة", "المسافة (كم)", "كم / لتر", "تكلفة الكم"]}>
               {fuelByBus.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-4 text-center text-muted-foreground">لا توجد سجلات بعد.</td></tr>
@@ -857,15 +943,20 @@ function WorkshopPage() {
               query={query}
               onQuery={setQuery}
               placeholder="ابحث برقم العربية أو السائق أو المحطة..."
-              onExport={() => exportToExcel("سجل السولار", fuelLogs.map((f) => ({ التاريخ: f.date, "رقم العربية": f.bus, السائق: f.driver, اللترات: f.liters, التكلفة: f.cost, المحطة: f.station })))}
+              onExport={() => exportToExcel("سجل السولار", fuelInRange.map((f) => ({ التاريخ: f.date, "رقم العربية": f.bus, السائق: f.driver, اللترات: f.liters, التكلفة: f.cost, المحطة: f.station })))}
               extra={
-                <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddFuel}>
-                  <Plus className="ml-2 h-4 w-4" /> إضافة سجل
-                </Button>
+                <>
+                  <Button variant="outline" className="border-border" onClick={() => printReport("fuel")}>
+                    <Printer className="ml-2 h-4 w-4" /> طباعة التقرير
+                  </Button>
+                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={openAddFuel}>
+                    <Plus className="ml-2 h-4 w-4" /> إضافة سجل
+                  </Button>
+                </>
               }
             />
             <DataTable head={["التاريخ", "رقم اللوحة", "اسم السائق", "العداد السابق", "العداد الحالي", "المسافة المقطوعة", "الكمية (لتر)", "المعدل (لتر/كم)", "التكلفة", "المحطة", "الإجراءات"]}>
-              {fuelLogs
+              {fuelInRange
                 .filter((f) => (f.bus + plateOf(f.bus) + f.driver + f.station).includes(query) || query === "")
                 .map((f) => (
                   <tr key={f.id} className="transition-colors hover:bg-secondary/30">
@@ -891,6 +982,15 @@ function WorkshopPage() {
                     </td>
                   </tr>
                 ))}
+              {fuelInRange.length > 0 && (
+                <tr className="bg-secondary/40 font-bold">
+                  <td className="px-4 py-3" colSpan={6}>الإجمالي ({fuelPeriod.fills} تزود)</td>
+                  <td className="px-4 py-3">{fmtQty(fuelPeriod.liters)}</td>
+                  <td className="px-4 py-3"></td>
+                  <td className="px-4 py-3 text-warning">{currency(fuelPeriod.cost)}</td>
+                  <td className="px-4 py-3" colSpan={2}></td>
+                </tr>
+              )}
             </DataTable>
           </Panel>
         </TabsContent>
@@ -1065,6 +1165,34 @@ function WorkshopPage() {
       </Dialog>
 
       <ItemStatementSheet item={statementItem} onClose={() => setStatementItem(null)} />
+
+      {printKind === "orders" && (
+        <ReportPrint
+          title="تقرير الورشة وأوامر الصيانة"
+          range={ordRange}
+          columns={["م", "التاريخ", "رقم الأمر", "العربية", "العطل / الخدمة", "قطع الغيار", "المصنعية", "الإجمالي", "الحالة"]}
+          rows={ordersInRange.map((o, i) => { const parts = o.items.reduce((x, it) => x + it.quantity * it.unitPrice, 0); return [i + 1, o.date, o.code, o.bus, o.issue, currency(parts), currency(o.laborCost), currency(o.cost), o.status]; })}
+          footer={["", "", "", "", `الإجمالي (${orderTotals.count} أمر بدون الملغي)`, currency(orderTotals.parts), currency(orderTotals.labor), currency(orderTotals.total), ""]}
+        />
+      )}
+      {printKind === "inventory" && (
+        <ReportPrint
+          title="تقرير حركة المخزن (وارد / منصرف)"
+          range={invRange}
+          columns={["م", "الصنف", "الوحدة", "الوارد (كمية)", "قيمة الوارد", "المنصرف (كمية)", "قيمة المنصرف"]}
+          rows={movements.map((m, i) => [i + 1, m.name, m.unitType, fmtQty(m.inQty), currency(m.inValue), fmtQty(m.outQty), currency(m.outValue)])}
+          footer={["", "الإجمالي", "", fmtQty(moveTotals.inQty), currency(moveTotals.inValue), fmtQty(moveTotals.outQty), currency(moveTotals.outValue)]}
+        />
+      )}
+      {printKind === "fuel" && (
+        <ReportPrint
+          title="تقرير السولار والوقود"
+          range={fuelRange}
+          columns={["م", "التاريخ", "رقم اللوحة", "السائق", "المحطة", "اللترات", "التكلفة"]}
+          rows={fuelInRange.map((f, i) => [i + 1, f.date, plateOf(f.bus), f.driver, f.station, fmtQty(f.liters), currency(f.cost)])}
+          footer={["", "", "", "", `الإجمالي (${fuelPeriod.fills} تزود)`, fmtQty(fuelPeriod.liters), currency(fuelPeriod.cost)]}
+        />
+      )}
 
       {/* printable maintenance ledger (only visible when printing) */}
       {ledgerOpen && ledgerBus && ledger.rows.length > 0 && (

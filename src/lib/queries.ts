@@ -363,6 +363,35 @@ export async function addPayment(studentId: string, amount: number, method: stri
   if (error) throw error;
 }
 
+export interface InventoryMovementRow {
+  inventoryId: string;
+  name: string;
+  unitType: string;
+  inQty: number;
+  inValue: number;
+  outQty: number;
+  outValue: number;
+}
+
+/** حركة المخزن خلال فترة: الوارد والمنصرف (كمية وقيمة) لكل صنف. */
+export async function fetchInventoryMovements(range: DateRange): Promise<InventoryMovementRow[]> {
+  const { data, error } = await pageAll((f, t) =>
+    supabase.from("inventory_transactions").select("inventory_id, type, quantity, total_cost, unit_price, tx_date, created_at, inventory(name, unit_type)").order("id").range(f, t),
+  );
+  if (error) throw error;
+  const map = new Map<string, InventoryMovementRow>();
+  for (const r of (data ?? []) as any[]) {
+    const date = (r.tx_date as string | null) ?? String(r.created_at).slice(0, 10);
+    if (!inDateRange(date, range)) continue;
+    const row = map.get(r.inventory_id) ?? { inventoryId: r.inventory_id, name: r.inventory?.name ?? "صنف", unitType: r.inventory?.unit_type ?? "", inQty: 0, inValue: 0, outQty: 0, outValue: 0 };
+    const qty = Number(r.quantity ?? 0);
+    const val = Number(r.total_cost ?? qty * Number(r.unit_price ?? 0));
+    if (r.type === "IN") { row.inQty += qty; row.inValue += val; } else { row.outQty += qty; row.outValue += val; }
+    map.set(r.inventory_id, row);
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "ar"));
+}
+
 // ---- Workshop ----
 
 export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {

@@ -811,6 +811,8 @@ export interface ExpenseInput {
   amount: number;
   /** مفتاح السيارة المستأجرة «المالك||العربية» عند بند «السيارات المستأجرة» */
   rentedVehicle?: string;
+  /** «driver:id» أو «employee:id» عند بند «مرتبات»: يُحتسب سلفة في مرتب الشخص */
+  subjectKey?: string;
 }
 
 export const CUSTODY_SOURCE = "عهدة الخزينة";
@@ -839,6 +841,7 @@ export async function fetchExpenses(): Promise<Expense[]> {
     description: e.description ?? "",
     notes: e.notes ?? "",
     payFrom: e.pay_from ?? "",
+    subjectKey: e.subject_type && e.subject_id ? `${e.subject_type}:${e.subject_id}` : "",
   }));
 }
 
@@ -857,6 +860,8 @@ const expenseRow = async (input: ExpenseInput) => {
     notes: input.notes || null,
     pay_from: input.payFrom || null,
     amount: input.amount,
+    subject_type: input.category === "مرتبات" && input.subjectKey ? input.subjectKey.split(":")[0] : null,
+    subject_id: input.category === "مرتبات" && input.subjectKey ? input.subjectKey.split(":")[1] : null,
   };
 };
 
@@ -865,7 +870,7 @@ export async function addExpense(input: ExpenseInput) {
   if (input.category === RENTED_EXPENSE_CATEGORY && !input.rentedVehicle) throw new Error("اختر السيارة المستأجرة");
   const { data, error } = await supabase.from("expenses").insert(await expenseRow(input)).select("id").single();
   if (error) throw error;
-  await syncCustodyLink({ table: "expenses", id: data.id as string }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes });
+  await syncCustodyLink({ table: "expenses", id: data.id as string }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes, ...(input.category === "مرتبات" && input.subjectKey ? { subjectKey: input.subjectKey } : {}) });
   await syncRentedAdvanceLink({ table: "expenses", id: data.id as string }, input.category === RENTED_EXPENSE_CATEGORY ? { date: input.date, amount: input.amount, vehicle: input.rentedVehicle ?? "", payFrom: input.payFrom, notes: input.description || input.notes } : null);
 }
 
@@ -1698,6 +1703,18 @@ export async function savePayrollAdjustment(type: PayrollSubjectType, id: string
     { table: "payroll_adjustments", id: data.id as string },
     { date: today.startsWith(month) ? today : `${month}-01`, amount: adj.advances + adj.tolls, category: "سلف وكرتات مرتبات", description: `سلف/كرتات مرتب — ${who?.name ?? ""}`.trim(), payFrom: adj.paySource ?? "" },
   );
+  // ...وإن كان المصدر غير العهدة (الخزينة الرئيسية / إنستا باي ...) يُسحب المبلغ من حساب الخزينة المختار
+  const amount = adj.advances + adj.tolls;
+  const toTreasury = !!adj.paySource && adj.paySource !== CUSTODY_SOURCE && amount > 0;
+  const { data: dep } = await supabase.from("treasury").select("id").eq("payroll_adjustment_id", data.id as string).maybeSingle();
+  if (toTreasury) {
+    const row = { date: today.startsWith(month) ? today : `${month}-01`, account: adj.paySource as string, opening: 0, deposits: 0, withdrawals: amount, notes: `سلف/كرتات مرتب — ${who?.name ?? ""}`.trim(), payroll_adjustment_id: data.id as string };
+    const { error: tErr } = dep ? await supabase.from("treasury").update(row).eq("id", dep.id) : await supabase.from("treasury").insert(row);
+    if (tErr) throw new Error(dbErrorMessage(tErr, "تعذر خصم السلفة من الخزينة"));
+  } else if (dep) {
+    const { error: tErr } = await supabase.from("treasury").delete().eq("id", dep.id);
+    if (tErr) throw new Error(dbErrorMessage(tErr, "تعذر تحديث الخزينة"));
+  }
 }
 
 // ---- Client ledger & statement (Module 2) ----
@@ -1900,7 +1917,7 @@ export async function updateExpense(id: string, input: ExpenseInput) {
   if (input.category === RENTED_EXPENSE_CATEGORY && !input.rentedVehicle) throw new Error("اختر السيارة المستأجرة");
   const { error } = await supabase.from("expenses").update(await expenseRow(input)).eq("id", id);
   if (error) throw error;
-  await syncCustodyLink({ table: "expenses", id }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes });
+  await syncCustodyLink({ table: "expenses", id }, { date: input.date, amount: input.amount, category: input.category, description: input.description || input.category, payFrom: input.payFrom, notes: input.notes, ...(input.category === "مرتبات" && input.subjectKey ? { subjectKey: input.subjectKey } : {}) });
   await syncRentedAdvanceLink({ table: "expenses", id }, input.category === RENTED_EXPENSE_CATEGORY ? { date: input.date, amount: input.amount, vehicle: input.rentedVehicle ?? "", payFrom: input.payFrom, notes: input.description || input.notes } : null);
 }
 export async function deleteExpense(id: string) {
@@ -3367,8 +3384,10 @@ async function syncTripCollection(tripId: string, i: TripInput) {
   const note = `تحصيل رحلة: ${i.clientName}${i.destination ? ` — ${i.destination}` : ""}`;
 
   const { data: dep } = await supabase.from("treasury").select("id").eq("trip_id", tripId).maybeSingle();
+  // شركة مسجلة بنفس الاسم → التحصيل يظهر دائنًا في كشف حسابها (مستحق الرحلة يُرحَّل مدينًا بتريجر قاعدة البيانات)
+  const { data: client } = i.clientName.trim() ? await supabase.from("clients").select("id").eq("client_name", i.clientName.trim()).maybeSingle() : { data: null };
   if (toTreasury) {
-    const row = { date, account: i.paySource as string, opening: 0, deposits: amount, withdrawals: 0, notes: note, trip_id: tripId };
+    const row = { date, account: i.paySource as string, opening: 0, deposits: amount, withdrawals: 0, notes: note, trip_id: tripId, client_id: (client?.id as string | undefined) ?? null };
     const { error } = dep ? await supabase.from("treasury").update(row).eq("id", dep.id) : await supabase.from("treasury").insert(row);
     if (error) throw new Error(dbErrorMessage(error, "تعذر ترحيل التحصيل للخزينة"));
   } else if (dep) {
@@ -4208,7 +4227,7 @@ export async function deleteCustodyEntry(id: string) {
  */
 export async function syncCustodyLink(
   source: { table: string; id: string },
-  active: { date: string; amount: number; category: string; description: string; payFrom: string; notes?: string; busCode?: string; maintenanceOrderId?: string } | null,
+  active: { date: string; amount: number; category: string; description: string; payFrom: string; notes?: string; busCode?: string; maintenanceOrderId?: string; subjectKey?: string } | null,
 ) {
   const { data: existing, error: findErr } = await supabase.from("custody_entries").select("id").eq("source_table", source.table).eq("source_id", source.id).maybeSingle();
   if (findErr) throw new Error(dbErrorMessage(findErr, "تعذر ربط المصروف بعهدة الخزينة"));
@@ -4231,6 +4250,7 @@ export async function syncCustodyLink(
     sourceId: source.id,
     busCode: active.busCode ?? "",
     maintenanceOrderId: active.maintenanceOrderId ?? "",
+    ...(active.subjectKey ? { subjectType: active.subjectKey.split(":")[0] as "driver" | "employee", subjectId: active.subjectKey.split(":")[1] ?? "" } : {}),
   });
   const { error } = existing ? await supabase.from("custody_entries").update(row).eq("id", existing.id) : await supabase.from("custody_entries").insert(row);
   if (error) throw new Error(dbErrorMessage(error, "تعذر تسجيل المصروف في عهدة الخزينة"));
@@ -4239,9 +4259,17 @@ export async function syncCustodyLink(
 /** Custody payments made to a driver/employee — counted as advances against their salary. Matched by id, not by name. */
 export async function fetchCustodyAdvances(period: Period): Promise<{ type: "driver" | "employee"; id: string; name: string; amount: number }[]> {
   const { start, end } = periodBounds(period);
-  const { data, error } = await supabase.from("custody_entries").select("subject_type, subject_id, person, amount").eq("kind", "out").not("subject_type", "is", null).gte("entry_date", start).lt("entry_date", end);
+  const [{ data, error }, { data: exp, error: eErr }] = await Promise.all([
+    supabase.from("custody_entries").select("subject_type, subject_id, person, amount").eq("kind", "out").not("subject_type", "is", null).gte("entry_date", start).lt("entry_date", end),
+    // مصروفات «مرتبات» المصروفة من الخزينة الرئيسية/غيرها (المصروف من العهدة يُحتسب عبر دفتر العهدة فلا يتكرر)
+    supabase.from("expenses").select("subject_type, subject_id, amount, pay_from").eq("category", "مرتبات").not("subject_type", "is", null).neq("pay_from", CUSTODY_SOURCE).gte("date", start).lt("date", end),
+  ]);
   if (error) throw new Error(dbErrorMessage(error, "تعذر تحميل سلف العهدة"));
-  return (data ?? []).map((r: any) => ({ type: r.subject_type, id: r.subject_id ?? "", name: r.person ?? "", amount: Number(r.amount ?? 0) }));
+  if (eErr) throw new Error(dbErrorMessage(eErr, "تعذر تحميل سلف المصروفات"));
+  return [
+    ...(data ?? []).map((r: any) => ({ type: r.subject_type, id: r.subject_id ?? "", name: r.person ?? "", amount: Number(r.amount ?? 0) })),
+    ...(exp ?? []).map((r: any) => ({ type: r.subject_type, id: r.subject_id ?? "", name: "", amount: Number(r.amount ?? 0) })),
+  ];
 }
 
 /** Names are compared trimmed — a trailing space in the drivers table must not hide a driver's shifts. */

@@ -146,6 +146,7 @@ export interface Expense {
   description: string;
   notes: string;
   payFrom: string;
+  subjectKey?: string;
 }
 
 

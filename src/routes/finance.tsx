@@ -47,6 +47,8 @@ import {
   deleteLoan,
   fetchClients,
   fetchSuppliers,
+  fetchDrivers,
+  fetchEmployees,
   fetchRentedOps,
   fetchRentedAdvances,
   listRentedVehicles,
@@ -88,10 +90,11 @@ function FinancePage() {
   const [treasuryForm, setTreasuryForm] = useState(emptyTreasury);
   const [clients, setClients] = useState<Client[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [peopleOpts, setPeopleOpts] = useState<PersonOption[]>([]);
   const [rentedOpts, setRentedOpts] = useState<PersonOption[]>([]);
   const [rentedByExpense, setRentedByExpense] = useState<Record<string, string>>({});
   const [addingExpense, setAddingExpense] = useState(false);
-  const emptyExpense = () => ({ id: "", date: todayStr(), category: "", supplierId: "", description: "", notes: "", payFrom: "", amount: "", rentedVehicle: "" });
+  const emptyExpense = () => ({ id: "", date: todayStr(), category: "", supplierId: "", description: "", notes: "", payFrom: "", amount: "", rentedVehicle: "", subjectKey: "" });
   const [expenseForm, setExpenseForm] = useState(emptyExpense);
   const [addingLoan, setAddingLoan] = useState(false);
   const emptyLoan = () => ({ id: "", lender: "", total: "", installments: [{ amount: "", dueDate: "" }] as { amount: string; dueDate: string }[] });
@@ -106,6 +109,12 @@ function FinancePage() {
     setError(null);
     try {
       const [t, e, l, c, sp, sum] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers(), fetchTreasurySummary({ from: "2000-01-01", to: "2100-01-01" })]);
+      try {
+        const [d, em] = await Promise.all([fetchDrivers(), fetchEmployees()]);
+        setPeopleOpts([...d.map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })), ...em.filter((x) => x.isActive).map((x) => ({ value: `employee:${x.id}`, label: x.name, group: "موظف" }))]);
+      } catch {
+        /* the people picker stays empty */
+      }
       try {
         const [rops, radv] = await Promise.all([fetchRentedOps(), fetchRentedAdvances()]);
         setRentedOpts(listRentedVehicles(rops, radv).map((v) => ({ value: v.value, label: v.label, group: v.group })));
@@ -168,12 +177,13 @@ function FinancePage() {
     setAddingExpense(true);
   };
   const openEditExpense = (e: Expense) => {
-    setExpenseForm({ id: e.id, date: e.date, category: e.category, supplierId: e.supplierId, description: e.description, notes: e.notes, payFrom: e.payFrom, amount: String(e.amount), rentedVehicle: rentedByExpense[e.id] ?? "" });
+    setExpenseForm({ id: e.id, date: e.date, category: e.category, supplierId: e.supplierId, description: e.description, notes: e.notes, payFrom: e.payFrom, amount: String(e.amount), rentedVehicle: rentedByExpense[e.id] ?? "", subjectKey: e.subjectKey ?? "" });
     setAddingExpense(true);
   };
   const submitExpense = async () => {
     if (!expenseForm.category.trim()) return setError("اختر البند");
     if (expenseForm.category === RENTED_EXPENSE_CATEGORY && !expenseForm.rentedVehicle) return setError("اختر السيارة المستأجرة");
+    if (expenseForm.category === "مرتبات" && !expenseForm.subjectKey) return setError("اختر السائق أو الموظف صاحب السلفة / المرتب");
     if (!(Number(expenseForm.amount) > 0)) return setError("أدخل مبلغ المصروف");
     if (!expenseForm.payFrom) return setError("اختر طريقة الصرف / صُرفت من");
     setSaving(true);
@@ -188,6 +198,7 @@ function FinancePage() {
         payFrom: expenseForm.payFrom,
         amount: Number(expenseForm.amount) || 0,
         rentedVehicle: expenseForm.category === RENTED_EXPENSE_CATEGORY ? expenseForm.rentedVehicle : "",
+        subjectKey: expenseForm.category === "مرتبات" ? expenseForm.subjectKey : "",
       };
       if (expenseForm.id) await updateExpense(expenseForm.id, payload);
       else await addExpense(payload);
@@ -535,6 +546,13 @@ function FinancePage() {
                 </Select>
               </div>
             </div>
+            {expenseForm.category === "مرتبات" && (
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">السائق / الموظف</Label>
+                <PersonPicker value={expenseForm.subjectKey} options={peopleOpts} onChange={(v) => setExpenseForm({ ...expenseForm, subjectKey: v })} placeholder="ابحث عن سائق أو موظف" />
+                <p className="text-xs text-muted-foreground">يُخصم المبلغ من مصدر الصرف المختار ويُسجَّل تلقائيًا كسلفة في مرتب الشخص بصفحة المرتبات.</p>
+              </div>
+            )}
             {expenseForm.category === RENTED_EXPENSE_CATEGORY && (
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">اختيار السيارة المستأجرة</Label>

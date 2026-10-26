@@ -11,6 +11,7 @@ import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PersonPicker } from "@/components/person-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -97,7 +98,7 @@ interface PartRow {
 let partKey = 0;
 const newPart = (): PartRow => ({ key: ++partKey, inventoryId: "", quantity: "1", unitPrice: "" });
 
-const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus };
+const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus, driverFault: false, faultDriverId: "", faultAmount: "" };
 const emptyItemForm = { id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "", unitType: "بالقطعة" as UnitType };
 const emptyFuelForm = { id: "", busCode: "", driverName: "", date: new Date().toISOString().slice(0, 10), currentOdometer: "", liters: "", cost: "", station: "" };
 
@@ -158,6 +159,7 @@ function WorkshopPage() {
   const [busCodes, setBusCodes] = useState<string[]>([]);
   const [busList, setBusList] = useState<Bus[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
+  const [driverOpts, setDriverOpts] = useState<{ value: string; label: string; group: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -229,6 +231,7 @@ function WorkshopPage() {
       setBusCodes(buses.map((b) => b.code));
       setBusList(buses);
       setDriverNames(drivers.map((d) => d.name));
+      setDriverOpts(drivers.map((d) => ({ value: d.id, label: d.name, group: "سائق" })));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");
     } finally {
@@ -256,6 +259,9 @@ function WorkshopPage() {
       laborCost: o.laborCost ? String(o.laborCost) : "",
       paySource: o.paySource ?? "",
       status: o.status,
+      driverFault: !!o.driverFault,
+      faultDriverId: o.faultDriverId ?? "",
+      faultAmount: o.faultAmount ? String(o.faultAmount) : "",
     });
     setParts(o.items.length ? o.items.map((i) => ({ key: ++partKey, inventoryId: i.inventoryId, quantity: String(i.quantity), unitPrice: String(i.unitPrice) })) : [newPart()]);
     setAdding(true);
@@ -286,6 +292,10 @@ function WorkshopPage() {
       setError("أدخل كمية صحيحة لكل قطعة");
       return;
     }
+    if (form.driverFault && !form.faultDriverId) {
+      setError("اختر السائق المسؤول عن الخطأ / الإهمال");
+      return;
+    }
     if ((Number(form.laborCost) || 0) > 0 && !form.paySource) {
       setError("اختر طريقة الدفع / مصدر التمويل للمصنعية");
       return;
@@ -300,6 +310,9 @@ function WorkshopPage() {
         laborCost: Number(form.laborCost) || 0,
         orderDate: form.date,
         paySource: form.paySource,
+        driverFault: form.driverFault,
+        faultDriverId: form.faultDriverId,
+        faultAmount: form.faultAmount ? Number(form.faultAmount) : null,
         items: filledParts.map((p) => ({ inventoryId: p.inventoryId, quantity: Number(p.quantity), unitPrice: Number(p.unitPrice) || 0 })),
       });
       await loadAll();
@@ -873,6 +886,25 @@ function WorkshopPage() {
               </p>
             </div>
             <PaymentSourceSelect value={form.paySource} onChange={(v) => setForm({ ...form, paySource: v })} label="طريقة الدفع / مصدر التمويل (للمصنعية)" />
+            <div className="rounded-lg border border-border bg-secondary/20 p-3">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-bold">
+                <input type="checkbox" checked={form.driverFault} onChange={(e) => setForm({ ...form, driverFault: e.target.checked, ...(e.target.checked ? {} : { faultDriverId: "", faultAmount: "" }) })} />
+                خطأ / إهمال سائق (خصم من المرتب)
+              </label>
+              {form.driverFault && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">السائق المسؤول</Label>
+                    <PersonPicker value={form.faultDriverId} options={driverOpts} onChange={(v) => setForm({ ...form, faultDriverId: v })} placeholder="ابحث عن السائق" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground">مبلغ الخصم (اتركه فارغًا = تكلفة الأمر كاملة {currency(totals.total)})</Label>
+                    <Input value={form.faultAmount} onChange={(e) => setForm({ ...form, faultAmount: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
+                  </div>
+                  <p className="text-xs text-muted-foreground sm:col-span-2">يُسجَّل الخصم كجزاء في مرتب السائق عند اكتمال الأمر (الحالة «مكتمل»).</p>
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button className="bg-primary text-primary-foreground" onClick={submitOrder} disabled={saving}>

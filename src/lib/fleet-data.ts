@@ -88,6 +88,10 @@ export interface MaintenanceOrder {
   paySource?: string;
   status: MaintenanceStatus;
   items: MaintenanceItem[];
+  driverFault?: boolean;
+  faultDriverId?: string;
+  /** مبلغ الخصم من السائق؛ فارغ = تكلفة الأمر كاملة */
+  faultAmount?: number | null;
 }
 
 

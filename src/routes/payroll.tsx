@@ -58,6 +58,7 @@ import {
   type DailyShift,
   type DriverPayrollRow,
   sameDriver,
+  shiftPayFactor,
 } from "@/lib/queries";
 
 export const Route = createFileRoute("/payroll")({
@@ -493,7 +494,7 @@ function PayrollPage() {
             </p>
             {printing.type === "driver" ? (() => {
               const rows = [
-                ...myDispatch.map((x) => ({ k: `d${x.id}`, date: x.date, route: [x.route || x.client, x.missionId ? "(مأمورية)" : ""].filter(Boolean).join(" "), status: x.attendanceStatus || "حاضر", base: x.driverValue, ot: x.overtime, ded: x.advance + x.penalty + x.karta })),
+                ...myDispatch.map((x) => ({ k: `d${x.id}`, date: x.date, route: [x.route || x.client, x.missionId ? "(مأمورية)" : ""].filter(Boolean).join(" "), status: x.attendanceStatus || "حاضر", base: x.driverValue * shiftPayFactor(x.attendanceStatus), ot: x.overtime, ded: x.advance + x.penalty + x.karta })),
                 ...myShifts.map((x) => ({ k: `s${x.id}`, date: x.date, route: x.route || (x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : "—"), status: x.status || "—", base: 0, ot: x.overtimeAllowance, ded: x.dailyAdvance + x.penalty + x.tollFee })),
               ].sort((m, n) => m.date.localeCompare(n.date));
               const otTotal = rows.reduce((t, r) => t + r.ot, 0);

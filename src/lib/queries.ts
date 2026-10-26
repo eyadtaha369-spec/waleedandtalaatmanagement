@@ -381,6 +381,9 @@ export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
     cost: Number(o.total_cost ?? 0),
     laborCost: Number(o.labor_cost ?? 0),
     paySource: o.pay_source ?? "",
+    driverFault: !!o.driver_fault,
+    faultDriverId: o.fault_driver_id ?? "",
+    faultAmount: o.fault_amount == null ? null : Number(o.fault_amount),
     status: o.status ?? "بانتظار القطع",
     items: (o.maintenance_order_items ?? []).map(
       (i: any): MaintenanceItem => ({
@@ -402,6 +405,9 @@ export interface MaintenanceOrderInput {
   laborCost: number;
   orderDate: string;
   paySource?: string;
+  driverFault?: boolean;
+  faultDriverId?: string;
+  faultAmount?: number | null;
   items: { inventoryId: string; quantity: number; unitPrice: number }[];
 }
 
@@ -435,6 +441,7 @@ export function findStockShortage(
 }
 
 export async function saveMaintenanceOrder(id: string | null, input: MaintenanceOrderInput) {
+  if (input.driverFault && !input.faultDriverId) throw new Error("اختر السائق المسؤول عن الخطأ / الإهمال");
   const items = input.items.filter((i) => i.inventoryId && i.quantity > 0);
 
   // 1) validate stock up-front so a shortage never leaves a half-saved order
@@ -477,6 +484,9 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
     labor_cost: input.laborCost,
     order_date: input.orderDate,
     pay_source: input.paySource || null,
+    driver_fault: !!input.driverFault,
+    fault_driver_id: input.driverFault ? input.faultDriverId || null : null,
+    fault_amount: input.driverFault && input.faultAmount != null && input.faultAmount > 0 ? input.faultAmount : null,
   };
   let orderId = id;
   if (orderId) {
@@ -1600,14 +1610,24 @@ export function computeDriverPayroll(
   });
 }
 
+/** نسبة أجر الوردية حسب حالة الحضور: حاضر كامل، نصف يوم نصف الأجر، غياب/إجازة بدون أجر وردية. */
+export function shiftPayFactor(status: string) {
+  const s = (status || "حاضر").trim();
+  if (s === "غياب" || s === "إجازة") return 0;
+  if (s === "نصف يوم") return 0.5;
+  return 1;
+}
+
 export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollRow[]> {
   const { start, end } = periodBounds(period);
-  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts, custodyAdv] = await Promise.all([
+  const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts, custodyAdv, { data: faultOrders }] = await Promise.all([
     supabase.from("drivers").select("id, name, base_salary"),
     fetchDailyShifts(period),
     supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
     fetchDispatchShifts(period),
     fetchCustodyAdvances(period),
+    // أوامر صيانة مكتملة بخطأ/إهمال سائق: تُخصم من مرتبه كجزاء
+    supabase.from("maintenance_orders").select("fault_driver_id, fault_amount, total_cost").eq("driver_fault", true).eq("status", "مكتمل").not("fault_driver_id", "is", null).gte("order_date", start).lt("order_date", end),
   ]);
   if (dErr) throw dErr;
   return computeDriverPayroll(
@@ -1617,6 +1637,7 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
       // إضافي/سلفة/جزاء/كرتة المسجلة مباشرة في ورديات الحركة تُرحَّل تلقائيًا للمرتب
       ...dispatchShifts.map((o) => ({ driver: o.driver, overtimeAllowance: o.overtime, dailyAdvance: o.advance, penalty: o.penalty, toll: o.karta })),
       // مبالغ صُرفت للسائق من عهدة الخزينة تُخصم كسلفة
+      ...(faultOrders ?? []).map((m: any) => ({ driver: (drivers ?? []).find((d: any) => d.id === m.fault_driver_id)?.name ?? "", overtimeAllowance: 0, dailyAdvance: 0, penalty: Number(m.fault_amount ?? m.total_cost ?? 0) })),
       ...custodyAdv.filter((c) => c.type === "driver").map((c) => ({ driver: (drivers ?? []).find((d: any) => d.id === c.id)?.name ?? c.name, overtimeAllowance: 0, dailyAdvance: c.amount, penalty: 0 })),
     ],
     [
@@ -1624,7 +1645,7 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
       // أجور المأموريات (مرحَّلة تلقائيًا في ورديات الحركة)
       ...dispatchShifts.filter((o) => o.missionId).map((o) => ({ driver: o.driver, fee: o.driverValue })),
     ],
-    dispatchShifts.filter((o) => !o.missionId).map((o) => ({ driver: o.driver, value: o.driverValue })),
+    dispatchShifts.filter((o) => !o.missionId).map((o) => ({ driver: o.driver, value: o.driverValue * shiftPayFactor(o.attendanceStatus) })),
   );
 }
 

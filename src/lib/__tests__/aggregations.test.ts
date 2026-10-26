@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver, computeTreasuryClosings, computeFleetFuelRows } from "@/lib/queries";
+import { computeFuelEfficiency, computeMonthlyFinance, computeDriverPayroll, computeRunningBalance, nextMonthPrefix, computeClientInvoiceSummary, computeMonthlyPL, computeMonthlyReport, computeEmployeePayroll, computeDailyReport, computeSupplierStatement, defaultAlertDate, computeOrderTotals, findStockShortage, computeFuelByBus, computeBusLedger, computeFinalPayroll, nextInstallment, computeClientMonthBalance, periodBounds, periodMonths, rangeForPreset, inDateRange, computeRentedLedger, missionNet, applySupplierRange, computeFuelAnalysis, busOptionLabel, computeFuelFills, computeItemLedger, computeSubscriptionFinance, computeCustody, custodyRange, computeDriverShiftSummary, sameDriver, computeTreasuryClosings, computeFleetFuelRows, shiftPayFactor } from "@/lib/queries";
 
 describe("computeFuelEfficiency", () => {
   it("computes liters per 100km for a single bus", () => {
@@ -670,5 +670,8 @@ describe("driver shift summary", () => {
     const rows = computeFleetFuelRows(buses, [sum("B1", 2.5), sum("B2", 4), sum("B3", 3)]);
     expect(rows.map((r) => [r.bus, r.status])).toEqual([["B1", "waste"], ["B2", "ok"], ["B3", "no-target"], ["B4", "no-data"]]);
     expect(Math.round(rows[0]!.wastePct)).toBe(33);
+  });
+  it("shiftPayFactor pays shifts according to attendance", () => {
+    expect([shiftPayFactor("حاضر"), shiftPayFactor("نصف يوم"), shiftPayFactor("غياب"), shiftPayFactor("إجازة"), shiftPayFactor("")]).toEqual([1, 0.5, 0, 0, 1]);
   });
 });

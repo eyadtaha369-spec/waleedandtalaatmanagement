@@ -92,6 +92,8 @@ export interface MaintenanceOrder {
   faultDriverId?: string;
   /** مبلغ الخصم من السائق؛ فارغ = تكلفة الأمر كاملة */
   faultAmount?: number | null;
+  /** عداد الكيلومتر وقت الصيانة */
+  maintenanceMileage?: number | null;
 }
 
 
@@ -121,6 +123,8 @@ export interface FuelLog {
   liters: number;
   cost: number;
   station: string;
+  pricePerLiter?: number | null;
+  supplierId?: string;
 }
 
 

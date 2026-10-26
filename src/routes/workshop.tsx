@@ -68,6 +68,7 @@ import {
   type InventoryPurchase,
   type InventoryPurchaseInput,
   fetchSuppliers,
+  addSupplier,
   type Supplier,
 } from "@/lib/queries";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -102,9 +103,10 @@ interface PartRow {
 let partKey = 0;
 const newPart = (): PartRow => ({ key: ++partKey, inventoryId: "", quantity: "1", unitPrice: "" });
 
-const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus, driverFault: false, faultDriverId: "", faultAmount: "" };
+const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus, driverFault: false, faultDriverId: "", faultAmount: "", mileage: "" };
 const emptyItemForm = { id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "", unitType: "بالقطعة" as UnitType };
-const emptyFuelForm = { id: "", busCode: "", driverName: "", date: new Date().toISOString().slice(0, 10), currentOdometer: "", liters: "", cost: "", station: "" };
+const NEW_STATION = "__new__";
+const emptyFuelForm = { id: "", busCode: "", driverName: "", date: new Date().toISOString().slice(0, 10), currentOdometer: "", liters: "", cost: "", station: "", pricePerLiter: "", supplierId: "" };
 
 /** Searchable dropdown over the inventory (only items currently in stock, plus ones already on this order). */
 function PartPicker({
@@ -279,6 +281,7 @@ function WorkshopPage() {
       driverFault: !!o.driverFault,
       faultDriverId: o.faultDriverId ?? "",
       faultAmount: o.faultAmount ? String(o.faultAmount) : "",
+      mileage: o.maintenanceMileage ? String(o.maintenanceMileage) : "",
     });
     setParts(o.items.length ? o.items.map((i) => ({ key: ++partKey, inventoryId: i.inventoryId, quantity: String(i.quantity), unitPrice: String(i.unitPrice) })) : [newPart()]);
     setAdding(true);
@@ -309,6 +312,10 @@ function WorkshopPage() {
       setError("أدخل كمية صحيحة لكل قطعة");
       return;
     }
+    if (!(Number(form.mileage) > 0)) {
+      setError("أدخل عداد الكيلومتر عند الصيانة");
+      return;
+    }
     if (form.driverFault && !form.faultDriverId) {
       setError("اختر السائق المسؤول عن الخطأ / الإهمال");
       return;
@@ -330,6 +337,7 @@ function WorkshopPage() {
         driverFault: form.driverFault,
         faultDriverId: form.faultDriverId,
         faultAmount: form.faultAmount ? Number(form.faultAmount) : null,
+        maintenanceMileage: Number(form.mileage) > 0 ? Number(form.mileage) : null,
         items: filledParts.map((p) => ({ inventoryId: p.inventoryId, quantity: Number(p.quantity), unitPrice: Number(p.unitPrice) || 0 })),
       });
       await loadAll();
@@ -480,6 +488,8 @@ function WorkshopPage() {
       liters: String(f.liters),
       cost: String(f.cost),
       station: f.station === "—" ? "" : f.station,
+      pricePerLiter: f.pricePerLiter ? String(f.pricePerLiter) : "",
+      supplierId: f.supplierId ?? "",
     });
     setAddingFuel(true);
   };
@@ -491,9 +501,18 @@ function WorkshopPage() {
     if (!fuelForm.date) return setError("أدخل تاريخ التموين");
     if (!(Number(fuelForm.currentOdometer) > 0)) return setError("أدخل العداد الحالي");
     if (!(Number(fuelForm.liters) > 0)) return setError("أدخل عدد اللترات");
+    if (fuelForm.supplierId === NEW_STATION && !newStation.trim()) return setError("اكتب اسم المحطة الجديدة");
     setSaving(true);
     setError(null);
     try {
+      let supplierId = fuelForm.supplierId;
+      let station = fuelForm.station;
+      if (supplierId === NEW_STATION) {
+        supplierId = await addSupplier({ name: newStation.trim(), phone: "", dueDate: "", alertDate: "" });
+        station = newStation.trim();
+      } else if (supplierId) {
+        station = suppliers.find((s) => s.id === supplierId)?.name ?? station;
+      }
       const payload = {
         busCode: fuelForm.busCode,
         driverName: fuelForm.driverName,
@@ -501,11 +520,14 @@ function WorkshopPage() {
         currentOdometer: Number(fuelForm.currentOdometer) || 0,
         liters: Number(fuelForm.liters) || 0,
         cost: Number(fuelForm.cost) || 0,
-        station: fuelForm.station,
+        station,
+        pricePerLiter: Number(fuelForm.pricePerLiter) || null,
+        supplierId: supplierId === NEW_STATION ? "" : supplierId,
       };
       if (fuelForm.id) await updateFuelLog(fuelForm.id, payload);
       else await addFuelLog(payload);
       await loadAll();
+      setNewStation("");
       setAddingFuel(false);
     } catch (e) {
       console.error(e);
@@ -515,6 +537,21 @@ function WorkshopPage() {
     }
   };
 
+  const [newStation, setNewStation] = useState("");
+  const setFuelCalc = (patch: Partial<typeof emptyFuelForm>) =>
+    setFuelForm((f) => {
+      const n = { ...f, ...patch };
+      if (("liters" in patch || "pricePerLiter" in patch) && Number(n.pricePerLiter) > 0) {
+        n.cost = String(Math.round((Number(n.liters) || 0) * Number(n.pricePerLiter) * 100) / 100);
+      }
+      return n;
+    });
+  const fuelTotals = useMemo(() => {
+    const today = todayStr();
+    const month = today.slice(0, 7);
+    const sum = (rows: FuelLog[]) => ({ liters: rows.reduce((a, r) => a + r.liters, 0), cost: rows.reduce((a, r) => a + r.cost, 0) });
+    return { day: sum(fuelLogs.filter((l) => l.date === today)), month: sum(fuelLogs.filter((l) => l.date.startsWith(month))) };
+  }, [fuelLogs]);
   const fuelByBus = useMemo(() => computeFuelByBus(fuelLogs), [fuelLogs]);
   const fuelFills = useMemo(() => computeFuelFills(fuelLogs.map((f) => ({ id: f.id, bus: f.bus, date: f.date, order: f.createdAt, liters: f.liters, cost: f.cost, currentOdometer: f.currentOdometer, odoStart: f.odoStart, odoEnd: f.odoEnd }))), [fuelLogs]);
   const plateOf = (code: string) => busList.find((b) => b.code === code)?.plate ?? code;
@@ -783,6 +820,19 @@ function WorkshopPage() {
 
         {rights.fuel && (
         <TabsContent value="fuel">
+          <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {[
+              ["لترات اليوم", `${fmtQty(fuelTotals.day.liters)} لتر`],
+              ["مصروف سولار اليوم", currency(fuelTotals.day.cost)],
+              ["لترات الشهر", `${fmtQty(fuelTotals.month.liters)} لتر`],
+              ["مصروف سولار الشهر", currency(fuelTotals.month.cost)],
+            ].map(([l, v]) => (
+              <div key={l} className="rounded-lg border border-border bg-secondary/30 p-3">
+                <p className="text-xs text-muted-foreground">{l}</p>
+                <p className="mt-1 font-bold text-primary">{v}</p>
+              </div>
+            ))}
+          </div>
           <Panel title="استهلاك السولار لكل سيارة">
             <DataTable head={["رقم العربية", "عدد مرات التزود", "إجمالي اللترات", "إجمالي التكلفة", "المسافة (كم)", "كم / لتر", "تكلفة الكم"]}>
               {fuelByBus.length === 0 ? (
@@ -912,6 +962,14 @@ function WorkshopPage() {
               </button>
             </div>
 
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">عداد كيلومتر الأتوبيس عند الصيانة</Label>
+              <Input value={form.mileage} onChange={(e) => setForm({ ...form, mileage: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
+              {(() => {
+                const cur = busList.find((b) => b.code === form.bus)?.odometer;
+                return cur ? <p className="text-xs text-muted-foreground">العداد الحالي المسجل للعربية: {cur.toLocaleString("ar-EG")} كم — يتحدّث تلقائياً لو القراءة أعلى.</p> : null;
+              })()}
+            </div>
             <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_2fr]">
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">تكلفة المصنعية (اختياري)</Label>
@@ -1224,23 +1282,44 @@ function WorkshopPage() {
                 </Select>
               </div>
             </div>
-            {[
-              ["date", "تاريخ التموين", "date"],
-              ["currentOdometer", "العداد الحالي", "number"],
-              ["liters", "عدد اللترات", "number"],
-              ["cost", "إجمالي التكلفة", "number"],
-              ["station", "المحطة"],
-            ].map(([key, label, type]) => (
-              <div key={key} className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">{label}</Label>
-                <Input
-                  value={fuelForm[key as keyof typeof fuelForm]}
-                  onChange={(e) => setFuelForm({ ...fuelForm, [key as string]: e.target.value })}
-                  type={type || "text"}
-                  className="border-border bg-input/60"
-                />
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">تاريخ التموين</Label>
+              <Input value={fuelForm.date} onChange={(e) => setFuelForm({ ...fuelForm, date: e.target.value })} type="date" className="border-border bg-input/60" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">العداد الحالي</Label>
+              <Input value={fuelForm.currentOdometer} onChange={(e) => setFuelForm({ ...fuelForm, currentOdometer: e.target.value })} type="number" className="border-border bg-input/60" />
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">عدد اللترات</Label>
+                <Input value={fuelForm.liters} onChange={(e) => setFuelCalc({ liters: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
               </div>
-            ))}
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">سعر اللتر</Label>
+                <Input value={fuelForm.pricePerLiter} onChange={(e) => setFuelCalc({ pricePerLiter: e.target.value })} type="number" min="0" step="0.01" className="border-border bg-input/60" />
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">إجمالي التكلفة {Number(fuelForm.pricePerLiter) > 0 ? "(محسوبة تلقائياً = لترات × سعر اللتر)" : ""}</Label>
+              <Input value={fuelForm.cost} onChange={(e) => setFuelForm({ ...fuelForm, cost: e.target.value })} readOnly={Number(fuelForm.pricePerLiter) > 0} type="number" min="0" className="border-border bg-input/60" />
+            </div>
+            <p className="rounded-lg border border-border bg-secondary/30 p-3 text-sm">
+              إجمالي اللترات: <b className="text-primary">{fmtQty(Number(fuelForm.liters) || 0)}</b> &nbsp;|&nbsp; إجمالي التكلفة: <b className="text-warning">{currency(Number(fuelForm.cost) || 0)}</b>
+            </p>
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">محطة الوقود (من الموردين)</Label>
+              <Select value={fuelForm.supplierId || "none"} onValueChange={(v) => setFuelForm({ ...fuelForm, supplierId: v === "none" ? "" : v })}>
+                <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر المحطة" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">بدون مورد (نقدي / غير مسجل)</SelectItem>
+                  {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  <SelectItem value={NEW_STATION}>+ إضافة محطة / مورد جديد</SelectItem>
+                </SelectContent>
+              </Select>
+              {fuelForm.supplierId === NEW_STATION && <Input value={newStation} onChange={(e) => setNewStation(e.target.value)} placeholder="اسم المحطة الجديدة" className="border-border bg-input/60" />}
+              {fuelForm.supplierId && fuelForm.supplierId !== NEW_STATION && <p className="text-xs text-muted-foreground">قيمة التموين هتتسجل مستحقات في كشف حساب المورد تلقائياً.</p>}
+            </div>
           </div>
           {error && <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">{error}</p>}
           <DialogFooter>

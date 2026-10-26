@@ -384,6 +384,7 @@ export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
     driverFault: !!o.driver_fault,
     faultDriverId: o.fault_driver_id ?? "",
     faultAmount: o.fault_amount == null ? null : Number(o.fault_amount),
+    maintenanceMileage: o.maintenance_mileage == null ? null : Number(o.maintenance_mileage),
     status: o.status ?? "بانتظار القطع",
     items: (o.maintenance_order_items ?? []).map(
       (i: any): MaintenanceItem => ({
@@ -408,6 +409,7 @@ export interface MaintenanceOrderInput {
   driverFault?: boolean;
   faultDriverId?: string;
   faultAmount?: number | null;
+  maintenanceMileage?: number | null;
   items: { inventoryId: string; quantity: number; unitPrice: number }[];
 }
 
@@ -487,7 +489,9 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
     driver_fault: !!input.driverFault,
     fault_driver_id: input.driverFault ? input.faultDriverId || null : null,
     fault_amount: input.driverFault && input.faultAmount != null && input.faultAmount > 0 ? input.faultAmount : null,
+    maintenance_mileage: input.maintenanceMileage != null && input.maintenanceMileage > 0 ? Math.round(input.maintenanceMileage) : null,
   };
+  if (fields.maintenance_mileage) await syncBusOdometer(fields.bus_id, fields.maintenance_mileage);
   let orderId = id;
   if (orderId) {
     const { error } = await supabase.from("maintenance_orders").update(fields).eq("id", orderId);
@@ -606,6 +610,8 @@ export async function fetchFuelLogs(): Promise<FuelLog[]> {
     liters: Number(f.liters ?? 0),
     cost: Number(f.cost ?? 0),
     station: f.station ?? "—",
+    pricePerLiter: f.price_per_liter == null ? null : Number(f.price_per_liter),
+    supplierId: f.supplier_id ?? "",
   }));
 }
 
@@ -617,6 +623,8 @@ export interface FuelLogInput {
   liters: number;
   cost: number;
   station: string;
+  pricePerLiter?: number | null;
+  supplierId?: string;
 }
 
 /** Readable Arabic message that keeps the exact database text (PostgREST errors are not `Error` instances). */
@@ -645,6 +653,8 @@ async function resolveFuelPayload(input: FuelLogInput) {
     liters: input.liters,
     cost: input.cost,
     station: input.station,
+    price_per_liter: input.pricePerLiter != null && input.pricePerLiter > 0 ? input.pricePerLiter : null,
+    supplier_id: input.supplierId || null,
   };
 }
 
@@ -657,9 +667,43 @@ async function syncBusOdometer(busId: string | null, reading: number) {
 
 export async function addFuelLog(input: FuelLogInput) {
   const payload = await resolveFuelPayload(input);
-  const { error } = await supabase.from("fuel_logs").insert(payload);
+  const { data, error } = await supabase.from("fuel_logs").insert(payload).select("id").single();
   if (error) throw error;
   await syncBusOdometer(payload.bus_id, input.currentOdometer);
+  await syncFuelSupplierInvoice(data.id as string, null, input);
+}
+
+/** مشتريات الوقود من محطة (مورّد) تظهر كفاتورة في كشف حسابه، وتتبع سجل السولار عند التعديل والحذف. */
+async function syncFuelSupplierInvoice(fuelId: string, previousInvoiceId: string | null, input: Pick<FuelLogInput, "supplierId" | "date" | "cost" | "liters" | "busCode" | "station">) {
+  const supplierId = input.supplierId || "";
+  const amount = Number(input.cost) || 0;
+  const ref = `وقود-${fuelId.slice(0, 6)}`;
+  const details = `سولار ${input.liters} لتر — عربية ${input.busCode}${input.station ? ` — ${input.station}` : ""}`;
+  if (previousInvoiceId && (!supplierId || amount <= 0)) {
+    const { error } = await supabase.from("supplier_invoices").delete().eq("id", previousInvoiceId);
+    if (error) throw error;
+    await supabase.from("fuel_logs").update({ supplier_invoice_id: null }).eq("id", fuelId);
+    return;
+  }
+  if (!supplierId || amount <= 0) return;
+  if (previousInvoiceId) {
+    const { data: cur } = await supabase.from("supplier_invoices").select("supplier_id").eq("id", previousInvoiceId).maybeSingle();
+    if (cur && cur.supplier_id === supplierId) {
+      const { error } = await supabase.from("supplier_invoices").update({ invoice_date: input.date, total_amount: amount, items_details: details }).eq("id", previousInvoiceId);
+      if (error) throw error;
+      return;
+    }
+    const { error: dErr } = await supabase.from("supplier_invoices").delete().eq("id", previousInvoiceId);
+    if (dErr) throw dErr;
+  }
+  const { data: inv, error } = await supabase
+    .from("supplier_invoices")
+    .insert({ supplier_id: supplierId, invoice_date: input.date, invoice_ref: ref, total_amount: amount, items_details: details, paid_amount: 0 })
+    .select("id")
+    .single();
+  if (error) throw error;
+  const { error: lErr } = await supabase.from("fuel_logs").update({ supplier_invoice_id: inv.id }).eq("id", fuelId);
+  if (lErr) throw lErr;
 }
 
 export interface BusFuelSummary {
@@ -1941,13 +1985,17 @@ export async function deleteInventoryItem(id: string) {
 
 export async function updateFuelLog(id: string, input: FuelLogInput) {
   const payload = await resolveFuelPayload(input);
+  const { data: prev } = await supabase.from("fuel_logs").select("supplier_invoice_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("fuel_logs").update(payload).eq("id", id);
   if (error) throw error;
   await syncBusOdometer(payload.bus_id, input.currentOdometer);
+  await syncFuelSupplierInvoice(id, (prev?.supplier_invoice_id as string | null) ?? null, input);
 }
 export async function deleteFuelLog(id: string) {
+  const { data: prev } = await supabase.from("fuel_logs").select("supplier_invoice_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("fuel_logs").delete().eq("id", id);
   if (error) throw error;
+  if (prev?.supplier_invoice_id) await supabase.from("supplier_invoices").delete().eq("id", prev.supplier_invoice_id as string);
 }
 
 export async function updateTreasuryEntry(id: string, input: TreasuryInput) {
@@ -2571,9 +2619,10 @@ function supplierPayload(input: SupplierInput) {
     alert_date: input.alertDate || defaultAlertDate(input.dueDate) || null,
   };
 }
-export async function addSupplier(input: SupplierInput) {
-  const { error } = await supabase.from("suppliers").insert(supplierPayload(input));
+export async function addSupplier(input: SupplierInput): Promise<string> {
+  const { data, error } = await supabase.from("suppliers").insert(supplierPayload(input)).select("id").single();
   if (error) throw error;
+  return data.id as string;
 }
 export async function updateSupplier(id: string, input: SupplierInput) {
   const { error } = await supabase.from("suppliers").update(supplierPayload(input)).eq("id", id);

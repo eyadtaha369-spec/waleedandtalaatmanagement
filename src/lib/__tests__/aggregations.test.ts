@@ -686,4 +686,9 @@ describe("driver shift summary", () => {
     expect(alerts.map((a) => a.bus)).toContain("C");
     expect(alerts.map((a) => a.bus)).not.toContain("A");
   });
+  it("computeMonthlyReport charges rented-vehicle rental cost against net profit", () => {
+    const base = { subscriptionRevenue: 0, companyRevenue: 1000, tripRevenue: 0, payrollExpense: 0, maintenanceExpense: 0, partsExpense: 0, fuelExpense: 0, adminMiscExpense: 0 };
+    expect(computeMonthlyReport({ ...base, rentedExpense: 600 }).netProfit).toBe(400);
+    expect(computeMonthlyReport(base).netProfit).toBe(1000);
+  });
 });

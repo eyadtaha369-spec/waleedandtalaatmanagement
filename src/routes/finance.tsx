@@ -307,6 +307,7 @@ function FinancePage() {
                   ["قطع الغيار من المخزن", summary.partsExpense, "bad"],
                   ["المصاريف الإدارية والنثريات", summary.adminMiscExpense, "bad"],
                   ["مصروفات الاشتراكات والخطوط", summary.subscriptionExpense, "bad"],
+                  ["تكلفة تأجير السيارات المستأجرة", summary.rentedExpense, "bad"],
                   ["إجمالي حساب السولار والوقود", summary.fuelExpense, "bad"],
                 ] as const).map(([label, value, tone]) => (
                   <div key={label} className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2">

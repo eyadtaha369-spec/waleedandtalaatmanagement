@@ -527,15 +527,39 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
   const { error: totErr } = await supabase.from("maintenance_orders").update({ total_cost: total, parts: summary || null }).eq("id", orderId);
   if (totErr) throw totErr;
   // الأجور (العمالة) هي ما يُدفع نقدًا؛ قطع الغيار تُسحب من المخزن
+  await syncMaintenancePayout(orderId as string, { status: input.status, date: input.orderDate, laborCost: input.laborCost, paySource: input.paySource ?? "", busCode: input.busCode, issue: input.issue });
+}
+
+/**
+ * عند اكتمال أمر الصيانة تُخصم أجور الصيانة لحظيًا من مصدر الدفع: دفتر العهدة، أو حساب الخزينة المختار؛
+ * وتُسحب الحركة تلقائيًا إن عاد الأمر لحالة غير مكتملة أو أُلغي. (قطع الغيار تُسحب من المخزن ولا تُدفع نقدًا هنا.)
+ */
+async function syncMaintenancePayout(orderId: string, o: { status: string; date: string; laborCost: number; paySource: string; busCode: string; issue: string }) {
+  const active = o.status === "مكتمل" && o.laborCost > 0;
+  const desc = `أجور صيانة — ${o.busCode}${o.issue ? ` — ${o.issue}` : ""}`;
   await syncCustodyLink(
-    { table: "maintenance_orders", id: orderId as string },
-    input.status === "ملغي" ? null : { date: input.orderDate, amount: input.laborCost, category: CUSTODY_MAINT_CATEGORY, description: `أجور صيانة — ${input.busCode}${input.issue ? ` — ${input.issue}` : ""}`, payFrom: input.paySource ?? "", busCode: input.busCode, maintenanceOrderId: orderId as string },
+    { table: "maintenance_orders", id: orderId },
+    active ? { date: o.date, amount: o.laborCost, category: CUSTODY_MAINT_CATEGORY, description: desc, payFrom: o.paySource, busCode: o.busCode, maintenanceOrderId: orderId } : null,
   );
+  const { data: dep } = await supabase.from("treasury").select("id").eq("maintenance_order_id", orderId).maybeSingle();
+  if (active && o.paySource && o.paySource !== CUSTODY_SOURCE) {
+    const row = { date: o.date, account: o.paySource, opening: 0, deposits: 0, withdrawals: o.laborCost, notes: desc, maintenance_order_id: orderId };
+    const { error } = dep ? await supabase.from("treasury").update(row).eq("id", dep.id) : await supabase.from("treasury").insert(row);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر خصم أجور الصيانة من الخزينة"));
+  } else if (dep) {
+    const { error } = await supabase.from("treasury").delete().eq("id", dep.id);
+    if (error) throw new Error(dbErrorMessage(error, "تعذر تحديث الخزينة"));
+  }
 }
 
 export async function updateMaintenanceStatus(id: string, status: string) {
+  const { data: o, error: gErr } = await supabase.from("maintenance_orders").select("order_date, created_at, labor_cost, pay_source, issue_description, buses(bus_code)").eq("id", id).maybeSingle();
+  if (gErr) throw gErr;
+  const labor = Number(o?.labor_cost ?? 0);
+  if (status === "مكتمل" && labor > 0 && !o?.pay_source) throw new Error("حدّد طريقة الدفع / مصدر التمويل لأجور الصيانة من تعديل الأمر قبل إكماله");
   const { error } = await supabase.from("maintenance_orders").update({ status }).eq("id", id);
   if (error) throw error;
+  if (o) await syncMaintenancePayout(id, { status, date: o.order_date ?? String(o.created_at).slice(0, 10), laborCost: labor, paySource: o.pay_source ?? "", busCode: (o as any).buses?.bus_code ?? "", issue: o.issue_description ?? "" });
 }
 
 export async function fetchInventory(): Promise<InventoryItem[]> {
@@ -1894,6 +1918,7 @@ export async function deleteStudent(id: string) {
 
 export async function deleteMaintenanceOrder(id: string) {
   await syncCustodyLink({ table: "maintenance_orders", id }, null);
+  await supabase.from("treasury").delete().eq("maintenance_order_id", id);
   const { error } = await supabase.from("maintenance_orders").delete().eq("id", id);
   if (error) throw error;
 }
@@ -3191,6 +3216,8 @@ export interface MonthlyReportBreakdown {
   partsExpense: number;
   fuelExpense: number;
   adminMiscExpense: number;
+  /** تكلفة تأجير السيارات المستأجرة المستحقة للمالكين (مقابل إيرادها في إيراد الشركات) */
+  rentedExpense: number;
   /** مصروفات الاشتراكات والخطوط (subscription_expenses) */
   subscriptionExpense: number;
   totalExpenses: number;
@@ -3207,12 +3234,14 @@ export function computeMonthlyReport(input: {
   fuelExpense: number;
   adminMiscExpense: number;
   subscriptionExpense?: number;
+  rentedExpense?: number;
 }): MonthlyReportBreakdown {
   const subscriptionExpense = input.subscriptionExpense ?? 0;
+  const rentedExpense = input.rentedExpense ?? 0;
   const totalRevenue = input.subscriptionRevenue + input.companyRevenue + input.tripRevenue;
-  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.adminMiscExpense + subscriptionExpense;
+  const totalExpenses = input.payrollExpense + input.maintenanceExpense + input.partsExpense + input.adminMiscExpense + subscriptionExpense + rentedExpense;
   // fuel is reported on its own line and is NOT part of totalExpenses
-  return { ...input, subscriptionExpense, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses - input.fuelExpense };
+  return { ...input, subscriptionExpense, rentedExpense, totalRevenue, totalExpenses, netProfit: totalRevenue - totalExpenses - input.fuelExpense };
 }
 
 export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportBreakdown> {
@@ -3228,6 +3257,7 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     { data: allExpenses },
     { data: subExpenses },
     { data: fuelLogRows },
+    { data: rentedRows },
   ] = await Promise.all([
     pageAll((f, t) => supabase.from("payments").select("amount").eq("type", "دائن").gte("date", start).lt("date", end).order("id").range(f, t)),
     fetchDispatchShifts(period),
@@ -3239,8 +3269,10 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     supabase.from("expenses").select("category, amount, date").gte("date", start).lt("date", end),
     pageAll((f, t) => supabase.from("subscription_expenses").select("amount").gte("date", start).lt("date", end).order("id").range(f, t)),
     pageAll((f, t) => supabase.from("fuel_logs").select("cost").gte("date", start).lt("date", end).order("id").range(f, t)),
+    pageAll((f, t) => supabase.from("rented_bus_operations").select("rental_fare").gte("op_date", start).lt("op_date", end).order("id").range(f, t)),
   ]);
 
+  const rentedExpense = (rentedRows ?? []).reduce((sum: number, r: any) => sum + Number(r.rental_fare ?? 0), 0);
   const subscriptionExpense = (subExpenses ?? []).reduce((sum: number, e: any) => sum + Number(e.amount ?? 0), 0);
   const subscriptionRevenue = (subPayments ?? []).reduce((sum, p: any) => sum + Number(p.amount ?? 0), 0);
   const companyRevenue = ops.reduce((sum, o) => sum + o.busValue, 0);
@@ -3277,6 +3309,7 @@ export async function fetchMonthlyReport(period: Period): Promise<MonthlyReportB
     fuelExpense,
     adminMiscExpense,
     subscriptionExpense,
+    rentedExpense,
   });
 }
 

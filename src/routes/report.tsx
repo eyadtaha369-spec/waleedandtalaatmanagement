@@ -136,6 +136,7 @@ function ReportPage() {
               <LineRow label="بند قطع الغيار المسحوبة من المخزن" value={report.partsExpense} tone="bad" />
               <LineRow label="بند المصاريف الإدارية والنثريات" value={report.adminMiscExpense} tone="bad" />
               <LineRow label="بند مصروفات الاشتراكات والخطوط" value={report.subscriptionExpense} tone="bad" />
+              <LineRow label="بند تكلفة تأجير السيارات المستأجرة (مستحق المُلّاك)" value={report.rentedExpense} tone="bad" />
               <div className="mt-2 flex items-center justify-between border-t border-destructive/30 pt-2 text-sm font-bold">
                 <span>إجمالي المصروفات</span>
                 <span className="text-destructive">{currency(report.totalExpenses)}</span>

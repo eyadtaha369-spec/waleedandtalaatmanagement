@@ -134,7 +134,7 @@ function TeamPage() {
                       className="h-8 w-40 border-border bg-input/60 text-sm"
                       onBlur={(e) => {
                         if (e.target.value !== (p.fullName ?? "")) {
-                          updateProfileName(p.id, e.target.value).then(load);
+                          updateProfileName(p.id, e.target.value).then(load).catch((err) => console.error(err));
                         }
                       }}
                     />

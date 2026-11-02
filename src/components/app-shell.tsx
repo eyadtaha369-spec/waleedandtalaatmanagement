@@ -1,4 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { PageErrorBoundary } from "@/components/error-boundary";
 import {
   Bus,
   Building2,
@@ -344,7 +345,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           transition={{ duration: 0.35, ease: "easeOut" }}
           className="flex-1 p-4 sm:p-6"
         >
-          {children}
+          <PageErrorBoundary>{children}</PageErrorBoundary>
         </motion.main>
       </div>
     </div>

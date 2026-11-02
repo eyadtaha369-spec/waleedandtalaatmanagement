@@ -2329,7 +2329,8 @@ export async function fetchClientInvoiceRows(clientName: string, period: Period)
   const shifts = await fetchDispatchShifts(period);
   return shifts
     .filter((o) => o.client === clientName)
-    .map((o) => ({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route, amount: o.busValue }));
+    .map((o) => ({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route, amount: o.busValue }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.route.localeCompare(b.route, "ar") || a.busCode.localeCompare(b.busCode, "ar"));
 }
 
 export function computeClientInvoiceSummary(rows: ClientInvoiceRow[]) {

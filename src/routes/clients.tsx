@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Bus, FileText, MapPin, Pencil, Plus, Printer, Receipt, Trash2 } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { AppShell } from "@/components/app-shell";
@@ -213,6 +213,15 @@ function ClientsPage() {
 
   const summary = computeClientInvoiceSummary(invoiceRows);
   const balance = computeClientMonthBalance(extras.opening, summary.totalDue, extras.postings);
+  const [groupByRoute, setGroupByRoute] = useState(true);
+  const routeGroups = (() => {
+    const m = new Map<string, ClientInvoiceRow[]>();
+    for (const r of invoiceRows) {
+      const k = r.route || "بدون خط";
+      m.set(k, [...(m.get(k) ?? []), r]);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "ar")).map(([route, rows]) => ({ route, rows, total: rows.reduce((t, r) => t + r.amount, 0) }));
+  })();
   const printStatement = () => {
     document.body.classList.add("print-statement");
     const cleanup = () => {
@@ -289,26 +298,45 @@ function ClientsPage() {
                     </>
                   }
                 />
-                <DataTable head={["اليوم والتاريخ", "رقم الأتوبيس", "نوع السيارة", "اسم السائق", "الخط / الوردية", "القيمة (دائن)"]}>
+                <div className="no-print mb-2 flex items-center gap-2 text-sm">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input type="checkbox" checked={groupByRoute} onChange={(e) => setGroupByRoute(e.target.checked)} />
+                    تجميع الورديات حسب خط السير مع إجمالي كل خط
+                  </label>
+                </div>
+                <DataTable head={["اليوم والتاريخ", "اسم السائق", "نوع السيارة", "رقم الأتوبيس", "الخط / الوجهة", "القيمة (دائن)"]}>
                   {invoiceLoading ? (
                     <tr>
                       <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
                     </tr>
                   ) : invoiceRows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">لا توجد ورديات مسجلة لهذه الشركة هذا الشهر.</td>
+                      <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">لا توجد ورديات مسجلة لهذه الشركة في هذه الفترة.</td>
                     </tr>
                   ) : (
-                    invoiceRows.map((r, i) => (
-                      <tr key={i} className="transition-colors hover:bg-secondary/30">
-                        <td className="px-4 py-3">{dayName(r.date)} — {r.date}</td>
-                        <td className="px-4 py-3 font-bold text-primary">{r.busCode}</td>
-                        <td className="px-4 py-3 text-xs">{r.busType}</td>
-                        <td className="px-4 py-3">{r.driver}</td>
-                        <td className="px-4 py-3">{r.route || "—"}</td>
-                        <td className="px-4 py-3 font-bold text-success">{currency(r.amount)}</td>
-                      </tr>
-                    ))
+                    <>
+                      {(groupByRoute ? routeGroups : [{ route: "", rows: invoiceRows, total: 0 }]).map((g) => (
+                        <Fragment key={g.route || "all"}>
+                          {groupByRoute && (
+                            <tr className="bg-primary/10"><td colSpan={6} className="px-4 py-2 font-bold text-primary">خط: {g.route} — {g.rows.length} وردية</td></tr>
+                          )}
+                          {g.rows.map((r, i) => (
+                            <tr key={i} className="transition-colors hover:bg-secondary/30">
+                              <td className="px-4 py-3">{dayName(r.date)} — {r.date}</td>
+                              <td className="px-4 py-3">{r.driver}</td>
+                              <td className="px-4 py-3 text-xs">{r.busType}</td>
+                              <td className="px-4 py-3 font-bold text-primary">{r.busCode}</td>
+                              <td className="px-4 py-3">{r.route || "—"}</td>
+                              <td className="px-4 py-3 font-bold text-success">{currency(r.amount)}</td>
+                            </tr>
+                          ))}
+                          {groupByRoute && (
+                            <tr className="bg-secondary/40 font-bold"><td colSpan={5} className="px-4 py-2">إجمالي خط {g.route}</td><td className="px-4 py-2 text-success">{currency(g.total)}</td></tr>
+                          )}
+                        </Fragment>
+                      ))}
+                      <tr className="bg-primary/15 text-base font-extrabold"><td colSpan={5} className="px-4 py-3">إجمالي المطالبة المستحقة</td><td className="px-4 py-3 text-primary">{currency(summary.totalDue)}</td></tr>
+                    </>
                   )}
                 </DataTable>
               </Panel>
@@ -399,16 +427,22 @@ function ClientsPage() {
           <h3>أولًا: الورديات والمطالبات</h3>
           <table>
             <thead>
-              <tr>{["م", "اليوم والتاريخ", "رقم الأتوبيس", "نوع السيارة", "اسم السائق", "الخط / الوردية", "القيمة"].map((h) => <th key={h}>{h}</th>)}</tr>
+              <tr>{["م", "اليوم والتاريخ", "اسم السائق", "نوع السيارة", "رقم الأتوبيس", "الخط / الوجهة", "القيمة"].map((h) => <th key={h}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {invoiceRows.length === 0 ? (
                 <tr><td colSpan={7} style={{ textAlign: "center" }}>لا توجد ورديات في هذه الفترة</td></tr>
               ) : (
-                invoiceRows.map((r, i) => (
-                  <tr key={i}>
-                    <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td><td>{r.busCode}</td><td>{r.busType}</td><td>{r.driver}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
-                  </tr>
+                (groupByRoute ? routeGroups : [{ route: "", rows: invoiceRows, total: 0 }]).map((g) => (
+                  <Fragment key={g.route || "all"}>
+                    {groupByRoute && <tr className="stmt-group"><td colSpan={7} style={{ textAlign: "right", fontWeight: 700 }}>خط: {g.route} ({g.rows.length} وردية)</td></tr>}
+                    {g.rows.map((r, i) => (
+                      <tr key={i}>
+                        <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td><td>{r.driver}</td><td>{r.busType}</td><td>{r.busCode}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
+                      </tr>
+                    ))}
+                    {groupByRoute && <tr className="stmt-sub"><td colSpan={6} style={{ textAlign: "right", fontWeight: 700 }}>إجمالي خط {g.route}</td><td className="num">{currency(g.total)}</td></tr>}
+                  </Fragment>
                 ))
               )}
             </tbody>

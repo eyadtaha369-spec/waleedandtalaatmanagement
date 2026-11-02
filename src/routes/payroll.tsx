@@ -483,7 +483,9 @@ function PayrollPage() {
       {printing && (() => {
         const f = finalOf(printing);
         const myShifts = shifts.filter((x) => sameDriver(x.driver, printing.name));
-        const myDispatch = dispatchShifts.filter((x) => sameDriver(x.driver, printing.name));
+        const myDispatch = dispatchShifts.filter((x) => sameDriver(x.driver, printing.name) && !x.missionId);
+        const myMissions = dispatchShifts.filter((x) => sameDriver(x.driver, printing.name) && x.missionId);
+        const myTrips = payTrips.filter((x) => sameDriver(x.driver, printing.name));
         const td = { border: "1px solid #000", padding: 6 } as const;
         return (
           <div className="print-only" dir="rtl">
@@ -494,22 +496,29 @@ function PayrollPage() {
             </p>
             {printing.type === "driver" ? (() => {
               const rows = [
-                ...myDispatch.map((x) => ({ k: `d${x.id}`, date: x.date, route: [x.route || x.client, x.missionId ? "(مأمورية)" : ""].filter(Boolean).join(" "), status: x.attendanceStatus || "حاضر", base: x.driverValue * shiftPayFactor(x.attendanceStatus), ot: x.overtime, ded: x.advance + x.penalty + x.karta })),
+                ...myDispatch.map((x) => ({ k: `d${x.id}`, date: x.date, route: x.route || x.client, status: x.attendanceStatus || "حاضر", base: x.driverValue * shiftPayFactor(x.attendanceStatus), ot: x.overtime, ded: x.advance + x.penalty + x.karta })),
                 ...myShifts.map((x) => ({ k: `s${x.id}`, date: x.date, route: x.route || (x.shiftFrom || x.shiftTo ? `${x.shiftFrom || "—"} ⬅ ${x.shiftTo || "—"}` : "—"), status: x.status || "—", base: 0, ot: x.overtimeAllowance, ded: x.dailyAdvance + x.penalty + x.tollFee })),
               ].sort((m, n) => m.date.localeCompare(n.date));
               const otTotal = rows.reduce((t, r) => t + r.ot, 0);
               const rowsDed = rows.reduce((t, r) => t + r.ded, 0);
               const extraDed = Math.max(0, f.deductions - rowsDed);
-              const allowTotal = f.baseSalary + (f.shiftAllowances - otTotal) + f.tripFees + f.bonus;
+              const tripRows = [
+                ...myTrips.map((x) => ({ k: `t${x.id}`, date: x.date, kind: "رحلة", dest: x.destination || x.client || "—", val: x.fee })),
+                ...myMissions.map((x) => ({ k: `m${x.id}`, date: x.date, kind: "مأمورية", dest: x.route || x.client || "—", val: x.driverValue })),
+              ].sort((m, n) => m.date.localeCompare(n.date));
+              const tripsTotal = tripRows.reduce((t, r) => t + r.val, 0);
               const th = { ...td, background: "#eee", textAlign: "center" } as const;
               const sum = [
-                ["إجمالي بدلات الورديات والرواتب", allowTotal],
-                ["إجمالي الإضافي", otTotal],
-                ["إجمالي السُلف والخصومات", f.deductions],
+                ["إجمالي الورديات (إضافي وقيمة السواقة)", f.shiftAllowances],
+                ["أجور الرحلات والمأموريات", f.tripFees],
+                ["مكافآت (تسوية)", f.bonus],
+                ["السُلف", f.advances],
+                ["الجزاءات والخصومات", f.penalties],
+                ["الكرتات", f.tolls],
               ] as const;
               return (
                 <>
-                  <h3 style={{ fontWeight: 700, margin: "8px 0" }}>كشف مرتب مفصل — الورديات والمشاوير</h3>
+                  <h3 style={{ fontWeight: 700, margin: "8px 0" }}>كشف مرتب مفصل — الورديات</h3>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}>
                     <thead>
                       <tr>{["تاريخ الوردية", "خط السير / المشوار", "حالة الحضور", "المبلغ الأساسي للوردية", "الإضافي المسجل", "السُلف والجزاءات والكرتات"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
@@ -523,6 +532,21 @@ function PayrollPage() {
                       <tr style={{ fontWeight: 800, background: "#f6f6f6" }}><td colSpan={3} style={td}>الإجمالي</td><td style={td}>{currency(rows.reduce((t, r) => t + r.base, 0))}</td><td style={td}>{currency(otTotal)}</td><td style={td}>{currency(rowsDed + extraDed)}</td></tr>
                     </tbody>
                   </table>
+                  <h3 style={{ fontWeight: 700, margin: "8px 0" }}>سجل الرحلات والمأموريات</h3>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}>
+                    <thead>
+                      <tr>{["التاريخ", "النوع", "الوجهة / المشوار", "أجر / بونص الرحلة"].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {tripRows.length === 0 && <tr><td colSpan={4} style={{ ...td, textAlign: "center" }}>لا توجد رحلات أو مأموريات مسجلة</td></tr>}
+                      {tripRows.map((r) => (
+                        <tr key={r.k}><td style={td}>{r.date}</td><td style={td}>{r.kind}</td><td style={td}>{r.dest}</td><td style={td}>{currency(r.val)}</td></tr>
+                      ))}
+                      {tripRows.length > 0 && tripsTotal !== f.tripFees && <tr><td colSpan={3} style={td}>تسويات أخرى على أجور الرحلات</td><td style={td}>{currency(f.tripFees - tripsTotal)}</td></tr>}
+                      <tr style={{ fontWeight: 800, background: "#f6f6f6" }}><td colSpan={3} style={td}>إجمالي الرحلات والمأموريات</td><td style={td}>{currency(f.tripFees)}</td></tr>
+                    </tbody>
+                  </table>
+                  <h3 style={{ fontWeight: 700, margin: "8px 0" }}>ملخص الحساب</h3>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                     <tbody>
                       <tr><td style={td}>المرتب الأساسي</td><td style={td}>{currency(f.baseSalary)}</td></tr>

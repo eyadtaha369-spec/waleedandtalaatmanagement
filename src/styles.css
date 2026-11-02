@@ -313,3 +313,6 @@
   .stmt-print td.drv { font-weight: 700; vertical-align: middle; background: #f8f9fc !important; white-space: normal; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .stmt-print tbody tr:nth-child(even) td.drv { background: #f8f9fc !important; }
 }
+@media print {
+  .stmt-print h4.stmt-sub-title { font-size: 13px; font-weight: 800; margin: 12px 0 4px; padding: 4px 8px; background: #e8ecf3; border-right: 4px solid #0B132B; -webkit-print-color-adjust: exact; print-color-adjust: exact; page-break-after: avoid; }
+}

@@ -2322,6 +2322,7 @@ export interface ClientInvoiceRow {
   driver: string;
   route: string;
   amount: number;
+  isMission: boolean;
 }
 
 export async function fetchClientInvoiceRows(clientName: string, period: Period): Promise<ClientInvoiceRow[]> {
@@ -2329,7 +2330,7 @@ export async function fetchClientInvoiceRows(clientName: string, period: Period)
   const shifts = await fetchDispatchShifts(period);
   return shifts
     .filter((o) => o.client === clientName)
-    .map((o) => ({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route, amount: o.busValue }))
+    .map((o) => ({ date: o.date, busCode: o.bus, busType: o.busType, driver: o.driver, route: o.route, amount: o.busValue, isMission: !!o.missionId }))
     .sort((a, b) => a.date.localeCompare(b.date) || a.route.localeCompare(b.route, "ar") || a.busCode.localeCompare(b.busCode, "ar"));
 }
 

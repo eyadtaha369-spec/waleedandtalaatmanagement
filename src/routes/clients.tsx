@@ -213,7 +213,7 @@ function ClientsPage() {
 
   const summary = computeClientInvoiceSummary(invoiceRows);
   const balance = computeClientMonthBalance(extras.opening, summary.totalDue, extras.postings);
-  const [groupByRoute, setGroupByRoute] = useState(true);
+  const [mode, setMode] = useState<"bus" | "route" | "date">("bus");
   /** عدد الصفوف المتتالية لنفس السائق (للدمج)؛ 0 = الخلية مدموجة في السابقة */
   const driverSpans = (rows: ClientInvoiceRow[]) => rows.map((r, i) => {
     if (i > 0 && rows[i - 1]!.driver === r.driver) return 0;
@@ -221,14 +221,74 @@ function ClientsPage() {
     while (i + n < rows.length && rows[i + n]!.driver === r.driver) n++;
     return n;
   });
-  const routeGroups = (() => {
+  const missionRows = invoiceRows.filter((r) => r.isMission);
+  const shiftRows = invoiceRows.filter((r) => !r.isMission);
+  const missionsTotal = missionRows.reduce((t, r) => t + r.amount, 0);
+  const shiftsTotal = shiftRows.reduce((t, r) => t + r.amount, 0);
+  type RowGroup = { key: string; title: string; rows: ClientInvoiceRow[]; total: number };
+  const shiftGroups: RowGroup[] = (() => {
+    if (mode === "date") return [{ key: "all", title: "", rows: shiftRows, total: shiftsTotal }];
     const m = new Map<string, ClientInvoiceRow[]>();
-    for (const r of invoiceRows) {
-      const k = r.route || "بدون خط";
+    for (const r of shiftRows) {
+      const k = mode === "bus" ? r.busCode || "بدون رقم" : r.route || "بدون خط";
       m.set(k, [...(m.get(k) ?? []), r]);
     }
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "ar")).map(([route, rows]) => ({ route, rows, total: rows.reduce((t, r) => t + r.amount, 0) }));
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "ar", { numeric: true })).map(([k, rows]) => ({
+      key: k,
+      title: mode === "bus" ? `عربية رقم ${k}${rows[0]?.busType ? ` — ${rows[0].busType}` : ""}` : `خط: ${k}`,
+      rows,
+      total: rows.reduce((t, r) => t + r.amount, 0),
+    }));
   })();
+  const renderScreenTable = (key: string, title: string, rows: ClientInvoiceRow[], totalLabel: string, total: number) => {
+    const sp = driverSpans(rows);
+    return (
+      <div key={key} className="mt-4">
+        {title && <h4 className="mb-1 text-sm font-bold text-primary">{title} <span className="text-xs font-normal text-muted-foreground">({rows.length} سجل)</span></h4>}
+        <DataTable head={["اليوم والتاريخ", "اسم السائق", "نوع السيارة", "رقم الأتوبيس", "الخط / الوجهة", "القيمة (دائن)"]}>
+          {rows.map((r, i) => (
+            <tr key={i} className="transition-colors hover:bg-secondary/30">
+              <td className="px-4 py-3">{dayName(r.date)} — {r.date}</td>
+              {sp[i]! > 0 && (
+                <td rowSpan={sp[i]} className="border-x border-border bg-secondary/20 px-4 py-3 text-center align-middle font-semibold">
+                  {r.driver}
+                  {sp[i]! > 1 && <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{sp[i]} سجلات</span>}
+                </td>
+              )}
+              <td className="px-4 py-3 text-xs">{r.busType}</td>
+              <td className="px-4 py-3 font-bold text-primary">{r.busCode}</td>
+              <td className="px-4 py-3">{r.route || "—"}</td>
+              <td className="px-4 py-3 font-bold text-success">{currency(r.amount)}</td>
+            </tr>
+          ))}
+          <tr className="bg-secondary/40 font-bold"><td colSpan={5} className="px-4 py-2">{totalLabel}</td><td className="px-4 py-2 text-success">{currency(total)}</td></tr>
+        </DataTable>
+      </div>
+    );
+  };
+  const renderPrintTable = (key: string, title: string, rows: ClientInvoiceRow[], totalLabel: string, total: number) => {
+    const sp = driverSpans(rows);
+    return (
+      <div key={key} style={{ pageBreakInside: "auto" }}>
+        {title && <h4 className="stmt-sub-title">{title}</h4>}
+        <table>
+          <thead>
+            <tr>{["م", "اليوم والتاريخ", "اسم السائق", "نوع السيارة", "رقم الأتوبيس", "الخط / الوجهة", "القيمة"].map((h) => <th key={h}>{h}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td>
+                {sp[i]! > 0 && <td rowSpan={sp[i]} className="drv">{r.driver}{sp[i]! > 1 ? ` (${sp[i]} سجلات)` : ""}</td>}
+                <td>{r.busType}</td><td>{r.busCode}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot><tr><td colSpan={6}>{totalLabel}</td><td className="num">{currency(total)}</td></tr></tfoot>
+        </table>
+      </div>
+    );
+  };
   const printStatement = () => {
     document.body.classList.add("print-statement");
     const cleanup = () => {
@@ -305,52 +365,40 @@ function ClientsPage() {
                     </>
                   }
                 />
-                <div className="no-print mb-2 flex items-center gap-2 text-sm">
-                  <label className="flex cursor-pointer items-center gap-2">
-                    <input type="checkbox" checked={groupByRoute} onChange={(e) => setGroupByRoute(e.target.checked)} />
-                    تجميع الورديات حسب خط السير مع إجمالي كل خط
-                  </label>
+                <div className="no-print mb-2 flex flex-wrap items-center gap-3 text-sm">
+                  <span className="text-muted-foreground">تقسيم الورديات:</span>
+                  {([["bus", "جدول لكل عربية"], ["route", "حسب خط السير"], ["date", "ترتيب زمني واحد"]] as const).map(([v, l]) => (
+                    <label key={v} className="flex cursor-pointer items-center gap-1.5">
+                      <input type="radio" name="claims-mode" checked={mode === v} onChange={() => setMode(v)} />
+                      {l}
+                    </label>
+                  ))}
                 </div>
-                <DataTable head={["اليوم والتاريخ", "اسم السائق", "نوع السيارة", "رقم الأتوبيس", "الخط / الوجهة", "القيمة (دائن)"]}>
-                  {invoiceLoading ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">جارِ التحميل...</td>
-                    </tr>
-                  ) : invoiceRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">لا توجد ورديات مسجلة لهذه الشركة في هذه الفترة.</td>
-                    </tr>
-                  ) : (
-                    <>
-                      {(groupByRoute ? routeGroups : [{ route: "", rows: invoiceRows, total: 0 }]).map((g) => (
-                        <Fragment key={g.route || "all"}>
-                          {groupByRoute && (
-                            <tr className="bg-primary/10"><td colSpan={6} className="px-4 py-2 font-bold text-primary">خط: {g.route} — {g.rows.length} وردية</td></tr>
-                          )}
-                          {(() => { const sp = driverSpans(g.rows); return g.rows.map((r, i) => (
-                            <tr key={i} className="transition-colors hover:bg-secondary/30">
-                              <td className="px-4 py-3">{dayName(r.date)} — {r.date}</td>
-                              {sp[i]! > 0 && (
-                                <td rowSpan={sp[i]} className="border-x border-border bg-secondary/20 px-4 py-3 text-center align-middle font-semibold">
-                                  {r.driver}
-                                  {sp[i]! > 1 && <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{sp[i]} ورديات</span>}
-                                </td>
-                              )}
-                              <td className="px-4 py-3 text-xs">{r.busType}</td>
-                              <td className="px-4 py-3 font-bold text-primary">{r.busCode}</td>
-                              <td className="px-4 py-3">{r.route || "—"}</td>
-                              <td className="px-4 py-3 font-bold text-success">{currency(r.amount)}</td>
-                            </tr>
-                          )); })()}
-                          {groupByRoute && (
-                            <tr className="bg-secondary/40 font-bold"><td colSpan={5} className="px-4 py-2">إجمالي خط {g.route}</td><td className="px-4 py-2 text-success">{currency(g.total)}</td></tr>
-                          )}
-                        </Fragment>
-                      ))}
-                      <tr className="bg-primary/15 text-base font-extrabold"><td colSpan={5} className="px-4 py-3">إجمالي المطالبة المستحقة</td><td className="px-4 py-3 text-primary">{currency(summary.totalDue)}</td></tr>
-                    </>
-                  )}
-                </DataTable>
+                {invoiceLoading ? (
+                  <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
+                ) : invoiceRows.length === 0 ? (
+                  <p className="py-6 text-center text-muted-foreground">لا توجد ورديات مسجلة لهذه الشركة في هذه الفترة.</p>
+                ) : (
+                  <>
+                    {missionRows.length > 0 && (
+                      <>
+                        <h3 className="mt-4 text-base font-extrabold text-primary">المأموريات والرحلات الخاصة</h3>
+                        {renderScreenTable("missions", "", missionRows, "إجمالي المأموريات", missionsTotal)}
+                      </>
+                    )}
+                    {shiftRows.length > 0 && (
+                      <>
+                        <h3 className="mt-6 text-base font-extrabold text-primary">الورديات</h3>
+                        {shiftGroups.map((g) => renderScreenTable(g.key, g.title, g.rows, g.title ? `إجمالي ${g.title.replace(/^خط: /, "خط ")}` : "إجمالي مستحق الورديات", g.total))}
+                      </>
+                    )}
+                    <div className="mt-6 grid gap-2 rounded-lg border border-primary/40 bg-primary/5 p-4 text-sm sm:grid-cols-3">
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground">إجمالي المأموريات</span><b>{currency(missionsTotal)}</b></div>
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground">إجمالي مستحق الورديات</span><b>{currency(shiftsTotal)}</b></div>
+                      <div className="flex justify-between gap-2 text-base font-extrabold text-primary"><span>الإجمالي النهائي (إجمالي المطالبة المستحقة)</span><b>{currency(summary.totalDue)}</b></div>
+                    </div>
+                  </>
+                )}
               </Panel>
 
               <Panel title="قيود الحساب (من الخزينة)" className="mt-4">
@@ -436,33 +484,29 @@ function ClientsPage() {
             <div><span>عدد الورديات</span><b>{summary.totalShifts}</b></div>
             <div><span>عدد الأتوبيسات</span><b>{summary.totalBusesDeployed}</b></div>
           </div>
-          <h3>أولًا: الورديات والمطالبات</h3>
-          <table>
-            <thead>
-              <tr>{["م", "اليوم والتاريخ", "اسم السائق", "نوع السيارة", "رقم الأتوبيس", "الخط / الوجهة", "القيمة"].map((h) => <th key={h}>{h}</th>)}</tr>
-            </thead>
+          {invoiceRows.length === 0 && <p style={{ textAlign: "center" }}>لا توجد ورديات في هذه الفترة</p>}
+          {missionRows.length > 0 && (
+            <>
+              <h3>أولًا: المأموريات والرحلات الخاصة</h3>
+              {renderPrintTable("pm", "", missionRows, "إجمالي المأموريات", missionsTotal)}
+            </>
+          )}
+          {shiftRows.length > 0 && (
+            <>
+              <h3>{missionRows.length > 0 ? "ثانيًا" : "أولًا"}: الورديات والمطالبات</h3>
+              {shiftGroups.map((g) => renderPrintTable(g.key, g.title, g.rows, g.title ? `إجمالي ${g.title.replace(/^خط: /, "خط ")}` : "إجمالي مستحق الورديات", g.total))}
+            </>
+          )}
+          <table className="stmt-totals">
             <tbody>
-              {invoiceRows.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: "center" }}>لا توجد ورديات في هذه الفترة</td></tr>
-              ) : (
-                (groupByRoute ? routeGroups : [{ route: "", rows: invoiceRows, total: 0 }]).map((g) => (
-                  <Fragment key={g.route || "all"}>
-                    {groupByRoute && <tr className="stmt-group"><td colSpan={7} style={{ textAlign: "right", fontWeight: 700 }}>خط: {g.route} ({g.rows.length} وردية)</td></tr>}
-                    {(() => { const sp = driverSpans(g.rows); return g.rows.map((r, i) => (
-                      <tr key={i}>
-                        <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td>{sp[i]! > 0 && <td rowSpan={sp[i]} className="drv">{r.driver}{sp[i]! > 1 ? ` (${sp[i]} ورديات)` : ""}</td>}<td>{r.busType}</td><td>{r.busCode}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
-                      </tr>
-                    )); })()}
-                    {groupByRoute && <tr className="stmt-sub"><td colSpan={6} style={{ textAlign: "right", fontWeight: 700 }}>إجمالي خط {g.route}</td><td className="num">{currency(g.total)}</td></tr>}
-                  </Fragment>
-                ))
-              )}
+              <tr><td>إجمالي المأموريات</td><td className="num">{currency(missionsTotal)}</td></tr>
+              <tr><td>إجمالي مستحق الورديات</td><td className="num">{currency(shiftsTotal)}</td></tr>
+              <tr className="grand"><td>الإجمالي النهائي (إجمالي المطالبة المستحقة)</td><td className="num">{currency(summary.totalDue)}</td></tr>
             </tbody>
-            <tfoot><tr><td colSpan={6}>إجمالي المطالبة المستحقة</td><td className="num">{currency(summary.totalDue)}</td></tr></tfoot>
           </table>
           {extras.postings.length > 0 && (
             <>
-              <h3>ثانيًا: قيود الحساب (تحصيلات ومدفوعات)</h3>
+              <h3>قيود الحساب (تحصيلات ومدفوعات)</h3>
               <table>
                 <thead><tr>{["التاريخ", "البيان", "مدين", "دائن"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                 <tbody>
@@ -476,7 +520,7 @@ function ClientsPage() {
           <table className="stmt-totals">
             <tbody>
               <tr><td>رصيد أول المدة (مرحّل)</td><td className="num">{currency(balance.opening)}</td></tr>
-              <tr><td>مطالبات الفترة</td><td className="num">{currency(balance.monthDues)}</td></tr>
+              <tr><td>مطالبات الفترة (الإجمالي النهائي أعلاه)</td><td className="num">{currency(balance.monthDues)}</td></tr>
               {balance.debits > 0 && <tr><td>قيود مدينة أخرى</td><td className="num">{currency(balance.debits)}</td></tr>}
               <tr><td>إجمالي المستحق</td><td className="num">{currency(balance.opening + balance.monthDues + balance.debits)}</td></tr>
               <tr><td>المحصَّل</td><td className="num">{currency(balance.credits)}</td></tr>

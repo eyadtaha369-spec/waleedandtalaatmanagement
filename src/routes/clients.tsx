@@ -214,6 +214,13 @@ function ClientsPage() {
   const summary = computeClientInvoiceSummary(invoiceRows);
   const balance = computeClientMonthBalance(extras.opening, summary.totalDue, extras.postings);
   const [groupByRoute, setGroupByRoute] = useState(true);
+  /** عدد الصفوف المتتالية لنفس السائق (للدمج)؛ 0 = الخلية مدموجة في السابقة */
+  const driverSpans = (rows: ClientInvoiceRow[]) => rows.map((r, i) => {
+    if (i > 0 && rows[i - 1]!.driver === r.driver) return 0;
+    let n = 1;
+    while (i + n < rows.length && rows[i + n]!.driver === r.driver) n++;
+    return n;
+  });
   const routeGroups = (() => {
     const m = new Map<string, ClientInvoiceRow[]>();
     for (const r of invoiceRows) {
@@ -320,16 +327,21 @@ function ClientsPage() {
                           {groupByRoute && (
                             <tr className="bg-primary/10"><td colSpan={6} className="px-4 py-2 font-bold text-primary">خط: {g.route} — {g.rows.length} وردية</td></tr>
                           )}
-                          {g.rows.map((r, i) => (
+                          {(() => { const sp = driverSpans(g.rows); return g.rows.map((r, i) => (
                             <tr key={i} className="transition-colors hover:bg-secondary/30">
                               <td className="px-4 py-3">{dayName(r.date)} — {r.date}</td>
-                              <td className="px-4 py-3">{r.driver}</td>
+                              {sp[i]! > 0 && (
+                                <td rowSpan={sp[i]} className="border-x border-border bg-secondary/20 px-4 py-3 text-center align-middle font-semibold">
+                                  {r.driver}
+                                  {sp[i]! > 1 && <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{sp[i]} ورديات</span>}
+                                </td>
+                              )}
                               <td className="px-4 py-3 text-xs">{r.busType}</td>
                               <td className="px-4 py-3 font-bold text-primary">{r.busCode}</td>
                               <td className="px-4 py-3">{r.route || "—"}</td>
                               <td className="px-4 py-3 font-bold text-success">{currency(r.amount)}</td>
                             </tr>
-                          ))}
+                          )); })()}
                           {groupByRoute && (
                             <tr className="bg-secondary/40 font-bold"><td colSpan={5} className="px-4 py-2">إجمالي خط {g.route}</td><td className="px-4 py-2 text-success">{currency(g.total)}</td></tr>
                           )}
@@ -436,11 +448,11 @@ function ClientsPage() {
                 (groupByRoute ? routeGroups : [{ route: "", rows: invoiceRows, total: 0 }]).map((g) => (
                   <Fragment key={g.route || "all"}>
                     {groupByRoute && <tr className="stmt-group"><td colSpan={7} style={{ textAlign: "right", fontWeight: 700 }}>خط: {g.route} ({g.rows.length} وردية)</td></tr>}
-                    {g.rows.map((r, i) => (
+                    {(() => { const sp = driverSpans(g.rows); return g.rows.map((r, i) => (
                       <tr key={i}>
-                        <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td><td>{r.driver}</td><td>{r.busType}</td><td>{r.busCode}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
+                        <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td>{sp[i]! > 0 && <td rowSpan={sp[i]} className="drv">{r.driver}{sp[i]! > 1 ? ` (${sp[i]} ورديات)` : ""}</td>}<td>{r.busType}</td><td>{r.busCode}</td><td>{r.route || "—"}</td><td className="num">{currency(r.amount)}</td>
                       </tr>
-                    ))}
+                    )); })()}
                     {groupByRoute && <tr className="stmt-sub"><td colSpan={6} style={{ textAlign: "right", fontWeight: 700 }}>إجمالي خط {g.route}</td><td className="num">{currency(g.total)}</td></tr>}
                   </Fragment>
                 ))

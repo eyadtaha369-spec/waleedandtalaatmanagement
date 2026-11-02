@@ -309,3 +309,7 @@
   .stmt-print tr.stmt-group td { background: #e8ecf3 !important; border-top: 2px solid #0B132B; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .stmt-print tr.stmt-sub td { background: #f6efd2 !important; font-weight: 800; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+@media print {
+  .stmt-print td.drv { font-weight: 700; vertical-align: middle; background: #f8f9fc !important; white-space: normal; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .stmt-print tbody tr:nth-child(even) td.drv { background: #f8f9fc !important; }
+}

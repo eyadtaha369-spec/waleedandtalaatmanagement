@@ -66,6 +66,10 @@ export interface Student {
 
 
 
+/** تصنيفات الصيانة المستقلة */
+export const MAINTENANCE_TYPES = ["تغيير كاوتش", "حل عجل", "عمرات", "زيت", "تشحيم"] as const;
+export const OTHER_MAINTENANCE_TYPE = "أخرى / عام";
+
 export type MaintenanceStatus = "بانتظار القطع" | "قيد التنفيذ" | "مكتمل" | "ملغي";
 
 export interface MaintenanceItem {
@@ -93,6 +97,7 @@ export interface MaintenanceOrder {
   faultDriverId?: string;
   /** مبلغ الخصم من السائق؛ فارغ = تكلفة الأمر كاملة */
   faultAmount?: number | null;
+  maintenanceType?: string;
   /** عداد الكيلومتر وقت الصيانة */
   maintenanceMileage?: number | null;
 }

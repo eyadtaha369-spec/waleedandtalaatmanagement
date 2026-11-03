@@ -32,7 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { currency, UNIT_TYPES, type MaintenanceOrder, type MaintenanceStatus, type InventoryItem, type FuelLog, type UnitType, type Bus } from "@/lib/fleet-data";
+import { currency, UNIT_TYPES, type MaintenanceOrder, type MaintenanceStatus, type InventoryItem, type FuelLog, type UnitType, type Bus, MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE } from "@/lib/fleet-data";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -108,7 +108,7 @@ interface PartRow {
 let partKey = 0;
 const newPart = (): PartRow => ({ key: ++partKey, inventoryId: "", quantity: "1", unitPrice: "" });
 
-const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus, driverFault: false, faultDriverId: "", faultAmount: "", mileage: "" };
+const emptyOrderForm = { id: "", bus: "", date: todayStr(), issue: "", laborCost: "", paySource: "", status: "بانتظار القطع" as MaintenanceStatus, driverFault: false, faultDriverId: "", faultAmount: "", mileage: "", type: "" };
 const emptyItemForm = { id: "", name: "", code: "", stock: "", minStock: "", unitPrice: "", unitType: "بالقطعة" as UnitType };
 const NEW_STATION = "__new__";
 const emptyFuelForm = { id: "", busCode: "", driverName: "", date: new Date().toISOString().slice(0, 10), currentOdometer: "", liters: "", cost: "", station: "", pricePerLiter: "", supplierId: "" };
@@ -287,6 +287,7 @@ function WorkshopPage() {
       faultDriverId: o.faultDriverId ?? "",
       faultAmount: o.faultAmount ? String(o.faultAmount) : "",
       mileage: o.maintenanceMileage ? String(o.maintenanceMileage) : "",
+      type: o.maintenanceType ?? "",
     });
     setParts(o.items.length ? o.items.map((i) => ({ key: ++partKey, inventoryId: i.inventoryId, quantity: String(i.quantity), unitPrice: String(i.unitPrice) })) : [newPart()]);
     setAdding(true);
@@ -343,6 +344,7 @@ function WorkshopPage() {
         faultDriverId: form.faultDriverId,
         faultAmount: form.faultAmount ? Number(form.faultAmount) : null,
         maintenanceMileage: Number(form.mileage) > 0 ? Number(form.mileage) : null,
+        maintenanceType: form.type,
         items: filledParts.map((p) => ({ inventoryId: p.inventoryId, quantity: Number(p.quantity), unitPrice: Number(p.unitPrice) || 0 })),
       });
       await loadAll();
@@ -552,7 +554,14 @@ function WorkshopPage() {
   useEffect(() => {
     fetchInventoryMovements(invRange).then(setMovements).catch(() => setMovements([]));
   }, [invRange, inventory, purchases]);
-  const ordersInRange = useMemo(() => orders.filter((o) => inDateRange(o.date, ordRange)), [orders, ordRange]);
+  const [catFilter, setCatFilter] = useState<string>("الكل");
+  const ordersByDate = useMemo(() => orders.filter((o) => inDateRange(o.date, ordRange)), [orders, ordRange]);
+  const typeOf = (o: MaintenanceOrder) => o.maintenanceType || OTHER_MAINTENANCE_TYPE;
+  const ordersInRange = useMemo(() => ordersByDate.filter((o) => catFilter === "الكل" || typeOf(o) === catFilter), [ordersByDate, catFilter]);
+  const categoryStats = useMemo(() => [...MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE].map((t) => {
+    const rows = ordersByDate.filter((o) => o.status !== "ملغي" && typeOf(o) === t);
+    return { type: t, count: rows.length, cost: rows.reduce((a, o) => a + o.cost, 0) };
+  }), [ordersByDate]);
   const orderTotals = useMemo(() => {
     const live = ordersInRange.filter((o) => o.status !== "ملغي");
     const parts = live.reduce((a, o) => a + o.items.reduce((x, i) => x + i.quantity * i.unitPrice, 0), 0);
@@ -688,7 +697,7 @@ function WorkshopPage() {
               onExport={() =>
                 exportToExcel(
                   "أوامر الصيانة",
-                  ordersInRange.map((o) => ({ الأمر: o.code, العربية: o.bus, التاريخ: o.date, العطل: o.issue, "قطع الغيار": o.parts, المصنعية: o.laborCost, الإجمالي: o.cost, الحالة: o.status })),
+                  ordersInRange.map((o) => ({ الأمر: o.code, العربية: o.bus, التاريخ: o.date, التصنيف: o.maintenanceType || OTHER_MAINTENANCE_TYPE, العطل: o.issue, "قطع الغيار": o.parts, المصنعية: o.laborCost, الإجمالي: o.cost, الحالة: o.status })),
                 )
               }
               extra={
@@ -706,6 +715,26 @@ function WorkshopPage() {
               }
             />
             <DateRangeFilter value={ordRange} onChange={setOrdRange} className="mb-2" />
+            <div className="no-print mb-2 flex flex-wrap gap-1.5">
+              {["الكل", ...MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE].map((t) => {
+                const n = t === "الكل" ? ordersByDate.length : ordersByDate.filter((o) => typeOf(o) === t).length;
+                return (
+                  <Button key={t} type="button" size="sm" variant={catFilter === t ? "default" : "outline"} className={catFilter === t ? "" : "border-border"} onClick={() => setCatFilter(t)}>
+                    {t} ({n})
+                  </Button>
+                );
+              })}
+            </div>
+            <div className="mb-3 overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-xs">
+                <thead className="bg-secondary/40 text-muted-foreground"><tr><th className="px-3 py-1.5 text-right font-medium">التصنيف</th><th className="px-3 py-1.5 text-right font-medium">عدد الأوامر</th><th className="px-3 py-1.5 text-right font-medium">إجمالي التكلفة (بدون الملغي)</th></tr></thead>
+                <tbody>
+                  {categoryStats.map((c) => (
+                    <tr key={c.type} className="border-t border-border"><td className="px-3 py-1.5 font-semibold">{c.type}</td><td className="px-3 py-1.5">{c.count}</td><td className="px-3 py-1.5 text-warning">{currency(c.cost)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <SummaryStrip items={[["عدد الأوامر (بدون الملغي)", String(orderTotals.count)], ["قطع الغيار", currency(orderTotals.parts)], ["المصنعية", currency(orderTotals.labor)], ["إجمالي تكلفة الفترة", currency(orderTotals.total)]]} />
             {loading ? (
               <p className="py-6 text-center text-muted-foreground">جارِ التحميل...</p>
@@ -726,7 +755,7 @@ function WorkshopPage() {
                               <span className="font-bold text-primary">{o.code}</span>
                               <span>{o.bus} · {o.date}</span>
                             </div>
-                            <p className="mt-2 text-sm font-semibold">{o.issue}</p>
+                            <p className="mt-2 text-sm font-semibold">{o.maintenanceType && <span className="ml-2 rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{o.maintenanceType}</span>}{o.issue}</p>
                             {o.items.length > 0 && (
                               <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                                 {o.items.map((i) => (
@@ -1025,6 +1054,15 @@ function WorkshopPage() {
               </div>
             </div>
             <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">تصنيف الصيانة</Label>
+              <Select value={form.type || OTHER_MAINTENANCE_TYPE} onValueChange={(v) => setForm({ ...form, type: v === OTHER_MAINTENANCE_TYPE ? "" : v })}>
+                <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[...MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">وصف العطل / الخدمة</Label>
               <Input value={form.issue} onChange={(e) => setForm({ ...form, issue: e.target.value })} className="border-border bg-input/60" />
             </div>
@@ -1168,11 +1206,11 @@ function WorkshopPage() {
 
       {printKind === "orders" && (
         <ReportPrint
-          title="تقرير الورشة وأوامر الصيانة"
+          title={catFilter === "الكل" ? "تقرير الورشة وأوامر الصيانة" : `تقرير الورشة — ${catFilter}`}
           range={ordRange}
-          columns={["م", "التاريخ", "رقم الأمر", "العربية", "العطل / الخدمة", "قطع الغيار", "المصنعية", "الإجمالي", "الحالة"]}
-          rows={ordersInRange.map((o, i) => { const parts = o.items.reduce((x, it) => x + it.quantity * it.unitPrice, 0); return [i + 1, o.date, o.code, o.bus, o.issue, currency(parts), currency(o.laborCost), currency(o.cost), o.status]; })}
-          footer={["", "", "", "", `الإجمالي (${orderTotals.count} أمر بدون الملغي)`, currency(orderTotals.parts), currency(orderTotals.labor), currency(orderTotals.total), ""]}
+          columns={["م", "التاريخ", "رقم الأمر", "العربية", "التصنيف", "العطل / الخدمة", "قطع الغيار", "المصنعية", "الإجمالي", "الحالة"]}
+          rows={ordersInRange.map((o, i) => { const parts = o.items.reduce((x, it) => x + it.quantity * it.unitPrice, 0); return [i + 1, o.date, o.code, o.bus, o.maintenanceType || OTHER_MAINTENANCE_TYPE, o.issue, currency(parts), currency(o.laborCost), currency(o.cost), o.status]; })}
+          footer={["", "", "", "", "", `الإجمالي (${orderTotals.count} أمر بدون الملغي)`, currency(orderTotals.parts), currency(orderTotals.labor), currency(orderTotals.total), ""]}
         />
       )}
       {printKind === "inventory" && (

@@ -425,6 +425,7 @@ export async function fetchMaintenanceOrders(): Promise<MaintenanceOrder[]> {
     faultDriverId: o.fault_driver_id ?? "",
     faultAmount: o.fault_amount == null ? null : Number(o.fault_amount),
     maintenanceMileage: o.maintenance_mileage == null ? null : Number(o.maintenance_mileage),
+    maintenanceType: o.maintenance_type ?? "",
     status: o.status ?? "بانتظار القطع",
     items: (o.maintenance_order_items ?? []).map(
       (i: any): MaintenanceItem => ({
@@ -450,6 +451,7 @@ export interface MaintenanceOrderInput {
   faultDriverId?: string;
   faultAmount?: number | null;
   maintenanceMileage?: number | null;
+  maintenanceType?: string;
   items: { inventoryId: string; quantity: number; unitPrice: number }[];
 }
 
@@ -529,6 +531,7 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
     driver_fault: !!input.driverFault,
     fault_driver_id: input.driverFault ? input.faultDriverId || null : null,
     fault_amount: input.driverFault && input.faultAmount != null && input.faultAmount > 0 ? input.faultAmount : null,
+    maintenance_type: input.maintenanceType && input.maintenanceType !== "أخرى / عام" ? input.maintenanceType : null,
     maintenance_mileage: input.maintenanceMileage != null && input.maintenanceMileage > 0 ? Math.round(input.maintenanceMileage) : null,
   };
   if (fields.maintenance_mileage) await syncBusOdometer(fields.bus_id, fields.maintenance_mileage);

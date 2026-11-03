@@ -78,7 +78,18 @@ export async function fetchDrivers(): Promise<Driver[]> {
     primaryBus: "—",
     backupBus: "—",
     shift: "راحة",
+    archived: !!d.archived,
   }));
+}
+
+/** السائقون النشطون فقط (لقوائم الاختيار في النماذج)؛ المؤرشفون محفوظ سجلهم التاريخي. */
+export async function fetchActiveDrivers(): Promise<Driver[]> {
+  return (await fetchDrivers()).filter((d) => !d.archived);
+}
+
+export async function setDriverArchived(id: string, archived: boolean) {
+  const { error } = await supabase.from("drivers").update({ archived, archived_at: archived ? new Date().toISOString() : null }).eq("id", id);
+  if (error) throw new Error(dbErrorMessage(error, archived ? "تعذر أرشفة السائق" : "تعذر إلغاء الأرشفة"));
 }
 
 export async function fetchAttendance(): Promise<Attendance[]> {
@@ -1718,7 +1729,7 @@ export function shiftPayFactor(status: string) {
 export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollRow[]> {
   const { start, end } = periodBounds(period);
   const [{ data: drivers, error: dErr }, shifts, { data: tripRows }, dispatchShifts, custodyAdv, { data: faultOrders }] = await Promise.all([
-    supabase.from("drivers").select("id, name, base_salary"),
+    supabase.from("drivers").select("id, name, base_salary, archived"),
     fetchDailyShifts(period),
     supabase.from("trips").select("driver_fee, drivers(name)").neq("status", "ملغاة").gte("trip_date", start).lt("trip_date", end),
     fetchDispatchShifts(period),
@@ -1727,7 +1738,7 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
     supabase.from("maintenance_orders").select("fault_driver_id, fault_amount, total_cost").eq("driver_fault", true).eq("status", "مكتمل").not("fault_driver_id", "is", null).gte("order_date", start).lt("order_date", end),
   ]);
   if (dErr) throw dErr;
-  return computeDriverPayroll(
+  const rows = computeDriverPayroll(
     (drivers ?? []).map((d: any) => ({ name: d.name, base_salary: Number(d.base_salary ?? 0) * periodMonths(period).length })),
     [
       ...shifts.map((s) => ({ driver: s.driver, overtimeAllowance: s.overtimeAllowance, dailyAdvance: s.dailyAdvance, penalty: s.penalty, toll: s.tollFee })),
@@ -1744,6 +1755,9 @@ export async function fetchDriverPayroll(period: Period): Promise<DriverPayrollR
     ],
     dispatchShifts.filter((o) => !o.missionId).map((o) => ({ driver: o.driver, value: o.driverValue * shiftPayFactor(o.attendanceStatus) })),
   );
+  // السائق المؤرشف لا يظهر في المرتبات إلا لو له حركة/مستحقات في الفترة
+  const archivedNames = new Set((drivers ?? []).filter((d: any) => d.archived).map((d: any) => d.name as string));
+  return rows.filter((r) => !archivedNames.has(r.driver) || r.totalOvertime + r.totalAdvances + r.totalPenalties + r.totalTolls + r.tripFees + r.shiftEarnings !== 0);
 }
 
 // ---- Payroll adjustments + final net formula ----
@@ -1758,6 +1772,9 @@ export interface PayrollAdjustment {
   notes: string;
   locked: boolean;
   paySource?: string;
+  /** مرتب ثابت مؤقت للشهر (مجموع شهور الفترة التي لها تعديل) دون المساس بمرتب السائق الدائم */
+  baseOverrideSum?: number;
+  baseOverrideCount?: number;
 }
 
 export const EMPTY_ADJUSTMENT: PayrollAdjustment = { bonus: 0, advances: 0, penalties: 0, tolls: 0, notes: "", locked: false };
@@ -1769,13 +1786,17 @@ export const EMPTY_ADJUSTMENT: PayrollAdjustment = { bonus: 0, advances: 0, pena
 export function computeFinalPayroll(
   row: { baseSalary: number; shiftAllowances: number; tripFees: number; advances: number; penalties: number; tolls?: number },
   adj: PayrollAdjustment = EMPTY_ADJUSTMENT,
+  months = 1,
 ) {
+  // الشهور التي لها مرتب مؤقت تستبدل حصتها من المرتب الدائم (المرتب في row = شهري × عدد الشهور)
+  const overCount = Math.min(adj.baseOverrideCount ?? 0, months);
+  const baseSalary = overCount > 0 ? row.baseSalary - (row.baseSalary / months) * overCount + (adj.baseOverrideSum ?? 0) : row.baseSalary;
   const additions = row.shiftAllowances + row.tripFees + adj.bonus;
   const advances = row.advances + adj.advances;
   const penalties = row.penalties + adj.penalties;
   const tolls = (row.tolls ?? 0) + adj.tolls;
   const deductions = advances + penalties + tolls;
-  return { baseSalary: row.baseSalary, shiftAllowances: row.shiftAllowances, tripFees: row.tripFees, bonus: adj.bonus, advances, penalties, tolls, additions, deductions, net: row.baseSalary + additions - deductions };
+  return { baseSalary, baseOverridden: overCount > 0, shiftAllowances: row.shiftAllowances, tripFees: row.tripFees, bonus: adj.bonus, advances, penalties, tolls, additions, deductions, net: baseSalary + additions - deductions };
 }
 
 export const adjustmentKey = (type: PayrollSubjectType, id: string) => `${type}:${id}`;
@@ -1795,12 +1816,16 @@ export async function fetchPayrollAdjustments(period: Period): Promise<Map<strin
     cur.tolls += Number((r as any).tolls ?? 0);
     cur.notes = cur.notes || ((r as any).notes ?? "");
     cur.paySource = cur.paySource || ((r as any).pay_source ?? "");
+    if ((r as any).base_override != null) {
+      cur.baseOverrideSum = (cur.baseOverrideSum ?? 0) + Number((r as any).base_override);
+      cur.baseOverrideCount = (cur.baseOverrideCount ?? 0) + 1;
+    }
     cur.n += 1;
     if ((r as any).locked) cur.lockedN += 1;
     out.set(key, cur);
   }
   return new Map(
-    [...out.entries()].map(([k, v]) => [k, { bonus: v.bonus, advances: v.advances, penalties: v.penalties, tolls: v.tolls, notes: v.notes, paySource: v.paySource ?? "", locked: v.n > 0 && v.lockedN === v.n }]),
+    [...out.entries()].map(([k, v]) => [k, { bonus: v.bonus, advances: v.advances, penalties: v.penalties, tolls: v.tolls, notes: v.notes, paySource: v.paySource ?? "", locked: v.n > 0 && v.lockedN === v.n, ...(v.baseOverrideCount ? { baseOverrideSum: v.baseOverrideSum ?? 0, baseOverrideCount: v.baseOverrideCount } : {}) }]),
   );
 }
 
@@ -1808,7 +1833,7 @@ export async function savePayrollAdjustment(type: PayrollSubjectType, id: string
   const { data, error } = await supabase
     .from("payroll_adjustments")
     .upsert(
-      { subject_type: type, subject_id: id, month, bonus: adj.bonus, advances: adj.advances, penalties: adj.penalties, tolls: adj.tolls, notes: adj.notes || null, locked: adj.locked, pay_source: adj.paySource || null },
+      { subject_type: type, subject_id: id, month, bonus: adj.bonus, advances: adj.advances, penalties: adj.penalties, tolls: adj.tolls, notes: adj.notes || null, locked: adj.locked, pay_source: adj.paySource || null, base_override: adj.baseOverrideCount ? adj.baseOverrideSum ?? 0 : null },
       { onConflict: "subject_type,subject_id,month" },
     )
     .select("id")

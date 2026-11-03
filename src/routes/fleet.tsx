@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import {
   addDriver as addDriverApi,
   updateDriver,
   deleteDriver,
+  setDriverArchived,
   checkInDriver,
   checkOutDriver,
   upsertAttendanceRecord,
@@ -115,6 +116,15 @@ function FleetPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [showArchived, setShowArchived] = useState(false);
+  const toggleArchive = async (d: Driver) => {
+    try {
+      await setDriverArchived(d.id, !d.archived);
+      await loadAll();
+    } catch (e) {
+      setError(errText(e, "تعذر تغيير حالة الأرشفة"));
+    }
+  };
   const loadAll = async () => {
     setLoading(true);
     setError(null);
@@ -430,6 +440,10 @@ function FleetPage() {
 
         <TabsContent value="drivers">
           <Panel title="بيانات السائقين">
+            <label className="no-print mb-2 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+              إظهار السائقين المؤرشفين ({drivers.filter((d) => d.archived).length})
+            </label>
             <Toolbar
               query={query}
               onQuery={setQuery}
@@ -448,10 +462,10 @@ function FleetPage() {
             />
             <DataTable head={["الاسم", "الهاتف", "نوع الرخصة", "انتهاء الرخصة", "المرتب الأساسي", "الأتوبيس الأساسي", "الاحتياطي", "الوردية", "الإجراءات"]}>
               {drivers
-                .filter((d) => d.name.includes(query) || query === "")
+                .filter((d) => (showArchived || !d.archived) && (d.name.includes(query) || query === ""))
                 .map((d) => (
-                  <tr key={d.id} className="transition-colors hover:bg-secondary/30">
-                    <td className="px-4 py-3 font-bold">{d.name}</td>
+                  <tr key={d.id} className={`transition-colors hover:bg-secondary/30 ${d.archived ? "opacity-60" : ""}`}>
+                    <td className="px-4 py-3 font-bold">{d.name}{d.archived && <span className="mr-2 rounded-full border border-border px-2 py-0.5 text-[10px] font-normal text-muted-foreground">مؤرشف</span>}</td>
                     <td className="px-4 py-3">{d.phone}</td>
                     <td className="px-4 py-3">{d.license}</td>
                     <td className="px-4 py-3">{d.licenseExpiry}</td>
@@ -465,6 +479,10 @@ function FleetPage() {
                       <div className="flex gap-1">
                         <Button size="sm" variant="ghost" className="text-primary hover:bg-primary/10" onClick={() => openEditDriver(d)}>
                           <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-warning hover:bg-warning/10" onClick={() => toggleArchive(d)} title={d.archived ? "إلغاء الأرشفة" : "أرشفة السائق"}>
+                          {d.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                          <span className="mr-1 text-xs">{d.archived ? "إلغاء الأرشفة" : "أرشفة السائق"}</span>
                         </Button>
                         <Button
                           size="sm"

@@ -28,6 +28,7 @@ export interface Driver {
   primaryBus: string;
   backupBus: string;
   shift: "الوردية الصباحية" | "الوردية المسائية" | "راحة";
+  archived?: boolean;
 }
 
 

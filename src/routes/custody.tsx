@@ -93,7 +93,7 @@ function CustodyPage() {
         setRentedByEntry(Object.fromEntries(radv.filter((a) => a.sourceTable === "custody_entries").map((a) => [a.sourceId, rentedVehicleKey(a.owner, a.bus)])));
         setSupplierOpts(sp.map((x) => ({ value: x.id, label: x.name, group: "مورد" })));
         setPeople([
-          ...d.map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })),
+          ...d.filter((x) => !x.archived).map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })),
           ...e.filter((x) => x.isActive).map((x) => ({ value: `employee:${x.id}`, label: x.name, group: "موظف" })),
         ]);
         setBuses(b);

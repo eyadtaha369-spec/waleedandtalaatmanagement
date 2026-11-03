@@ -113,7 +113,7 @@ function FinancePage() {
       const [t, e, l, c, sp, sum] = await Promise.all([fetchTreasury(), fetchExpenses(), fetchLoans(), fetchClients(), fetchSuppliers(), fetchTreasurySummary({ from: "2000-01-01", to: "2100-01-01" })]);
       try {
         const [d, em] = await Promise.all([fetchDrivers(), fetchEmployees()]);
-        setPeopleOpts([...d.map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })), ...em.filter((x) => x.isActive).map((x) => ({ value: `employee:${x.id}`, label: x.name, group: "موظف" }))]);
+        setPeopleOpts([...d.filter((x) => !x.archived).map((x) => ({ value: `driver:${x.id}`, label: x.name, group: "سائق" })), ...em.filter((x) => x.isActive).map((x) => ({ value: `employee:${x.id}`, label: x.name, group: "موظف" }))]);
       } catch {
         /* the people picker stays empty */
       }

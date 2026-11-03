@@ -241,7 +241,7 @@ function WorkshopPage() {
       setSuppliers(s);
       setBusCodes(buses.map((b) => b.code));
       setBusList(buses);
-      setDriverNames(drivers.map((d) => d.name));
+      setDriverNames(drivers.filter((d) => !d.archived).map((d) => d.name));
       setDriverOpts(drivers.map((d) => ({ value: d.id, label: d.name, group: "سائق" })));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل البيانات");

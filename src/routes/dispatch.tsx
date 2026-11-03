@@ -142,7 +142,7 @@ function DispatchShiftsSection() {
       setShifts(o);
       if (driverFilter) void loadDriverView();
       setBuses(buses);
-      setDriverNames(drivers.map((d) => d.name));
+      setDriverNames(drivers.filter((d) => !d.archived).map((d) => d.name));
       setDriverExpiry(Object.fromEntries(drivers.map((d) => [d.name, d.licenseExpiry])));
       setClientNames(clients.map((c) => c.name));
     } catch (e) {
@@ -485,7 +485,7 @@ function DispatchShiftsSection() {
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">السائق</Label>
-                    <SearchSelect value={r.driverName} options={driverNames} onChange={(v) => updateRow(r.key, { driverName: v })} placeholder="اختر السائق" searchPlaceholder="اكتب اسم السائق..." className={issue(r).driver ? "border-orange-500 ring-2 ring-orange-500" : ""} />
+                    <SearchSelect value={r.driverName} options={driverNames.includes(r.driverName) || !r.driverName ? driverNames : [r.driverName, ...driverNames]} onChange={(v) => updateRow(r.key, { driverName: v })} placeholder="اختر السائق" searchPlaceholder="اكتب اسم السائق..." className={issue(r).driver ? "border-orange-500 ring-2 ring-orange-500" : ""} />
                     {issue(r).driver && <p className="text-xs font-bold text-orange-500">رخصة السائق منتهية</p>}
                   </div>
                   <div className="grid gap-1.5">

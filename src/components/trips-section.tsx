@@ -71,7 +71,7 @@ export function TripsSection() {
       const [t, buses, drivers] = await Promise.all([fetchTrips(), fetchBuses(), fetchDrivers()]);
       setTrips(t);
       setBusCodes(buses.map((b) => b.code));
-      setDriverNames(drivers.map((d) => d.name));
+      setDriverNames(drivers.filter((d) => !d.archived).map((d) => d.name));
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر تحميل بيانات الرحلات");
     } finally {

@@ -34,6 +34,7 @@ import { fetchDrivers, fetchBuses, fetchRoutes } from "@/lib/queries";
 import {
   fetchDailyShifts,
   periodLabel,
+  periodMonths,
   fetchPayrollTrips,
   fetchEmployeeAttendanceInPeriod,
   type PayrollTripRow,
@@ -128,7 +129,7 @@ function PayrollPage() {
   const [dispatchShifts, setDispatchShifts] = useState<DispatchShift[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [adjFor, setAdjFor] = useState<PersonRow | null>(null);
-  const [adjForm, setAdjForm] = useState({ bonus: "", advances: "", penalties: "", tolls: "", notes: "", paySource: "" });
+  const [adjForm, setAdjForm] = useState({ bonus: "", advances: "", penalties: "", tolls: "", notes: "", paySource: "", baseOverride: "" });
   const [payTrips, setPayTrips] = useState<PayrollTripRow[]>([]);
   const [empRows, setEmpRows] = useState<EmployeeAttendanceRow[]>([]);
   const [detailFor, setDetailFor] = useState<PersonRow | null>(null);
@@ -160,7 +161,7 @@ function PayrollPage() {
       setShifts(s);
       setPayroll(p);
       setEmployeePayroll(ep);
-      setDriverNames(drivers.map((d) => d.name));
+      setDriverNames(drivers.filter((d) => !d.archived).map((d) => d.name));
       setBuses(buses);
       setRouteNames(routes.map((r) => r.name));
     } catch (e) {
@@ -274,12 +275,12 @@ function PayrollPage() {
 
   const adjOf = (p: PersonRow): PayrollAdjustment => adjustments.get(p.key) ?? EMPTY_ADJUSTMENT;
   const finalOf = (p: PersonRow) =>
-    computeFinalPayroll({ baseSalary: p.baseSalary, shiftAllowances: p.shiftAllowances, tripFees: p.tripFees, advances: p.dailyAdvances, penalties: p.dailyPenalties, tolls: p.dailyTolls }, adjOf(p));
+    computeFinalPayroll({ baseSalary: p.baseSalary, shiftAllowances: p.shiftAllowances, tripFees: p.tripFees, advances: p.dailyAdvances, penalties: p.dailyPenalties, tolls: p.dailyTolls }, adjOf(p), Math.max(1, periodMonths(range).length));
   const grandTotal = people.reduce((a, p) => a + finalOf(p).net, 0);
 
   const openAdjust = (p: PersonRow) => {
     const a = adjOf(p);
-    setAdjForm({ bonus: a.bonus ? String(a.bonus) : "", advances: a.advances ? String(a.advances) : "", penalties: a.penalties ? String(a.penalties) : "", tolls: a.tolls ? String(a.tolls) : "", notes: a.notes, paySource: a.paySource ?? "" });
+    setAdjForm({ bonus: a.bonus ? String(a.bonus) : "", advances: a.advances ? String(a.advances) : "", penalties: a.penalties ? String(a.penalties) : "", tolls: a.tolls ? String(a.tolls) : "", notes: a.notes, paySource: a.paySource ?? "", baseOverride: a.baseOverrideCount ? String(a.baseOverrideSum ?? 0) : "" });
     setAdjFor(p);
   };
   const submitAdjust = async () => {
@@ -296,6 +297,7 @@ function PayrollPage() {
         notes: adjForm.notes,
         paySource: adjForm.paySource,
         locked: adjOf(adjFor).locked,
+        ...(adjForm.baseOverride.trim() !== "" ? { baseOverrideSum: Number(adjForm.baseOverride) || 0, baseOverrideCount: 1 } : {}),
       });
       await loadAll();
       setAdjFor(null);
@@ -466,6 +468,11 @@ function PayrollPage() {
                 <Input value={adjForm[key as keyof typeof adjForm]} onChange={(e) => setAdjForm({ ...adjForm, [key]: e.target.value })} type="number" min="0" step="any" className="border-border bg-input/60" />
               </div>
             ))}
+            <div className="grid gap-1.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <Label className="text-xs text-primary">المرتب الأساسي لهذا الشهر فقط (اختياري)</Label>
+              <Input value={adjForm.baseOverride} onChange={(e) => setAdjForm({ ...adjForm, baseOverride: e.target.value })} type="number" min="0" step="any" placeholder={adjFor ? `اتركه فارغًا لاستخدام المرتب الدائم (${currency(adjFor.baseSalary)})` : ""} className="border-border bg-input/60" />
+              <p className="text-[11px] text-muted-foreground">للشهر الجزئي: يستبدل المرتب الدائم في هذا الشهر فقط ولا يغيّر ملف السائق/الموظف.</p>
+            </div>
             <PaymentSourceSelect value={adjForm.paySource} onChange={(v) => setAdjForm({ ...adjForm, paySource: v })} label="طريقة الدفع / مصدر التمويل (للسلف والكرتات)" />
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">ملاحظات</Label>
@@ -625,7 +632,7 @@ function PayrollPage() {
                 </div>
 
                 <Section title="المرتب الأساسي">
-                  <p className="text-sm">المرتب الشهري المسجَّل: <b>{currency(detailFor.baseSalary)}</b></p>
+                  <p className="text-sm">المرتب الشهري المسجَّل: <b>{currency(detailFor.baseSalary)}</b>{f.baseOverridden && <> — المرتب المعتمد لهذه الفترة (مؤقت): <b className="text-primary">{currency(f.baseSalary)}</b></>}</p>
                 </Section>
 
                 {isDriver ? (

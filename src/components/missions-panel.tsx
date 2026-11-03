@@ -255,7 +255,7 @@ export function MissionsPanel() {
                   <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>سائق خارجي / بدون تحديد</SelectItem>
-                    {drivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                    {drivers.filter((d) => !d.archived || d.id === form.driverId).map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

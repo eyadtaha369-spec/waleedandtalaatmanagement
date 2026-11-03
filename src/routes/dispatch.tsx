@@ -5,6 +5,7 @@ import { DateRangeFilter } from "@/components/date-range-filter";
 import { PersonPicker } from "@/components/person-picker";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
 import { BusPicker } from "@/components/bus-picker";
+import { SearchSelect } from "@/components/search-select";
 import type { Bus as BusRecord } from "@/lib/fleet-data";
 import { AppShell } from "@/components/app-shell";
 import { RentedSection } from "@/components/rented-section";
@@ -484,18 +485,12 @@ function DispatchShiftsSection() {
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">السائق</Label>
-                    <Select value={r.driverName} onValueChange={(v) => updateRow(r.key, { driverName: v })}>
-                      <SelectTrigger className={`border-border bg-input/60 ${issue(r).driver ? "border-orange-500 ring-2 ring-orange-500" : ""}`}><SelectValue placeholder="اختر" /></SelectTrigger>
-                      <SelectContent>{driverNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
-                    </Select>
+                    <SearchSelect value={r.driverName} options={driverNames} onChange={(v) => updateRow(r.key, { driverName: v })} placeholder="اختر السائق" searchPlaceholder="اكتب اسم السائق..." className={issue(r).driver ? "border-orange-500 ring-2 ring-orange-500" : ""} />
                     {issue(r).driver && <p className="text-xs font-bold text-orange-500">رخصة السائق منتهية</p>}
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الشركة</Label>
-                    <Select value={r.clientName} onValueChange={(v) => updateRow(r.key, { clientName: v })}>
-                      <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر" /></SelectTrigger>
-                      <SelectContent>{clientNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent>
-                    </Select>
+                    <SearchSelect value={r.clientName} options={clientNames} onChange={(v) => updateRow(r.key, { clientName: v })} placeholder="اختر الشركة" searchPlaceholder="اكتب اسم الشركة..." />
                   </div>
                   <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground">الخط (اختياري)</Label>

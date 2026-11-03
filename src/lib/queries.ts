@@ -531,7 +531,7 @@ export async function saveMaintenanceOrder(id: string | null, input: Maintenance
     driver_fault: !!input.driverFault,
     fault_driver_id: input.driverFault ? input.faultDriverId || null : null,
     fault_amount: input.driverFault && input.faultAmount != null && input.faultAmount > 0 ? input.faultAmount : null,
-    maintenance_type: input.maintenanceType && input.maintenanceType !== "أخرى / عام" ? input.maintenanceType : null,
+    maintenance_type: input.maintenanceType && input.maintenanceType !== "غير مصنّف (قديم)" ? input.maintenanceType : null,
     maintenance_mileage: input.maintenanceMileage != null && input.maintenanceMileage > 0 ? Math.round(input.maintenanceMileage) : null,
   };
   if (fields.maintenance_mileage) await syncBusOdometer(fields.bus_id, fields.maintenance_mileage);

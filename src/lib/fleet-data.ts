@@ -68,7 +68,7 @@ export interface Student {
 
 /** تصنيفات الصيانة المستقلة */
 export const MAINTENANCE_TYPES = ["تغيير كاوتش", "حل عجل", "عمرات", "زيت", "تشحيم"] as const;
-export const OTHER_MAINTENANCE_TYPE = "أخرى / عام";
+export const OTHER_MAINTENANCE_TYPE = "غير مصنّف (قديم)";
 
 export type MaintenanceStatus = "بانتظار القطع" | "قيد التنفيذ" | "مكتمل" | "ملغي";
 

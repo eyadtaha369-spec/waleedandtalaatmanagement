@@ -264,12 +264,16 @@ function WorkshopPage() {
 
   const openFuelInspection = (bus: string) => {
     setForm({ ...emptyOrderForm, date: todayStr(), bus, issue: "فحص موتور / رشاشات — استهلاك سولار عالي" });
+    setSelBuses([bus]);
+    setBusSearch("");
     setParts([newPart()]);
     setAdding(true);
   };
 
   const openAddOrder = () => {
     setForm({ ...emptyOrderForm, date: todayStr() });
+    setSelBuses([]);
+    setBusSearch("");
     setParts([newPart()]);
     setAdding(true);
   };
@@ -318,9 +322,26 @@ function WorkshopPage() {
       setError("أدخل كمية صحيحة لكل قطعة");
       return;
     }
-    if (!(Number(form.mileage) > 0)) {
+    if (!(MAINTENANCE_TYPES as readonly string[]).includes(form.type)) {
+      setError("اختر تصنيف الصيانة (تغيير كاوتش / حل عجل / عمرات / زيت / تشحيم)");
+      return;
+    }
+    const targetBuses = form.id ? [form.bus] : selBuses;
+    if (!targetBuses.length || !targetBuses[0]) {
+      setError(form.id ? "اختر رقم العربية" : "حدّد عربية واحدة على الأقل من القائمة");
+      return;
+    }
+    if (targetBuses.length === 1 && !(Number(form.mileage) > 0)) {
       setError("أدخل عداد الكيلومتر عند الصيانة");
       return;
+    }
+    // الكميات تُسجَّل لكل عربية؛ نتأكد أن المخزن يكفي الجميع قبل الحفظ
+    for (const p of filledParts) {
+      const stock = inventory.find((i) => i.id === p.inventoryId);
+      if (stock && !form.id && Number(p.quantity) * targetBuses.length > stock.stock) {
+        setError(`الرصيد لا يكفي: ${stock.name} المتاح ${fmtQty(stock.stock)} والمطلوب ${fmtQty(Number(p.quantity) * targetBuses.length)} (${targetBuses.length} عربية)`);
+        return;
+      }
     }
     if (form.driverFault && !form.faultDriverId) {
       setError("اختر السائق المسؤول عن الخطأ / الإهمال");
@@ -333,7 +354,7 @@ function WorkshopPage() {
     setSaving(true);
     setError(null);
     try {
-      await saveMaintenanceOrder(form.id || null, {
+      const base = {
         busCode: form.bus,
         issue: form.issue,
         status: form.status,
@@ -346,7 +367,27 @@ function WorkshopPage() {
         maintenanceMileage: Number(form.mileage) > 0 ? Number(form.mileage) : null,
         maintenanceType: form.type,
         items: filledParts.map((p) => ({ inventoryId: p.inventoryId, quantity: Number(p.quantity), unitPrice: Number(p.unitPrice) || 0 })),
-      });
+      };
+      if (form.id) {
+        await saveMaintenanceOrder(form.id, base);
+      } else {
+        // أمر مستقل لكل عربية محددة (نفس التصنيف والبيانات)
+        const failed: string[] = [];
+        let done = 0;
+        for (const code of targetBuses) {
+          try {
+            await saveMaintenanceOrder(null, { ...base, busCode: code, maintenanceMileage: targetBuses.length === 1 ? base.maintenanceMileage : null });
+            done++;
+          } catch (err) {
+            failed.push(`${code}: ${err instanceof Error ? err.message : "تعذر الحفظ"}`);
+          }
+        }
+        await loadAll();
+        if (failed.length) {
+          setError(`تم حفظ ${done} أمر، وتعذر ${failed.length}: ${failed.join(" | ")}`);
+          return;
+        }
+      }
       await loadAll();
       setAdding(false);
     } catch (e) {
@@ -555,13 +596,16 @@ function WorkshopPage() {
     fetchInventoryMovements(invRange).then(setMovements).catch(() => setMovements([]));
   }, [invRange, inventory, purchases]);
   const [catFilter, setCatFilter] = useState<string>("الكل");
+  const [selBuses, setSelBuses] = useState<string[]>([]);
+  const [busSearch, setBusSearch] = useState("");
   const ordersByDate = useMemo(() => orders.filter((o) => inDateRange(o.date, ordRange)), [orders, ordRange]);
   const typeOf = (o: MaintenanceOrder) => o.maintenanceType || OTHER_MAINTENANCE_TYPE;
   const ordersInRange = useMemo(() => ordersByDate.filter((o) => catFilter === "الكل" || typeOf(o) === catFilter), [ordersByDate, catFilter]);
-  const categoryStats = useMemo(() => [...MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE].map((t) => {
+  const hasLegacy = useMemo(() => ordersByDate.some((o) => !o.maintenanceType), [ordersByDate]);
+  const categoryStats = useMemo(() => [...MAINTENANCE_TYPES, ...(hasLegacy ? [OTHER_MAINTENANCE_TYPE] : [])].map((t) => {
     const rows = ordersByDate.filter((o) => o.status !== "ملغي" && typeOf(o) === t);
     return { type: t, count: rows.length, cost: rows.reduce((a, o) => a + o.cost, 0) };
-  }), [ordersByDate]);
+  }), [ordersByDate, hasLegacy]);
   const orderTotals = useMemo(() => {
     const live = ordersInRange.filter((o) => o.status !== "ملغي");
     const parts = live.reduce((a, o) => a + o.items.reduce((x, i) => x + i.quantity * i.unitPrice, 0), 0);
@@ -716,7 +760,7 @@ function WorkshopPage() {
             />
             <DateRangeFilter value={ordRange} onChange={setOrdRange} className="mb-2" />
             <div className="no-print mb-2 flex flex-wrap gap-1.5">
-              {["الكل", ...MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE].map((t) => {
+              {["الكل", ...MAINTENANCE_TYPES, ...(hasLegacy ? [OTHER_MAINTENANCE_TYPE] : [])].map((t) => {
                 const n = t === "الكل" ? ordersByDate.length : ordersByDate.filter((o) => typeOf(o) === t).length;
                 return (
                   <Button key={t} type="button" size="sm" variant={catFilter === t ? "default" : "outline"} className={catFilter === t ? "" : "border-border"} onClick={() => setCatFilter(t)}>
@@ -1037,10 +1081,17 @@ function WorkshopPage() {
           </DialogHeader>
           <div className="grid gap-3">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">رقم العربية</Label>
-                <BusPicker value={form.bus} buses={busList} onChange={(v) => setForm({ ...form, bus: v })} />
-              </div>
+              {form.id ? (
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">رقم العربية</Label>
+                  <BusPicker value={form.bus} buses={busList} onChange={(v) => setForm({ ...form, bus: v })} />
+                </div>
+              ) : (
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">العربيات المحددة</Label>
+                  <p className="rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm font-bold text-primary">{selBuses.length} عربية</p>
+                </div>
+              )}
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">تاريخ الأمر</Label>
                 <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="border-border bg-input/60" />
@@ -1055,13 +1106,50 @@ function WorkshopPage() {
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">تصنيف الصيانة</Label>
-              <Select value={form.type || OTHER_MAINTENANCE_TYPE} onValueChange={(v) => setForm({ ...form, type: v === OTHER_MAINTENANCE_TYPE ? "" : v })}>
-                <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر التصنيف" /></SelectTrigger>
                 <SelectContent>
-                  {[...MAINTENANCE_TYPES, OTHER_MAINTENANCE_TYPE].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  {MAINTENANCE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
+            {!form.id && (
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                {!form.type ? (
+                  <p className="text-sm text-muted-foreground">اختر تصنيف الصيانة أولًا لتظهر قائمة العربيات.</p>
+                ) : (
+                  (() => {
+                    const q = busSearch.trim();
+                    const fleet = busList.filter((b) => b.status !== "متوقفة");
+                    const shown = fleet.filter((b) => !q || `${b.code} ${b.plate}`.includes(q));
+                    const allShown = shown.length > 0 && shown.every((b) => selBuses.includes(b.code));
+                    return (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Input value={busSearch} onChange={(e) => setBusSearch(e.target.value)} placeholder="بحث برقم الأتوبيس أو اللوحة" className="h-9 min-w-[12rem] flex-1 border-border bg-input/60" />
+                          <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setSelBuses((cur) => [...new Set([...cur, ...shown.map((b) => b.code)])])} disabled={allShown}>تحديد الكل</Button>
+                          <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setSelBuses((cur) => cur.filter((c) => !shown.some((b) => b.code === c)))} disabled={!shown.some((b) => selBuses.includes(b.code))}>إلغاء التحديد</Button>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">حدّد العربيات التي تمت لها «{form.type}» — يُسجَّل أمر مستقل لكل عربية بنفس البيانات والقطع والمصنعية. المحدد: {selBuses.length} من {fleet.length}</p>
+                        <div className="mt-2 grid max-h-52 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
+                          {shown.length === 0 && <p className="col-span-full py-3 text-center text-xs text-muted-foreground">لا توجد عربية مطابقة.</p>}
+                          {shown.map((b) => {
+                            const on = selBuses.includes(b.code);
+                            return (
+                              <label key={b.id} className={`flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm ${on ? "border-primary bg-primary/10" : "border-border"}`}>
+                                <input type="checkbox" checked={on} onChange={() => setSelBuses((cur) => (on ? cur.filter((c) => c !== b.code) : [...cur, b.code]))} />
+                                <span className="font-bold">{b.code}</span>
+                                <span className="truncate text-xs text-muted-foreground">{b.plate}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </>
+                    );
+                  })()
+                )}
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">وصف العطل / الخدمة</Label>
               <Input value={form.issue} onChange={(e) => setForm({ ...form, issue: e.target.value })} className="border-border bg-input/60" />
@@ -1101,7 +1189,7 @@ function WorkshopPage() {
             </div>
 
             <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">عداد كيلومتر الأتوبيس عند الصيانة</Label>
+              <Label className="text-xs text-muted-foreground">عداد كيلومتر الأتوبيس عند الصيانة{!form.id && selBuses.length > 1 ? " (غير مطلوب عند تحديد أكثر من عربية)" : ""}</Label>
               <Input value={form.mileage} onChange={(e) => setForm({ ...form, mileage: e.target.value })} type="number" min="0" className="border-border bg-input/60" />
               {(() => {
                 const cur = busList.find((b) => b.code === form.bus)?.odometer;

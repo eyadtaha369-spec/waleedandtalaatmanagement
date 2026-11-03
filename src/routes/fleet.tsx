@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Archive, ArchiveRestore, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { PreventiveAlertsBanner } from "@/components/preventive-alerts";
 import { DataTable, PageHeader, Panel, StatusPill, Toolbar, exportToExcel } from "@/components/ui-kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -364,6 +365,7 @@ function FleetPage() {
   return (
     <AppShell>
       <PageHeader title="إدارة الأسطول والسائقين" subtitle="الأتوبيسات، السائقون، وسجل الحضور اليومي" />
+      <PreventiveAlertsBanner />
 
       {error && (
         <p className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

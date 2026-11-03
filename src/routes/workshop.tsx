@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, Check, ChevronsUpDown, FileText, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import { ReportPrint } from "@/components/report-print";
+import { PreventiveAlertsBanner } from "@/components/preventive-alerts";
 import { BusPicker } from "@/components/bus-picker";
 import { ItemStatementSheet } from "@/components/item-statement";
 import { PaymentSourceSelect } from "@/components/payment-source-select";
@@ -717,6 +718,8 @@ function WorkshopPage() {
         title={rights.fuel ? "الورشة والمخزون والسولار" : rights.inventory ? "الورشة والمخزون" : "الورشة"}
         subtitle={rights.fuel ? "أوامر الصيانة، قطع الغيار، وسجل التزود بالوقود" : rights.inventory ? "أوامر الصيانة وقطع الغيار" : "أوامر الصيانة"}
       />
+
+      <PreventiveAlertsBanner refreshKey={orders} />
 
       {rights.fuel && fuelAlerts.length > 0 && (
         <div className="no-print mb-4 rounded-xl border-2 border-red-500 bg-red-500/10 p-4" role="alert">

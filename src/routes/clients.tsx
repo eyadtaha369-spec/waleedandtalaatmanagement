@@ -289,14 +289,27 @@ function ClientsPage() {
       </div>
     );
   };
-  const printStatement = () => {
+  const [printMode, setPrintMode] = useState<"internal" | "client">("internal");
+  /** نسخة العميل: تجميع الورديات المتشابهة (يوم + نوع سيارة + خط + سعر) بعدد وسعر يوم، بدون سائقين أو أرقام عربيات */
+  const clientShiftRows = (() => {
+    const m = new Map<string, { date: string; busType: string; route: string; unit: number; count: number }>();
+    for (const r of shiftRows) {
+      const k = `${r.date}|${r.busType}|${r.route}|${r.amount}`;
+      const cur = m.get(k);
+      if (cur) cur.count += 1;
+      else m.set(k, { date: r.date, busType: r.busType, route: r.route, unit: r.amount, count: 1 });
+    }
+    return [...m.values()].sort((a, b) => a.date.localeCompare(b.date) || a.route.localeCompare(b.route, "ar"));
+  })();
+  const printStatement = (mode: "internal" | "client" = "internal") => {
+    setPrintMode(mode);
     document.body.classList.add("print-statement");
     const cleanup = () => {
       document.body.classList.remove("print-statement");
       window.removeEventListener("afterprint", cleanup);
     };
     window.addEventListener("afterprint", cleanup);
-    setTimeout(() => window.print(), 150);
+    setTimeout(() => window.print(), 250);
   };
   const filteredClients = clients.filter((c) => (c.name + c.phone).includes(query) || query === "");
 
@@ -359,8 +372,11 @@ function ClientsPage() {
                       <Button className="bg-primary text-primary-foreground" onClick={() => { setPayForm({ ...payForm, kind: "in" }); setPayOpen(true); }}>
                         <Plus className="ml-2 h-4 w-4" /> تسجيل تحصيل / صرف (يُرحَّل للخزينة)
                       </Button>
-                      <Button variant="outline" className="border-border" onClick={printStatement}>
+                      <Button variant="outline" className="border-border" onClick={() => printStatement("internal")}>
                         <Printer className="ml-2 h-4 w-4" /> طباعة كشف الحساب
+                      </Button>
+                      <Button className="bg-primary text-primary-foreground" onClick={() => printStatement("client")}>
+                        🖨️ طباعة كشف حساب رسمي للشركة (للعميل)
                       </Button>
                     </>
                   }
@@ -472,7 +488,73 @@ function ClientsPage() {
         </TabsContent>
       </Tabs>
 
-      {selectedClient && (
+      {selectedClient && printMode === "client" && (
+        <div className="print-only stmt-print" dir="rtl">
+          <div className="stmt-head">
+            <h1>شركة وليد وطلعت للرحلات</h1>
+            <h2>لخدمات النقل والرحلات</h2>
+            <p className="stmt-reg">السجل التجاري: ______________ &nbsp;&nbsp;|&nbsp;&nbsp; الرقم الضريبي: ______________</p>
+          </div>
+          <div className="stmt-meta">
+            <div><span>السادة / شركة</span><b>{selectedClient}</b></div>
+            <div><span>الفترة</span><b>{periodLabel(range)}</b></div>
+          </div>
+          <h2 className="stmt-title">كشف حساب</h2>
+          {clientShiftRows.length > 0 && (
+            <>
+              <h3>{missionRows.length > 0 ? "أولًا: " : ""}خدمات النقل والرحلات</h3>
+              <table>
+                <thead>
+                  <tr>{["م", "التاريخ واليوم", "نوع السيارة", "البيان / خط السير", "العدد", "سعر اليوم", "الإجمالي"].map((h) => <th key={h}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {clientShiftRows.map((r, i) => (
+                    <tr key={i}>
+                      <td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td><td>{r.busType || "—"}</td><td>{r.route || "—"}</td>
+                      <td>{r.count}</td><td className="num">{currency(r.unit)}</td><td className="num">{currency(r.unit * r.count)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr><td colSpan={4}>إجمالي الخدمات</td><td>{clientShiftRows.reduce((t, r) => t + r.count, 0)}</td><td></td><td className="num">{currency(shiftsTotal)}</td></tr></tfoot>
+              </table>
+            </>
+          )}
+          {missionRows.length > 0 && (
+            <>
+              <h3>{clientShiftRows.length > 0 ? "ثانيًا: " : ""}المأموريات والرحلات الخاصة</h3>
+              <table>
+                <thead><tr>{["م", "التاريخ واليوم", "البيان", "القيمة"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {missionRows.map((r, i) => (
+                    <tr key={i}><td>{i + 1}</td><td>{dayName(r.date)} — {r.date}</td><td>{r.route || "مأمورية"}</td><td className="num">{currency(r.amount)}</td></tr>
+                  ))}
+                </tbody>
+                <tfoot><tr><td colSpan={3}>إجمالي المأموريات</td><td className="num">{currency(missionsTotal)}</td></tr></tfoot>
+              </table>
+            </>
+          )}
+          {invoiceRows.length === 0 && <p style={{ textAlign: "center" }}>لا توجد خدمات مسجلة في هذه الفترة</p>}
+          <table className="stmt-totals">
+            <tbody>
+              {missionRows.length > 0 && <tr><td>إجمالي المأموريات</td><td className="num">{currency(missionsTotal)}</td></tr>}
+              <tr><td>إجمالي الخدمات</td><td className="num">{currency(shiftsTotal)}</td></tr>
+              <tr><td>الإجمالي النهائي للمطالبة</td><td className="num">{currency(summary.totalDue)}</td></tr>
+              {balance.opening !== 0 && <tr><td>رصيد سابق</td><td className="num">{currency(balance.opening)}</td></tr>}
+              {balance.credits > 0 && <tr><td>المسدَّد</td><td className="num">{currency(balance.credits)}</td></tr>}
+              <tr className="grand"><td>صافي المستحق</td><td className="num">{currency(balance.closing)}</td></tr>
+            </tbody>
+          </table>
+          <div className="stmt-foot">
+            <p>تاريخ الإصدار: {new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" })}</p>
+            <div className="stmt-sign">
+              <span>إعداد (الحسابات)<i /></span>
+              <span>اعتماد الإدارة<i /></span>
+              <span>اعتماد العميل / ختم الشركة<i /></span>
+            </div>
+          </div>
+        </div>
+      )}
+      {selectedClient && printMode !== "client" && (
         <div className="print-only stmt-print" dir="rtl">
           <div className="stmt-head">
             <h1>شركة وليد وطلعت لخدمات النقل والرحلات</h1>

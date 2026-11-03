@@ -316,3 +316,7 @@
 @media print {
   .stmt-print h4.stmt-sub-title { font-size: 13px; font-weight: 800; margin: 12px 0 4px; padding: 4px 8px; background: #e8ecf3; border-right: 4px solid #0B132B; -webkit-print-color-adjust: exact; print-color-adjust: exact; page-break-after: avoid; }
 }
+@media print {
+  .stmt-print .stmt-head .stmt-reg { font-size: 11px; color: #444; margin: 6px 0 0; }
+  .stmt-print h2.stmt-title { text-align: center; font-size: 17px; font-weight: 800; margin: 6px 0 10px; color: #0B132B; }
+}

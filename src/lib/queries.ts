@@ -4562,6 +4562,17 @@ async function buildClosingSnapshot(month: string, module: ClosingModule, client
     const [drivers, employees, adj] = await Promise.all([fetchDriverPayroll(period), fetchEmployeePayroll(period), fetchPayrollAdjustments(period)]);
     let adjTotal = 0;
     for (const a of adj.values()) adjTotal += a.bonus - a.advances - a.penalties - a.tolls;
+    // المرتب الأساسي المؤقت للشهر يستبدل حصة المرتب الدائم
+    const [{ data: dIds }, { data: eIds }] = await Promise.all([supabase.from("drivers").select("id, name"), supabase.from("employees").select("id, name")]);
+    const months = Math.max(1, periodMonths(period).length);
+    const overrideDelta = (type: PayrollSubjectType, name: string, base: number, ids: { id: string; name: string }[] | null) => {
+      const id = (ids ?? []).find((x) => x.name === name)?.id;
+      const a = id ? adj.get(adjustmentKey(type, id)) : undefined;
+      const n = Math.min(a?.baseOverrideCount ?? 0, months);
+      return n > 0 ? (a?.baseOverrideSum ?? 0) - (base / months) * n : 0;
+    };
+    for (const d of drivers) adjTotal += overrideDelta("driver", d.driver, d.baseSalary, dIds as any);
+    for (const e of employees) adjTotal += overrideDelta("employee", e.employee, e.baseSalary, eIds as any);
     return { snapshot: { drivers: drivers.length, employees: employees.length, payrollNet: drivers.reduce((s, d) => s + d.netSalary, 0) + employees.reduce((s, e) => s + e.netSalary, 0) + adjTotal } };
   }
   if (module === "suppliers") {

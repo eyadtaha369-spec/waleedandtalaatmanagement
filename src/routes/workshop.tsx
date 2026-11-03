@@ -591,11 +591,27 @@ function WorkshopPage() {
   const [invRange, setInvRange] = useState<DateRange>(ALL);
   const [fuelRange, setFuelRange] = useState<DateRange>(ALL);
   const [movements, setMovements] = useState<InventoryMovementRow[]>([]);
-  const [printKind, setPrintKind] = useState<"orders" | "inventory" | "fuel" | null>(null);
+  const [printKind, setPrintKind] = useState<"orders" | "inventory" | "fuel" | "category" | null>(null);
   useEffect(() => {
     fetchInventoryMovements(invRange).then(setMovements).catch(() => setMovements([]));
   }, [invRange, inventory, purchases]);
   const [catFilter, setCatFilter] = useState<string>("الكل");
+  const [repCat, setRepCat] = useState<string>(MAINTENANCE_TYPES[0]);
+  const [repRange, setRepRange] = useState<DateRange>({ from: "", to: "" });
+  const [repBuses, setRepBuses] = useState<string[]>([]);
+  const [repSearch, setRepSearch] = useState("");
+  const repRows = useMemo(
+    () =>
+      orders
+        .filter((o) => o.status !== "ملغي" && o.maintenanceType === repCat && inDateRange(o.date, repRange) && (repBuses.length === 0 || repBuses.includes(o.bus)))
+        .sort((a, b) => a.date.localeCompare(b.date) || a.bus.localeCompare(b.bus, "ar", { numeric: true })),
+    [orders, repCat, repRange, repBuses],
+  );
+  const repTotals = useMemo(() => {
+    const parts = repRows.reduce((a, o) => a + o.items.reduce((x, i) => x + i.quantity * i.unitPrice, 0), 0);
+    const labor = repRows.reduce((a, o) => a + o.laborCost, 0);
+    return { parts, labor, total: parts + labor, buses: new Set(repRows.map((o) => o.bus)).size };
+  }, [repRows]);
   const [selBuses, setSelBuses] = useState<string[]>([]);
   const [busSearch, setBusSearch] = useState("");
   const ordersByDate = useMemo(() => orders.filter((o) => inDateRange(o.date, ordRange)), [orders, ordRange]);
@@ -616,7 +632,7 @@ function WorkshopPage() {
   const moveTotals = useMemo(() => ({ inQty: movements.reduce((a, m) => a + m.inQty, 0), inValue: movements.reduce((a, m) => a + m.inValue, 0), outQty: movements.reduce((a, m) => a + m.outQty, 0), outValue: movements.reduce((a, m) => a + m.outValue, 0) }), [movements]);
   const fuelInRange = useMemo(() => fuelLogs.filter((l) => inDateRange(l.date, fuelRange)), [fuelLogs, fuelRange]);
   const fuelPeriod = useMemo(() => ({ fills: fuelInRange.length, liters: fuelInRange.reduce((a, l) => a + l.liters, 0), cost: fuelInRange.reduce((a, l) => a + l.cost, 0) }), [fuelInRange]);
-  const printReport = (kind: "orders" | "inventory" | "fuel") => {
+  const printReport = (kind: "orders" | "inventory" | "fuel" | "category") => {
     setPrintKind(kind);
     document.body.classList.add("print-statement");
     const cleanup = () => {
@@ -728,6 +744,7 @@ function WorkshopPage() {
       <Tabs defaultValue="orders">
         <TabsList className="no-print mb-4 border border-border bg-secondary/50">
           <TabsTrigger value="orders">أوامر الصيانة</TabsTrigger>
+          <TabsTrigger value="catreports">تقارير الصيانة حسب البند</TabsTrigger>
           {rights.inventory && <TabsTrigger value="inventory">المخزن</TabsTrigger>}
           {rights.fuel && <TabsTrigger value="fuel">سجل السولار</TabsTrigger>}
         </TabsList>
@@ -843,6 +860,88 @@ function WorkshopPage() {
                 ))}
               </div>
             )}
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="catreports">
+          <Panel title="تقارير الصيانة والورشة حسب البند">
+            <div className="no-print grid gap-3">
+              <div className="flex flex-wrap gap-1.5">
+                {MAINTENANCE_TYPES.map((t) => (
+                  <Button key={t} type="button" size="sm" variant={repCat === t ? "default" : "outline"} className={repCat === t ? "" : "border-border"} onClick={() => setRepCat(t)}>
+                    {t} ({orders.filter((o) => o.status !== "ملغي" && o.maintenanceType === t).length})
+                  </Button>
+                ))}
+              </div>
+              <DateRangeFilter value={repRange} onChange={setRepRange} />
+              <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                {(() => {
+                  const q = repSearch.trim();
+                  const fleet = busList;
+                  const shown = fleet.filter((b) => !q || `${b.code} ${b.plate}`.includes(q));
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input value={repSearch} onChange={(e) => setRepSearch(e.target.value)} placeholder="بحث برقم الأتوبيس أو اللوحة" className="h-9 min-w-[12rem] flex-1 border-border bg-input/60" />
+                        <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setRepBuses((cur) => [...new Set([...cur, ...shown.map((b) => b.code)])])}>تحديد الكل</Button>
+                        <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setRepBuses((cur) => cur.filter((c) => !shown.some((b) => b.code === c)))}>إلغاء التحديد</Button>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">{repBuses.length === 0 ? "كل العربيات (لم تُحدَّد عربية بعينها)" : `المحدد: ${repBuses.length} عربية`}</p>
+                      <div className="mt-2 grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3 lg:grid-cols-5">
+                        {shown.map((b) => {
+                          const on = repBuses.includes(b.code);
+                          return (
+                            <label key={b.id} className={`flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm ${on ? "border-primary bg-primary/10" : "border-border"}`}>
+                              <input type="checkbox" checked={on} onChange={() => setRepBuses((cur) => (on ? cur.filter((c) => c !== b.code) : [...cur, b.code]))} />
+                              <span className="font-bold">{b.code}</span>
+                              <span className="truncate text-xs text-muted-foreground">{b.plate}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button className="bg-primary text-primary-foreground" onClick={() => printReport("category")}>
+                  <Printer className="ml-2 h-4 w-4" /> طباعة تقرير البند
+                </Button>
+                <Button variant="outline" className="border-border" onClick={() => exportToExcel(`صيانة ${repCat}`, repRows.map((o) => ({ التاريخ: o.date, العربية: o.bus, الأمر: o.code, البيان: o.issue, "قطع الغيار": o.items.reduce((x, i) => x + i.quantity * i.unitPrice, 0), المصنعية: o.laborCost, الإجمالي: o.cost, الحالة: o.status })))}>
+                  تصدير Excel
+                </Button>
+              </div>
+            </div>
+            <SummaryStrip items={[["عدد العمليات", String(repRows.length)], ["عدد العربيات", String(repTotals.buses)], ["قطع الغيار + المصنعية", `${currency(repTotals.parts)} + ${currency(repTotals.labor)}`], ["إجمالي التكلفة", currency(repTotals.total)]]} />
+            <div className="mt-4">
+              <DataTable head={["التاريخ", "رقم الأتوبيس", "رقم الأمر", "البيان / ملاحظات", "قطع الغيار", "المصنعية", "الإجمالي", "الحالة"]}>
+                {repRows.length === 0 ? (
+                  <tr><td colSpan={8} className="px-4 py-4 text-center text-muted-foreground">لا توجد عمليات «{repCat}» في هذه الفترة.</td></tr>
+                ) : (
+                  repRows.map((o) => (
+                    <tr key={o.id} className="transition-colors hover:bg-secondary/30">
+                      <td className="px-4 py-3">{o.date}</td>
+                      <td className="px-4 py-3 font-bold text-primary">{o.bus}</td>
+                      <td className="px-4 py-3 text-xs">{o.code}</td>
+                      <td className="px-4 py-3">{o.issue}</td>
+                      <td className="px-4 py-3">{currency(o.items.reduce((x, i) => x + i.quantity * i.unitPrice, 0))}</td>
+                      <td className="px-4 py-3">{currency(o.laborCost)}</td>
+                      <td className="px-4 py-3 text-warning">{currency(o.cost)}</td>
+                      <td className="px-4 py-3"><StatusPill label={o.status} tone={statusTone(o.status)} /></td>
+                    </tr>
+                  ))
+                )}
+                {repRows.length > 0 && (
+                  <tr className="bg-secondary/40 font-bold">
+                    <td className="px-4 py-3" colSpan={4}>الإجمالي ({repRows.length} عملية)</td>
+                    <td className="px-4 py-3">{currency(repTotals.parts)}</td>
+                    <td className="px-4 py-3">{currency(repTotals.labor)}</td>
+                    <td className="px-4 py-3 text-warning">{currency(repTotals.total)}</td>
+                    <td className="px-4 py-3"></td>
+                  </tr>
+                )}
+              </DataTable>
+            </div>
           </Panel>
         </TabsContent>
 
@@ -1299,6 +1398,16 @@ function WorkshopPage() {
           columns={["م", "التاريخ", "رقم الأمر", "العربية", "التصنيف", "العطل / الخدمة", "قطع الغيار", "المصنعية", "الإجمالي", "الحالة"]}
           rows={ordersInRange.map((o, i) => { const parts = o.items.reduce((x, it) => x + it.quantity * it.unitPrice, 0); return [i + 1, o.date, o.code, o.bus, o.maintenanceType || OTHER_MAINTENANCE_TYPE, o.issue, currency(parts), currency(o.laborCost), currency(o.cost), o.status]; })}
           footer={["", "", "", "", "", `الإجمالي (${orderTotals.count} أمر بدون الملغي)`, currency(orderTotals.parts), currency(orderTotals.labor), currency(orderTotals.total), ""]}
+        />
+      )}
+      {printKind === "category" && (
+        <ReportPrint
+          title={`تقرير الصيانة — ${repCat}`}
+          range={repRange}
+          columns={["م", "التاريخ", "رقم الأتوبيس", "رقم الأمر", "البيان / ملاحظات", "قطع الغيار", "المصنعية", "الإجمالي"]}
+          rows={repRows.map((o, i) => [i + 1, o.date, o.bus, o.code, o.issue || "—", currency(o.items.reduce((x, it) => x + it.quantity * it.unitPrice, 0)), currency(o.laborCost), currency(o.cost)])}
+          footer={["", "", "", "", `الإجمالي (${repRows.length} عملية — ${repTotals.buses} عربية)`, currency(repTotals.parts), currency(repTotals.labor), currency(repTotals.total)]}
+          summary={[["عدد العمليات", String(repRows.length)], ["إجمالي قطع الغيار", currency(repTotals.parts)], ["إجمالي المصنعية", currency(repTotals.labor)], ["الإجمالي الكلي", currency(repTotals.total)]]}
         />
       )}
       {printKind === "inventory" && (

@@ -549,7 +549,7 @@ function PayrollPage() {
                       {tripRows.map((r) => (
                         <tr key={r.k}><td style={td}>{r.date}</td><td style={td}>{r.kind}</td><td style={td}>{r.dest}</td><td style={td}>{currency(r.val)}</td></tr>
                       ))}
-                      {tripRows.length > 0 && tripsTotal !== f.tripFees && <tr><td colSpan={3} style={td}>تسويات أخرى على أجور الرحلات</td><td style={td}>{currency(f.tripFees - tripsTotal)}</td></tr>}
+                      {tripRows.length > 0 && Math.abs(tripsTotal - f.tripFees) > 0.005 && <tr><td colSpan={3} style={td}>تسويات أخرى على أجور الرحلات</td><td style={td}>{currency(f.tripFees - tripsTotal)}</td></tr>}
                       <tr style={{ fontWeight: 800, background: "#f6f6f6" }}><td colSpan={3} style={td}>إجمالي الرحلات والمأموريات</td><td style={td}>{currency(f.tripFees)}</td></tr>
                     </tbody>
                   </table>

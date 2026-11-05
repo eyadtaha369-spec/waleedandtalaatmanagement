@@ -457,8 +457,8 @@ export interface MaintenanceOrderInput {
 
 /** Parts total + overall total (labour + parts) of an order. */
 export function computeOrderTotals(items: { quantity: number; unitPrice: number }[], laborCost: number) {
-  const partsTotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
-  return { partsTotal, total: partsTotal + laborCost };
+  const partsTotal = round2(items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0));
+  return { partsTotal, total: round2(partsTotal + laborCost) };
 }
 
 /**
@@ -1793,13 +1793,13 @@ export function computeFinalPayroll(
 ) {
   // الشهور التي لها مرتب مؤقت تستبدل حصتها من المرتب الدائم (المرتب في row = شهري × عدد الشهور)
   const overCount = Math.min(adj.baseOverrideCount ?? 0, months);
-  const baseSalary = overCount > 0 ? row.baseSalary - (row.baseSalary / months) * overCount + (adj.baseOverrideSum ?? 0) : row.baseSalary;
+  const baseSalary = round2(overCount > 0 ? row.baseSalary - (row.baseSalary / months) * overCount + (adj.baseOverrideSum ?? 0) : row.baseSalary);
   const additions = row.shiftAllowances + row.tripFees + adj.bonus;
   const advances = row.advances + adj.advances;
   const penalties = row.penalties + adj.penalties;
   const tolls = (row.tolls ?? 0) + adj.tolls;
   const deductions = advances + penalties + tolls;
-  return { baseSalary, baseOverridden: overCount > 0, shiftAllowances: row.shiftAllowances, tripFees: row.tripFees, bonus: adj.bonus, advances, penalties, tolls, additions, deductions, net: baseSalary + additions - deductions };
+  return { baseSalary, baseOverridden: overCount > 0, shiftAllowances: row.shiftAllowances, tripFees: row.tripFees, bonus: adj.bonus, advances: round2(advances), penalties: round2(penalties), tolls: round2(tolls), additions: round2(additions), deductions: round2(deductions), net: round2(baseSalary + additions - deductions) };
 }
 
 export const adjustmentKey = (type: PayrollSubjectType, id: string) => `${type}:${id}`;
@@ -2381,10 +2381,13 @@ export interface ClientLedgerPosting {
 }
 
 /** Balance still owed by the client = dues - credits. Anything unpaid rolls into the next month's opening balance. */
+/** تقريب مبلغ لأقرب قرش لتفادي أخطاء الفاصلة العائمة (مثل 0.1+0.2). */
+export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
 export function computeClientMonthBalance(opening: number, monthDues: number, postings: { debit: number; credit: number }[]) {
-  const debits = postings.reduce((s, p) => s + p.debit, 0);
-  const credits = postings.reduce((s, p) => s + p.credit, 0);
-  return { opening, monthDues, debits, credits, closing: opening + monthDues + debits - credits };
+  const debits = round2(postings.reduce((s, p) => s + p.debit, 0));
+  const credits = round2(postings.reduce((s, p) => s + p.credit, 0));
+  return { opening: round2(opening), monthDues: round2(monthDues), debits, credits, closing: round2(opening + monthDues + debits - credits) };
 }
 
 export async function fetchClientStatementExtras(clientName: string, period: Period): Promise<{ opening: number; postings: ClientLedgerPosting[] }> {
@@ -4274,7 +4277,7 @@ export function computeCustody(entries: CustodyEntry[], range: DateRange) {
     totalOut,
     opening,
     balance: totalIn - totalOut,
-    closing: opening + totalIn - totalOut,
+    closing: round2(opening + totalIn - totalOut),
     byCategory: Array.from(byCategory.entries()).map(([category, total]) => ({ category, total })),
   };
 }
@@ -4484,7 +4487,7 @@ export function computeTreasuryClosings(rows: { date: string; account: string; o
     if (r.date >= before) continue;
     const cur = last.get(r.account);
     const at = r.createdAt ?? "";
-    if (!cur || r.date > cur.date || (r.date === cur.date && at >= cur.createdAt)) last.set(r.account, { date: r.date, createdAt: at, closing: r.opening + r.deposits - r.withdrawals });
+    if (!cur || r.date > cur.date || (r.date === cur.date && at >= cur.createdAt)) last.set(r.account, { date: r.date, createdAt: at, closing: round2(r.opening + r.deposits - r.withdrawals) });
   }
   return [...last.entries()].map(([account, v]) => ({ account, closing: v.closing })).sort((a, b) => a.account.localeCompare(b.account, "ar"));
 }
@@ -4653,7 +4656,7 @@ export async function computeSupplierMonth(supplierId: string, month: string) {
       payments += e.payments;
     }
   }
-  return { opening, purchases, payments, closing: opening + purchases - payments };
+  return { opening, purchases, payments, closing: round2(opening + purchases - payments) };
 }
 
 export async function closeSupplierMonth(month: string, supplierId: string) {

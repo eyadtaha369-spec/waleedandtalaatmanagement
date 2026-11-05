@@ -1181,80 +1181,89 @@ function WorkshopPage() {
               القطع المختارة تُخصم من المخزن تلقائيًا. عند التعديل تُرجَع القطع السابقة ثم تُخصم الجديدة، وعند الإلغاء أو الحذف تُرجَع كلها.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="grid gap-4">
+            {/* الخطوة 1: التاريخ والتصنيف */}
+            <section className="rounded-lg border border-border bg-secondary/10 p-3">
+              <p className="mb-2 text-sm font-extrabold text-primary">① التاريخ وتصنيف الصيانة</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">تاريخ الأمر</Label>
+                  <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="border-border bg-input/60" />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">الحالة</Label>
+                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as MaintenanceStatus })}>
+                    <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
+                    <SelectContent>{columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <Label className="mt-3 block text-xs text-muted-foreground">تصنيف الصيانة (مطلوب)</Label>
+              <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="تصنيف الصيانة">
+                {MAINTENANCE_TYPES.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={form.type === t}
+                    onClick={() => setForm((f) => ({ ...f, type: t }))}
+                    className={`rounded-full border px-4 py-1.5 text-sm font-bold transition-colors ${form.type === t ? "border-[#D4AF37] bg-[#D4AF37] text-[#0B132B]" : "border-border bg-input/40 hover:bg-secondary/50"}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* الخطوة 2: العربيات */}
+            <section className="rounded-lg border border-border bg-secondary/10 p-3">
+              <p className="mb-2 text-sm font-extrabold text-primary">② اختيار العربية / العربيات</p>
               {form.id ? (
                 <div className="grid gap-1.5">
-                  <Label className="text-xs text-muted-foreground">رقم العربية</Label>
+                  <Label className="text-xs text-muted-foreground">رقم الأتوبيس / اللوحة</Label>
                   <BusPicker value={form.bus} buses={busList} onChange={(v) => setForm({ ...form, bus: v })} />
                 </div>
               ) : (
-                <div className="grid gap-1.5">
-                  <Label className="text-xs text-muted-foreground">العربيات المحددة</Label>
-                  <p className="rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm font-bold text-primary">{selBuses.length} عربية</p>
-                </div>
+                (() => {
+                  const q = busSearch.trim();
+                  const fleet = busList.filter((b) => b.status !== "متوقفة");
+                  const shown = fleet.filter((b) => !q || `${b.code} ${b.plate}`.includes(q));
+                  const allShown = shown.length > 0 && shown.every((b) => selBuses.includes(b.code));
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input value={busSearch} onChange={(e) => setBusSearch(e.target.value)} placeholder="بحث برقم الأتوبيس أو اللوحة" className="h-9 min-w-[12rem] flex-1 border-border bg-input/60" />
+                        <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setSelBuses((cur) => [...new Set([...cur, ...shown.map((b) => b.code)])])} disabled={allShown}>تحديد الكل</Button>
+                        <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setSelBuses((cur) => cur.filter((c) => !shown.some((b) => b.code === c)))} disabled={!shown.some((b) => selBuses.includes(b.code))}>إلغاء التحديد</Button>
+                      </div>
+                      <p className={`mt-2 text-xs ${selBuses.length ? "font-bold text-primary" : "text-muted-foreground"}`}>
+                        {selBuses.length ? `المحدد: ${selBuses.length} من ${fleet.length} عربية` : "لم تُحدَّد أي عربية بعد — اختر عربية واحدة على الأقل"}
+                        {selBuses.length > 0 && form.type ? ` — يُسجَّل أمر «${form.type}» مستقل لكل عربية` : ""}
+                      </p>
+                      <div className="mt-2 grid max-h-52 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
+                        {shown.length === 0 && <p className="col-span-full py-3 text-center text-xs text-muted-foreground">لا توجد عربية مطابقة.</p>}
+                        {shown.map((b) => {
+                          const on = selBuses.includes(b.code);
+                          return (
+                            <label key={b.id} className={`flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm ${on ? "border-primary bg-primary/10" : "border-border"}`}>
+                              <input type="checkbox" checked={on} onChange={() => setSelBuses((cur) => (on ? cur.filter((c) => c !== b.code) : [...cur, b.code]))} />
+                              <span className="font-bold">{b.code}</span>
+                              <span className="truncate text-xs text-muted-foreground">{b.plate}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()
               )}
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">تاريخ الأمر</Label>
-                <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="border-border bg-input/60" />
-              </div>
-              <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">الحالة</Label>
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as MaintenanceStatus })}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue /></SelectTrigger>
-                  <SelectContent>{columns.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">تصنيف الصيانة</Label>
-              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder="اختر التصنيف" /></SelectTrigger>
-                <SelectContent>
-                  {MAINTENANCE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {!form.id && (
-              <div className="rounded-lg border border-border bg-secondary/20 p-3">
-                {!form.type ? (
-                  <p className="text-sm text-muted-foreground">اختر تصنيف الصيانة أولًا لتظهر قائمة العربيات.</p>
-                ) : (
-                  (() => {
-                    const q = busSearch.trim();
-                    const fleet = busList.filter((b) => b.status !== "متوقفة");
-                    const shown = fleet.filter((b) => !q || `${b.code} ${b.plate}`.includes(q));
-                    const allShown = shown.length > 0 && shown.every((b) => selBuses.includes(b.code));
-                    return (
-                      <>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Input value={busSearch} onChange={(e) => setBusSearch(e.target.value)} placeholder="بحث برقم الأتوبيس أو اللوحة" className="h-9 min-w-[12rem] flex-1 border-border bg-input/60" />
-                          <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setSelBuses((cur) => [...new Set([...cur, ...shown.map((b) => b.code)])])} disabled={allShown}>تحديد الكل</Button>
-                          <Button type="button" size="sm" variant="outline" className="border-border" onClick={() => setSelBuses((cur) => cur.filter((c) => !shown.some((b) => b.code === c)))} disabled={!shown.some((b) => selBuses.includes(b.code))}>إلغاء التحديد</Button>
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">حدّد العربيات التي تمت لها «{form.type}» — يُسجَّل أمر مستقل لكل عربية بنفس البيانات والقطع والمصنعية. المحدد: {selBuses.length} من {fleet.length}</p>
-                        <div className="mt-2 grid max-h-52 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
-                          {shown.length === 0 && <p className="col-span-full py-3 text-center text-xs text-muted-foreground">لا توجد عربية مطابقة.</p>}
-                          {shown.map((b) => {
-                            const on = selBuses.includes(b.code);
-                            return (
-                              <label key={b.id} className={`flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm ${on ? "border-primary bg-primary/10" : "border-border"}`}>
-                                <input type="checkbox" checked={on} onChange={() => setSelBuses((cur) => (on ? cur.filter((c) => c !== b.code) : [...cur, b.code]))} />
-                                <span className="font-bold">{b.code}</span>
-                                <span className="truncate text-xs text-muted-foreground">{b.plate}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </>
-                    );
-                  })()
-                )}
-              </div>
-            )}
+            </section>
+
+            {/* الخطوة 3: التفاصيل والتكلفة */}
+            <p className="-mb-2 text-sm font-extrabold text-primary">③ وصف العطل والتكلفة</p>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">وصف العطل / الخدمة</Label>
-              <Input value={form.issue} onChange={(e) => setForm({ ...form, issue: e.target.value })} className="border-border bg-input/60" />
+              <Input value={form.issue} onChange={(e) => setForm({ ...form, issue: e.target.value })} placeholder="ملاحظات عن العطل أو العملية" className="border-border bg-input/60" />
             </div>
 
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">

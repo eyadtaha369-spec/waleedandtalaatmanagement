@@ -873,9 +873,9 @@ export function computeBusLedger(
     });
   return {
     rows,
-    totalParts: rows.reduce((s, r) => s + r.partsTotal, 0),
-    totalLabor: rows.reduce((s, r) => s + r.laborCost, 0),
-    grandTotal: rows.reduce((s, r) => s + r.total, 0),
+    totalParts: round2(rows.reduce((s, r) => s + r.partsTotal, 0)),
+    totalLabor: round2(rows.reduce((s, r) => s + r.laborCost, 0)),
+    grandTotal: round2(rows.reduce((s, r) => s + r.total, 0)),
   };
 }
 
@@ -3899,9 +3899,9 @@ export function computeRentedLedger(
   const advRows = advances
     .filter((a) => (!filter.owner || a.owner === filter.owner) && (!filter.bus || !a.bus || a.bus === filter.bus) && inDateRange(a.date, filter.range))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  const totalDue = rows.reduce((s, r) => s + r.fare, 0);
-  const totalPaid = rows.filter((r) => r.paid).reduce((s, r) => s + r.fare, 0);
-  const totalAdvances = advRows.reduce((s, a) => s + a.amount, 0);
+  const totalDue = round2(rows.reduce((s, r) => s + r.fare, 0));
+  const totalPaid = round2(rows.filter((r) => r.paid).reduce((s, r) => s + r.fare, 0));
+  const totalAdvances = round2(advRows.reduce((s, a) => s + a.amount, 0));
   const openAdvances = advRows.reduce((s, a) => s + Math.max(0, a.amount - a.applied), 0);
   return {
     rows,
@@ -3912,8 +3912,8 @@ export function computeRentedLedger(
     openAdvances,
     /** المتبقي = المستحق غير المسدد − السلف التي لم تُخصم بعد */
     remaining: totalDue - totalPaid - openAdvances,
-    totalClientFare: rows.reduce((s, r) => s + r.clientFare, 0),
-    totalNet: rows.reduce((s, r) => s + rentedNetProfit(r), 0),
+    totalClientFare: round2(rows.reduce((s, r) => s + r.clientFare, 0)),
+    totalNet: round2(rows.reduce((s, r) => s + rentedNetProfit(r), 0)),
     unpaidIds: rows.filter((r) => !r.paid).map((r) => r.id),
   };
 }
@@ -4133,12 +4133,12 @@ export function computeBusProfile(data: BusProfileData, target: number | null, b
   const revenue = data.activities.reduce((s, a) => s + a.revenue, 0);
   const maintenanceTotal = data.maintenance.reduce((s, m) => s + m.total, 0);
   const liters = data.fuel.reduce((s, f) => s + f.liters, 0);
-  const fuelCost = data.fuel.reduce((s, f) => s + f.cost, 0);
+  const fuelCost = round2(data.fuel.reduce((s, f) => s + f.cost, 0));
   const km = data.fuel.reduce((s, f) => s + f.km, 0);
   // per-km ratios only count fills whose distance since the previous fill is known
   const covered = data.fuel.filter((f) => f.km > 0);
   const coveredLiters = covered.reduce((s, f) => s + f.liters, 0);
-  const coveredCost = covered.reduce((s, f) => s + f.cost, 0);
+  const coveredCost = round2(covered.reduce((s, f) => s + f.cost, 0));
   const shifts = data.activities.length;
   const drivers = new Map<string, number>();
   for (const a of data.activities) if (a.driver !== "—") drivers.set(a.driver, (drivers.get(a.driver) ?? 0) + 1);
@@ -4534,7 +4534,7 @@ async function buildClosingSnapshot(month: string, module: ClosingModule, client
     ]);
     if (error) throw new Error(dbErrorMessage(error, "تعذر قراءة الخزينة"));
     const treasury = computeTreasuryClosings((tRows ?? []).map((r: any) => ({ date: r.date, account: r.account, opening: Number(r.opening ?? 0), deposits: Number(r.deposits ?? 0), withdrawals: Number(r.withdrawals ?? 0), createdAt: r.created_at })), nextStart);
-    const snapshot = { treasury, treasuryTotal: treasury.reduce((s, t) => s + t.closing, 0), custodyClosing: computeCustody(custody, { from: "", to: `${month}-31` }).closing };
+    const snapshot = { treasury, treasuryTotal: round2(treasury.reduce((s, t) => s + t.closing, 0)), custodyClosing: computeCustody(custody, { from: "", to: `${month}-31` }).closing };
     const carry = async () => {
       const { data: existing } = await supabase.from("treasury").select("account").eq("is_rollover", true).eq("date", nextStart);
       const have = new Set((existing ?? []).map((r: any) => r.account as string));
@@ -4559,7 +4559,7 @@ async function buildClosingSnapshot(month: string, module: ClosingModule, client
     for (const x of shifts ?? []) if ((x as any).client_id) recv.set((x as any).client_id, (recv.get((x as any).client_id) ?? 0) + Number((x as any).bus_value ?? 0));
     for (const e of ledger ?? []) recv.set((e as any).client_id, (recv.get((e as any).client_id) ?? 0) + Number((e as any).debit ?? 0) - Number((e as any).credit ?? 0));
     const list = [...recv.entries()].filter(([id, v]) => (!clientId || id === clientId) && Math.abs(v) > 0.001).map(([id, closing]) => ({ client: names.get(id) ?? id, closing })).sort((a, b) => b.closing - a.closing);
-    return { snapshot: { receivable: list, total: list.reduce((s, c) => s + c.closing, 0) } };
+    return { snapshot: { receivable: list, total: round2(list.reduce((s, c) => s + c.closing, 0)) } };
   }
   if (module === "payroll") {
     const [drivers, employees, adj] = await Promise.all([fetchDriverPayroll(period), fetchEmployeePayroll(period), fetchPayrollAdjustments(period)]);
@@ -4576,14 +4576,14 @@ async function buildClosingSnapshot(month: string, module: ClosingModule, client
     };
     for (const d of drivers) adjTotal += overrideDelta("driver", d.driver, d.baseSalary, dIds as any);
     for (const e of employees) adjTotal += overrideDelta("employee", e.employee, e.baseSalary, eIds as any);
-    return { snapshot: { drivers: drivers.length, employees: employees.length, payrollNet: drivers.reduce((s, d) => s + d.netSalary, 0) + employees.reduce((s, e) => s + e.netSalary, 0) + adjTotal } };
+    return { snapshot: { drivers: drivers.length, employees: employees.length, payrollNet: round2(drivers.reduce((s, d) => s + d.netSalary, 0)) + round2(employees.reduce((s, e) => s + e.netSalary, 0)) + adjTotal } };
   }
   if (module === "suppliers") {
     const [suppliers, { data: rented }] = await Promise.all([
       fetchSuppliers(),
       pageAll((f, t) => supabase.from("rented_bus_operations").select("rental_fare, advance_applied, paid").eq("paid", false).lt("op_date", nextStart).order("id").range(f, t)),
     ]);
-    const payable = suppliers.reduce((s, x) => s + x.balanceDue, 0);
+    const payable = round2(suppliers.reduce((s, x) => s + x.balanceDue, 0));
     const owners = (rented ?? []).reduce((s: number, r: any) => s + Number(r.rental_fare ?? 0), 0);
     return { snapshot: { suppliersPayable: payable, suppliersCount: suppliers.length, rentedOwnersUnpaid: owners } };
   }

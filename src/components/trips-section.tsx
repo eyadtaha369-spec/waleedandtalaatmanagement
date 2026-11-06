@@ -27,7 +27,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { currency } from "@/lib/fleet-data";
 import { MissionsPanel } from "@/components/missions-panel";
-import { fetchBuses, fetchDrivers } from "@/lib/queries";
+import { fetchBuses, fetchDrivers, fetchAllClientRoutes } from "@/lib/queries";
+import { SearchSelect } from "@/components/search-select";
 import { fetchTrips, addTrip, updateTrip, deleteTrip, TRIP_NOTIFICATION_OPTIONS, type Trip } from "@/lib/queries";
 
 
@@ -54,6 +55,10 @@ export function TripsSection() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [busCodes, setBusCodes] = useState<string[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>([]);
+  const [routeNames, setRouteNames] = useState<string[]>([]);
+  useEffect(() => {
+    fetchAllClientRoutes().then((r) => setRouteNames(Array.from(new Set(r.map((x) => x.routeName))).sort((a, b) => a.localeCompare(b, "ar")))).catch(() => setRouteNames([]));
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -87,6 +92,8 @@ export function TripsSection() {
     setForm(emptyForm);
     setAdding(true);
   };
+
+  const destinationOptions = useMemo(() => (form.destination && !routeNames.includes(form.destination) ? [form.destination, ...routeNames] : routeNames), [routeNames, form.destination]);
 
   const openEdit = (t: Trip) => {
     setForm({
@@ -293,7 +300,7 @@ export function TripsSection() {
               </div>
               <div className="grid gap-1.5">
                 <Label className="text-xs text-muted-foreground">جهة الرحلة</Label>
-                <Input value={form.destination} onChange={(e) => setForm({ ...form, destination: e.target.value })} className="border-border bg-input/60" />
+                <SearchSelect value={form.destination} options={destinationOptions} onChange={(v) => setForm({ ...form, destination: v })} placeholder="اختر الخط / الوجهة" searchPlaceholder="ابحث عن خط..." />
               </div>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

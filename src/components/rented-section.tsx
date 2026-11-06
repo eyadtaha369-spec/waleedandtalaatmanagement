@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Bus, Wallet, Receipt } from "lucide-react";
 import { currency } from "@/lib/fleet-data";
+import { SearchSelect } from "@/components/search-select";
 import {
   addRentedOp,
   addRentedAdvance,
@@ -48,6 +49,7 @@ import {
   type Client,
   type DateRange,
   type RentedOp,
+  round2,
 } from "@/lib/queries";
 
 
@@ -55,13 +57,12 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const PENDING = "معلق / لم يتم السداد";
 const PAID = "تم السداد";
 
-const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", fare: "", clientFare: "", vehicleType: "", routeName: "", status: PENDING, paySource: "", notes: "" });
+const emptyForm = () => ({ id: "", wasPaid: false, paidAt: "", date: todayStr(), owner: "", bus: "", driver: "", clientId: "", destination: "", fare: "", clientFare: "", vehicleType: "", routeName: "", quantity: "1", status: PENDING, paySource: "", notes: "" });
 
 export function RentedSection() {
   const [ops, setOps] = useState<RentedOp[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientRoutes, setClientRoutes] = useState<ClientRoute[]>([]);
-  const [manualRoute, setManualRoute] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -158,29 +159,37 @@ export function RentedSection() {
     [ops, advances, ledgerOwner, ledgerBus, range],
   );
 
-  const routesOfClient = useMemo(() => clientRoutes.filter((r) => r.clientId === form.clientId), [clientRoutes, form.clientId]);
+  // قائمة الخطوط المعرّفة: خطوط العميل المختار أولًا، وإلا كل الخطوط (بدون تكرار) + قيمة قديمة محفوظة إن وُجدت
+  const routeOptions = useMemo(() => {
+    const own = clientRoutes.filter((r) => r.clientId === form.clientId).map((r) => r.routeName);
+    const base = own.length ? own : clientRoutes.map((r) => r.routeName);
+    const list = Array.from(new Set(base)).sort((a, b) => a.localeCompare(b, "ar"));
+    return form.routeName && !list.includes(form.routeName) ? [form.routeName, ...list] : list;
+  }, [clientRoutes, form.clientId, form.routeName]);
+  const qty = Math.floor(Number(form.quantity) || 0);
+  const totalFare = round2((Number(form.fare) || 0) * Math.max(qty, 0));
+  const totalClientFare = round2((Number(form.clientFare) || 0) * Math.max(qty, 0));
 
-  const formNet = rentedNetProfit({ clientFare: Number(form.clientFare) || 0, fare: Number(form.fare) || 0 });
+  const formNet = round2(rentedNetProfit({ clientFare: totalClientFare, fare: totalFare }));
 
   const openAdd = () => {
     setForm({ ...emptyForm(), owner: ledgerOwner });
-    setManualRoute(false);
     setAdding(true);
   };
   const openEdit = (o: RentedOp) => {
     const client = clients.find((c) => c.id === o.clientId);
-    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, fare: String(o.fare), clientFare: String(o.clientFare), vehicleType: o.vehicleType, routeName: o.routeName, status: o.paid ? PAID : PENDING, paySource: o.paySource, notes: o.notes });
-    setManualRoute(!!o.routeName && !clientRoutes.some((r) => r.clientId === o.clientId && r.routeName === o.routeName));
+    setForm({ id: o.id, wasPaid: o.paid, paidAt: o.paidAt, date: o.date, owner: o.owner, bus: o.bus, driver: o.driver, clientId: o.clientId, destination: client?.name ?? o.destination, fare: String(round2(o.fare / o.quantity)), clientFare: String(round2(o.clientFare / o.quantity)), vehicleType: o.vehicleType, routeName: o.routeName, quantity: String(o.quantity), status: o.paid ? PAID : PENDING, paySource: o.paySource, notes: o.notes });
     setAdding(true);
   };
   const submit = async () => {
     if (!form.owner.trim() || !form.bus.trim()) return setError("أدخل اسم صاحب العربية ورقم / اسم العربية");
     if (!form.vehicleType) return setError("اختر نوع السيارة");
+    if (!Number.isInteger(qty) || qty < 1) return setError("عدد الأتوبيسات لازم يكون رقم صحيح 1 أو أكتر");
     if (form.status === PAID && !form.paySource) return setError("اختر طريقة الدفع / مصدر التمويل لتكلفة التأجير");
     setSaving(true);
     setError(null);
     try {
-      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, fare: Number(form.fare) || 0, clientFare: Number(form.clientFare) || 0, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, paySource: form.paySource, notes: form.notes };
+      const payload = { date: form.date, owner: form.owner, bus: form.bus, driver: form.driver, clientId: form.clientId, destination: form.destination, fare: totalFare, clientFare: totalClientFare, quantity: qty, vehicleType: form.vehicleType, routeName: form.routeName, paid: form.status === PAID, paySource: form.paySource, notes: form.notes };
       if (form.id) await updateRentedOp(form.id, payload, form.wasPaid, form.paidAt);
       else await addRentedOp(payload);
       await loadAll();
@@ -245,7 +254,7 @@ export function RentedSection() {
 
       <Panel title="سجل حركة العربيات المستأجرة">
         <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "نوع السيارة": o.vehicleType, الخط: o.routeName, "تكلفة التأجير": o.fare, "سعر الشركة": o.clientFare, "صافي الربح": rentedNetProfit(o), الحالة: o.paid ? PAID : PENDING })))}>
+          <Button variant="outline" className="border-border" onClick={() => exportToExcel("حركة العربيات المستأجرة", logRows.map((o) => ({ التاريخ: o.date, "صاحب العربية": o.owner, العربية: o.bus, السائق: o.driver, "الشركة / المكان": o.destination, "نوع السيارة": o.vehicleType, العدد: o.quantity, الخط: o.routeName, "تكلفة التأجير": o.fare, "سعر الشركة": o.clientFare, "صافي الربح": rentedNetProfit(o), الحالة: o.paid ? PAID : PENDING })))}>
             تصدير Excel
           </Button>
           <Button variant="outline" className="border-primary/50 text-primary" onClick={openAdv}>
@@ -266,7 +275,7 @@ export function RentedSection() {
                 <td className="px-4 py-3">{o.date}</td>
                 <td className="px-4 py-3 font-bold">{o.owner}</td>
                 <td className="px-4 py-3">{o.bus}</td>
-                <td className="px-4 py-3">{o.vehicleType || "—"}</td>
+                <td className="px-4 py-3">{o.vehicleType || "—"}{o.quantity > 1 ? ` × ${o.quantity}` : ""}</td>
                 <td className="px-4 py-3">{o.driver || "—"}</td>
                 <td className="px-4 py-3">{clients.find((c) => c.id === o.clientId)?.name ?? (o.destination || "—")}{o.routeName ? ` — ${o.routeName}` : ""}</td>
                 <td className="px-4 py-3 font-bold text-warning">{currency(o.fare)}</td>
@@ -483,34 +492,23 @@ export function RentedSection() {
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">الشركة / المكان المستهدف</Label>
-              <AccountPicker value={form.destination} clients={clients} placeholder="ابحث عن شركة أو اكتب المكان..." onPick={(name, clientId) => { setManualRoute(false); setForm({ ...form, destination: name, clientId, routeName: "" }); }} />
+              <AccountPicker value={form.destination} clients={clients} placeholder="ابحث عن شركة أو اكتب المكان..." onPick={(name, clientId) => { setForm({ ...form, destination: name, clientId, routeName: "" }); }} />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs text-muted-foreground">الخط / خط السير</Label>
-              {form.clientId && !manualRoute ? (
-                <Select value={form.routeName} onValueChange={(v) => (v === "__manual" ? (setManualRoute(true), setForm({ ...form, routeName: "" })) : setForm({ ...form, routeName: v }))}>
-                  <SelectTrigger className="border-border bg-input/60"><SelectValue placeholder={routesOfClient.length ? "اختر الخط" : "لا توجد خطوط مسجلة — أضف يدويًا"} /></SelectTrigger>
-                  <SelectContent>
-                    {routesOfClient.map((r) => <SelectItem key={r.id} value={r.routeName}>{r.routeName}</SelectItem>)}
-                    <SelectItem value="__manual">+ كتابة خط جديد يدويًا</SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : (
-                <div className="flex gap-2">
-                  <Input value={form.routeName} onChange={(e) => setForm({ ...form, routeName: e.target.value })} placeholder="اكتب خط السير" className="border-border bg-input/60" />
-                  {form.clientId && (
-                    <Button type="button" variant="outline" className="border-border" onClick={() => { setManualRoute(false); setForm({ ...form, routeName: "" }); }}>من القائمة</Button>
-                  )}
-                </div>
-              )}
+              <SearchSelect value={form.routeName} options={routeOptions} onChange={(v) => setForm({ ...form, routeName: v })} placeholder={routeOptions.length ? "اختر خط السير" : "لا توجد خطوط مسجلة — أضفها من صفحة العملاء"} searchPlaceholder="ابحث عن خط..." />
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">سعر الشركة (إيراد)</Label>
+                <Label className="text-xs text-muted-foreground">عدد الأتوبيسات *</Label>
+                <Input type="number" min="1" step="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="border-border bg-input/60" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">سعر الشركة للوحدة (إيراد)</Label>
                 <Input type="number" min="0" step="any" value={form.clientFare} onChange={(e) => setForm({ ...form, clientFare: e.target.value })} className="border-border bg-input/60" />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">تكلفة التأجير (لمالك العربية)</Label>
+                <Label className="text-xs text-muted-foreground">تكلفة التأجير للوحدة (لمالك العربية)</Label>
                 <Input type="number" min="0" step="any" value={form.fare} onChange={(e) => setForm({ ...form, fare: e.target.value })} className="border-border bg-input/60" />
               </div>
               <div className="grid gap-1.5">
@@ -524,9 +522,14 @@ export function RentedSection() {
                 </Select>
               </div>
             </div>
+            <div className="grid grid-cols-1 gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm sm:grid-cols-3">
+              <div className="flex justify-between sm:block"><span className="text-muted-foreground">عدد الأتوبيسات</span> <b>{qty > 0 ? qty : 0}</b></div>
+              <div className="flex justify-between sm:block"><span className="text-muted-foreground">إجمالي سعر الشركة</span> <b>{currency(totalClientFare)}</b></div>
+              <div className="flex justify-between sm:block"><span className="text-muted-foreground">إجمالي تكلفة التأجير</span> <b>{currency(totalFare)}</b></div>
+            </div>
             {form.status === PAID && <PaymentSourceSelect value={form.paySource} onChange={(v) => setForm({ ...form, paySource: v })} label="طريقة الدفع / مصدر التمويل (لتكلفة التأجير)" />}
             <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">صافي ربح الوردية (سعر الشركة − تكلفة التأجير)</span>
+              <span className="text-muted-foreground">صافي الربح الإجمالي (سعر الشركة − تكلفة التأجير)</span>
               <b className={formNet < 0 ? "text-destructive" : "text-success"}>{currency(formNet)}</b>
             </div>
             <div className="grid gap-1.5">

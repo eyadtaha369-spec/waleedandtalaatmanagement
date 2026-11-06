@@ -3605,6 +3605,8 @@ export interface RentedOp {
   clientFare: number; // سعر الشركة (إيراد)
   vehicleType: string;
   routeName: string;
+  /** عدد الأتوبيسات (fare / clientFare إجماليات = السعر للوحدة × العدد) */
+  quantity: number;
   paid: boolean;
   paidAt: string;
   paySource: string;
@@ -3614,7 +3616,7 @@ export interface RentedOp {
   advanceApplied: number;
 }
 
-export const RENTED_VEHICLE_TYPES = ["هاي إس (HiAce)", "ملاكي", "أوتوبيس 33", "أوتوبيس 50", "دوبل كابينة"] as const;
+export const RENTED_VEHICLE_TYPES = ["هاي إس (HiAce)", "ملاكي", "أوتوبيس 33", "أوتوبيس 50", "أتوبيس 40 راكب", "دوبل كابينة"] as const;
 
 /** صافي ربح الوردية = سعر الشركة − تكلفة التأجير */
 export const rentedNetProfit = (o: { clientFare: number; fare: number }) => o.clientFare - o.fare;
@@ -3630,6 +3632,7 @@ export interface RentedOpInput {
   clientFare: number;
   vehicleType: string;
   routeName: string;
+  quantity?: number;
   paid: boolean;
   paySource?: string;
   notes: string;
@@ -3650,6 +3653,7 @@ export async function fetchRentedOps(): Promise<RentedOp[]> {
     clientFare: Number(r.client_fare ?? 0),
     vehicleType: r.vehicle_type ?? "",
     routeName: r.route_name ?? "",
+    quantity: Math.max(1, Number(r.quantity ?? 1)),
     paid: !!r.paid,
     paidAt: r.paid_at ?? "",
     paySource: r.pay_source ?? "",
@@ -3670,6 +3674,7 @@ const rentedRow = (i: RentedOpInput) => ({
   client_fare: i.clientFare,
   vehicle_type: i.vehicleType || null,
   route_name: i.routeName.trim() || null,
+  quantity: Math.max(1, Math.floor(i.quantity ?? 1)),
   paid: i.paid,
   paid_at: i.paid ? new Date().toISOString().slice(0, 10) : null,
   pay_source: i.paid ? i.paySource || null : null,
